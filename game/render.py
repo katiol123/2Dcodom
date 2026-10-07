@@ -149,7 +149,7 @@ class Renderer:
         self.metas: Dict[str, dict] = dict(metas)
         self._art: Dict[str, UnitArt] = {}
         self._portraits: Dict[tuple, pygame.Surface] = {}
-        bg_path = assets.cache_dir() / "background.png"
+        bg_path = assets.cache_dir() / "background_v2.png"
         if bg_path.exists():
             self.bg = pygame.image.load(str(bg_path)).convert()
         else:

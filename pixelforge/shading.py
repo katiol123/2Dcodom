@@ -102,6 +102,8 @@ class Shader:
     shadow_width: int = 2                       # px depth of the shadow band
     contours: bool = True
     selout_lit_mix: float = 0.45                # how much lighter the lit outline is
+    outline_darken: float = 0.0                 # pull selout colors toward ``outline_color`` (crisper silhouettes)
+    despeckle: bool = False                     # remove lone 1px shade pixels (cleaner, less "noisy" look)
 
     def __post_init__(self):
         lx, ly = self.light
@@ -153,10 +155,33 @@ class Shader:
     # --- passes ---------------------------------------------------------------
     def render(self, buf: PartBuffer) -> Canvas:
         out = Canvas(buf.width, buf.height)
-        for x, y, ink in buf.items():
-            out.set(x, y, ink.material.color(self.level_at(buf, x, y)))
+        levels = {(x, y): self.level_at(buf, x, y) for x, y, _ in buf.items()}
+        if self.despeckle:
+            levels = self._despeckle(buf, levels)
+        for (x, y), lvl in levels.items():
+            out.set(x, y, buf.get(x, y).material.color(lvl))
         if self.outline != "none":
             self._outline(buf, out)
+        return out
+
+    @staticmethod
+    def _despeckle(buf: PartBuffer, levels: dict) -> dict:
+        """A pixel whose shade differs from all 4 neighbours of its own group, which
+        agree with each other, takes their shade - removes noisy single pixels."""
+        out = dict(levels)
+        for (x, y), lvl in levels.items():
+            ink = buf.get(x, y)
+            if ink.level is not None:
+                continue
+            around = []
+            for dx, dy in _N4:
+                o = buf.get(x + dx, y + dy)
+                if o is None or o.group != ink.group:
+                    break
+                around.append(levels[(x + dx, y + dy)])
+            else:
+                if len(set(around)) == 1 and around[0] != lvl:
+                    out[(x, y)] = around[0]
         return out
 
     def _outline(self, buf: PartBuffer, out: Canvas) -> None:
@@ -185,6 +210,8 @@ class Shader:
                     c = m.outline or m.color(OUTLINE)
                     if lit and m.outline is None and self.selout_lit_mix > 0:
                         c = mix(c, m.color(SHADOW), self.selout_lit_mix)
+                    if self.outline_darken > 0:
+                        c = mix(c, self.outline_color, self.outline_darken)
                 out.set(x, y, c)
 
 

@@ -21,6 +21,9 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   per entry, `("NAME", "short description")`; keep them true to the mechanics. Menu shows them in that order.
   Plain stats (HP, armor, speed, damage, range, cooldown, dodge) are shown as stats, never as traits.
 - No screen shake (user request); impact feel comes from hit-stop and slow-mo.
+- Crispness (user request): units use `CRISP` shader settings (near-black tinted outline, no lit-side outline,
+  despeckle); the ground stays calm (2 tones); the window is DPI-aware on Windows and `present()` only ever
+  scales by whole numbers (letterboxed in fullscreen).
 - Inspect visually: record with `--record`, then `ffmpeg ... -vf "fps=6,tile=3x3"` to look at frame sequences.
 
 ## How to add graphics

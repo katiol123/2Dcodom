@@ -77,10 +77,15 @@ def _materials(spec: HumanoidSpec) -> Dict[str, Material]:
     return m
 
 
+# crisp unit look: near-black silhouette (tinted by the material), no lightened outline
+# on the lit side, no single-pixel shading noise - reads clearly at 1x on any background
+CRISP = dict(selout_lit_mix=0.0, outline_darken=0.6, despeckle=True)
+
+
 def build_rig(spec: HumanoidSpec) -> Rig:
     s = spec.size / 32.0
     m = _materials(spec)
-    shader = Shader(outline=spec.outline)
+    shader = Shader(outline=spec.outline, **CRISP)
     fw, fh = frame_size(spec)
     rig = Rig(fw, fh, (fw // 2 - 1, ground_row(spec) - 10 * s), shader)
 

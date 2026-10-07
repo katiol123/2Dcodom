@@ -22,6 +22,35 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
 
+def _dpi_aware() -> None:
+    """Tell Windows we draw at real pixels: otherwise display scaling (125%/150%)
+    stretches the window with smoothing and the pixel art looks blurry."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)      # per-monitor aware
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+def present(logical, screen):
+    """Blit the 480x270 frame scaled by a whole number (nearest neighbour), centred.
+    Returns (offset_x, offset_y, scale) so mouse positions can be mapped back."""
+    import pygame
+    from game.sim import H, W
+    sw, sh = screen.get_size()
+    k = max(1, min(sw // W, sh // H))
+    ox, oy = (sw - W * k) // 2, (sh - H * k) // 2
+    if (ox, oy) != (0, 0):
+        screen.fill((0, 0, 0))
+    screen.blit(pygame.transform.scale(logical, (W * k, H * k)), (ox, oy))
+    return ox, oy, k
+
+
 def _icon_surface():
     """Window/taskbar icon: the engine's sword icon, scaled up pixel-perfect."""
     import pygame
@@ -40,7 +69,7 @@ def _loading(screen, scale, font, name, i, n):
     pygame.draw.rect(surf, (90, 105, 136), (W // 2 - 80, H // 2, 160, 6), 1)
     pygame.draw.rect(surf, (44, 232, 245), (W // 2 - 79, H // 2 + 1, int(158 * (i + 1) / n), 4))
     font.draw(surf, name.upper().replace("_", " "), W // 2, H // 2 + 12, "#8b9bb4", anchor="center")
-    pygame.transform.scale(surf, screen.get_size(), screen)
+    present(surf, screen)
     pygame.display.flip()
     pygame.event.pump()
 
@@ -71,6 +100,8 @@ def main(argv=None) -> int:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
         os.environ["SDL_AUDIODRIVER"] = "dummy"
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    os.environ.setdefault("SDL_RENDER_SCALE_QUALITY", "0")   # never smooth when SDL scales
+    _dpi_aware()
     import pygame
     from game.assets import SpriteFactory, ensure_unit_sheets
     from game.audio import Sfx
@@ -129,6 +160,7 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         prefetch(menu.squads, new_seed + 1, factory)     # draw the next battle's faces in the background
         return w
 
+    view = (0, 0, scale)
     if args.auto:
         world = start(seed)
     while True:
@@ -140,16 +172,16 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
             print(f"ok: {where} seed={seed} sfx={'on' if sfx.ok else 'off'}")
             return 0
         mx, my = pygame.mouse.get_pos()
-        sw, sh = screen.get_size()
-        mouse = (mx * W // max(1, sw), my * H // max(1, sh))
+        mouse = ((mx - view[0]) // view[2], (my - view[1]) // view[2])
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 pygame.quit()
                 return 0
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_f:
                 fullscreen = not fullscreen
-                flags = pygame.FULLSCREEN | pygame.SCALED if fullscreen else 0
-                screen = pygame.display.set_mode((W * scale, H * scale), flags)
+                # fullscreen at the desktop resolution; present() keeps whole-number scaling
+                screen = (pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if fullscreen
+                          else pygame.display.set_mode((W * scale, H * scale)))
                 continue
             if world is None:
                 action = menu.handle(ev, mouse)
@@ -185,7 +217,7 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                 seed += 1
                 world = start(seed)                       # rematch: same squads, new faces
             renderer.draw(world, logical, real, paused, speed)
-        pygame.transform.scale(logical, screen.get_size(), screen)
+        view = present(logical, screen)
         pygame.display.flip()
 
 

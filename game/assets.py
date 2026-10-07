@@ -296,19 +296,21 @@ def background(w: int, h: int, horizon: int, seed: int = 4) -> Canvas:
     for y in range(horizon + 3, h):
         depth = (y - horizon) / (h - horizon)        # 0 far .. 1 near
         for x in range(w):
-            v = fnoise.fbm(x / 40, y / 22, 3)
+            # calm ground: two close tones in big soft patches, so units stand out
+            v = fnoise.fbm(x / 70, y / 35, 2)
             patch = fnoise(x / 70 + 5, y / 30 + 5)
             if patch > 0.72 and depth > 0.15:
-                col = pfx.dither_pick(d[1:4], v, x, y)
+                col = pfx.dither_pick(d[2:4], v, x, y)
             else:
-                col = pfx.dither_pick(g[1:4] if depth > 0.25 else g[0:3], v * 0.8 + depth * 0.25, x, y)
+                tones = g[1:3] if depth > 0.25 else g[0:2]
+                col = pfx.dither_pick(tones, min(0.99, max(0.0, (v - 0.5) * 2.2 + 0.5)), x, y)
             c.set(x, y, col)
     # tufts / flowers / rocks, denser and bigger near the camera
     rock = Material.of("rock", "#8b9bb4")
-    for _ in range(int(w * h / 260)):
+    for _ in range(int(w * h / 700)):
         x, y = rnd.randrange(w), rnd.randrange(horizon + 6, h)
         k = rnd.random()
-        if k < 0.75:
+        if k < 0.7:
             c.set(x, y, g[3])
             c.set(x, y - 1, g[4] if rnd.random() < 0.3 else g[3])
             c.set(x + 1, y, g[1])

@@ -17,6 +17,7 @@ from ..anim import Animation, Sprite, from_poses
 from ..color import ColorLike, mix
 from ..rig import Blob, Limb, Pixels, Poly, Pose, Rig
 from ..shading import BASE, HIGHLIGHT, LIGHT, Ink, Material, PartBuffer, Shader
+from .humanoid import CRISP
 
 
 # --- slime ----------------------------------------------------------------------
@@ -136,7 +137,7 @@ def build_quad_rig(spec: QuadSpec) -> Rig:
     belly = Material.of("belly", spec.belly)
     eye = Material.of("eye", spec.eye, flat=True)
     nose = Material.of("nose", spec.nose, flat=True)
-    rig = Rig(W, H, (W * 0.36, H - 3 - spec.leg_len * 2 - 1), Shader())
+    rig = Rig(W, H, (W * 0.36, H - 3 - spec.leg_len * 2 - 1), Shader(**CRISP))
     L, bw = spec.body_len, spec.body_w
 
     rig.bone("root", None, 0)
