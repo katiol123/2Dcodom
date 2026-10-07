@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 if TYPE_CHECKING:  # pragma: no cover
     from .sim import Unit, World
 
-from .sim import FIELD, Lightning, Ring, Vfx
+from .sim import FIELD, SUMMON_HP, Lightning, Ring, Vfx
 
 RETARGET = 0.35
 COUNTER_BONUS = 2.0    # spearman meeting a charge with the spear: +100% damage
@@ -82,11 +82,26 @@ def _bleed(t: "Unit", seconds: float) -> None:
         t.status["bleed"] = max(t.status.get("bleed", 0.0), seconds)
 
 
+def _poison(t: "Unit", seconds: float) -> None:
+    if not t.type.undead:
+        t.status["poison"] = max(t.status.get("poison", 0.0), seconds)
+
+
+MAD_AURA = 75.0
+
+
+def mad_aura(world: "World", u: "Unit") -> bool:
+    """A mad goblin of u's side is close: goblins forget how to be afraid."""
+    return any(a.key == "mad_goblin" and math.hypot(a.x - u.x, a.y - u.y) < MAD_AURA for a in world.allies(u))
+
+
 # --- target selection -------------------------------------------------------------------
 
 def score(world: "World", u: "Unit", e: "Unit") -> float:
     d = u.dist(e)
-    divers = ("rogue", "wolf", "monk")
+    if u.key == "troll":                            # straight ahead: whoever is closest
+        return -d + (25.0 if e is u.target else 0.0) + u.bias * 3.0
+    divers = ("rogue", "wolf", "monk", "wolf_rider")
     s = -d * (0.45 if u.key in divers else 1.0)    # divers ignore distance to reach the backline
     s += u.type.prefers.get(e.key, 0.0)
     wounded = 1.0 - e.hp / e.max_hp
@@ -126,6 +141,8 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
     if u.key == "monk" and not e.ranged and e.target is not None and e.target.ranged \
             and e.target.team == u.team:
         s += 80.0                                   # interceptor: catch divers on our shooters
+    if u.key == "mad_goblin" and e.target is not None and e.target.team == u.team and e.target.type.goblin:
+        s += 60.0                                   # chieftain: whoever hits my goblins
     if u.key == "wolf" and any(a.key == "wolf" and a.target is e for a in world.allies(u)):
         s += 60.0                                   # pack hunt: the same prey as the other wolves
     if e.summoned:
@@ -225,6 +242,22 @@ def passives(world: "World", u: "Unit") -> None:
             if e.target is u:
                 e.target = None
         world.sounds.append("smoke")
+    if u.key == "goblin":
+        if u.has("panic") and mad_aura(world, u):
+            del u.status["panic"]
+            world.text(u, "!", "#e43b44", big=True)
+        elif not u.panic_used and u.hp < u.max_hp * 0.3 and not mad_aura(world, u):
+            u.panic_used = True
+            u.status["panic"] = 8.0
+            u.action = None
+            world.text(u, "АААА!", "#ffffff", big=True)
+            world.sounds.append("dodge")
+    if u.has("panic") and world.rng.random() < 0.3:
+        world.burst(u.x, u.y, 22, "#c0cbdc", n=1, speed=15, up=30, life=0.4)    # sweat drops
+    if u.has("frenzy") and world.rng.random() < 0.3:
+        world.burst(u.x + world.rng.uniform(-4, 4), u.y, 8, "#b55088", n=1, speed=5, up=40, life=0.5, gravity=-40)
+    if u.key == "troll":
+        _troll(world, u)
     if u.key == "paladin" and world.rng.random() < 0.06:
         world.burst(u.x + world.rng.uniform(-14, 14), u.y + world.rng.uniform(-4, 4), 2, "#fee761",
                     n=1, speed=2, up=25, life=0.6, gravity=-20)
@@ -232,6 +265,48 @@ def passives(world: "World", u: "Unit") -> None:
         world.burst(u.x, u.y, 18, "#fee761", n=1, speed=20, up=20, life=0.4, gravity=-10)
     if u.has("charge") and world.rng.random() < 0.5:
         world.vfx.append(Vfx("dust", u.x - u.facing * 6, u.y - 6, flip=u.facing < 0))
+
+
+NEST_EVERY = 24.0
+DUMB_EVERY = 6.0
+
+
+def _troll(world: "World", u: "Unit") -> None:
+    """Goblin nest, kicks and the occasional stupor."""
+    u.abil.setdefault("nest", NEST_EVERY)
+    u.abil.setdefault("dumb", DUMB_EVERY)
+    if u.abil["nest"] <= 0:
+        u.abil["nest"] = NEST_EVERY
+        f = u.facing
+        for dx, dy in ((f * 20, -5), (f * 20, 5), (-f * 20, -5), (-f * 20, 5)):   # 2 in front, 2 behind
+            g = world.summon(u, u.x + dx, u.y + dy, "goblin")
+            if g is not None:
+                g.hop = 0.45
+        world.text(u, "ГНЕЗДО!", "#a7f070")
+        world.burst(u.x, u.y, 34, "#63c74d", n=10, speed=40, up=50, life=0.5)
+        world.sounds.append("smoke")
+    if u.abil["dumb"] <= 0:
+        u.abil["dumb"] = DUMB_EVERY
+        if world.rng.random() < 0.2 and not u.has("stupor"):
+            u.status["stupor"] = 5.0
+            u.action = None
+            world.text(u, "...?", "#c0cbdc", big=True)
+    # any cowardly goblin (of either side) that bumps into the troll may get kicked - once per goblin
+    reach = u.type.radius + 8
+    for g in world.units:
+        if (g.key == "goblin" and g.alive and not g.kick_checked and g.hop <= 0 and g.rising <= 0
+                and math.hypot(g.x - u.x, (g.y - u.y) * 1.4) <= reach):
+            g.kick_checked = True
+            if world.rng.random() < 0.25:
+                world.kick(u, g)
+
+
+def _frenzy_targets(world: "World", u: "Unit") -> List["Unit"]:
+    """Up to two allies already in the thick of the fight (melee, next to their target)."""
+    cands = [a for a in world.allies(u) if not a.ranged and not a.has("frenzy") and a.rising <= 0
+             and math.hypot(a.x - u.x, a.y - u.y) < 140 and a.target is not None and in_melee_range(a, a.target, 8)]
+    cands.sort(key=lambda a: math.hypot(a.x - u.x, a.y - u.y))
+    return cands[:2]
 
 
 def _try_abilities(world: "World", u: "Unit") -> bool:
@@ -300,12 +375,19 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
                 u.action["counter"] = True
                 u.cd = u.cooldown()
                 return True
-    if u.key == "barbarian" and u.abil.get("leap", 0) <= 0 and u.target is not None:
-        if 35 < u.dist(u.target) < 95:
-            u.abil["leap"] = 10.0
+    if u.key in ("barbarian", "wolf_rider") and u.abil.get("leap", 0) <= 0 and u.target is not None:
+        if 35 < u.dist(u.target) < (95 if u.key == "barbarian" else 110):
+            u.abil["leap"] = 10.0 if u.key == "barbarian" else 9.0
             u.status["charge"] = 1.4
             world.text(u, "НА ПРОРЫВ!", "#feae34")
             world.sounds.append("rage")
+    if u.key == "goblin_shaman" and u.abil.get("frenzy", 0) <= 0 and u.cd <= 0.5:
+        picks = _frenzy_targets(world, u)
+        if picks:
+            u.abil["frenzy"] = 4.0
+            world.start_action(u, "frenzy", picks[0], anim="cast", event="cast", cooldown=1.0)
+            u.action["picks"] = picks
+            return True
     if u.key == "mage" and u.abil.get("nova", 0) <= 0:
         close = [e for e in world.enemies(u) if not e.ranged and u.dist(e) < 30]
         if close:
@@ -357,12 +439,21 @@ def resolve_action(world: "World", u: "Unit", a: dict) -> None:
     if kind == "raise":
         if t is not None and t.dead and not t.raised:
             t.raised = True
-            m = world.summon(u, t.x, t.y)
+            m = world.summon(u, t.x, t.y, "skeleton", hp=SUMMON_HP, rising=0.6)
             if m is not None:
                 world.text(m, "ВОССТАНЬ!", "#63c74d", big=True)
                 world.burst(t.x, t.y, 4, "#63c74d", n=20, speed=40, up=70, life=0.8, gravity=-10)
                 world.rings.append(Ring(t.x, t.y, 2, 22, "#63c74d", 0.5))
                 world.sounds.append("smoke")
+        return
+    if kind == "frenzy":
+        for al in a.get("picks", []):
+            if al.alive:
+                al.status["frenzy"] = 5.0
+                world.text(al, "БЕШЕНСТВО!", "#b55088", big=True)
+                world.rings.append(Ring(al.x, al.y, 2, 16, "#b55088", 0.4))
+                world.burst(al.x, al.y, 16, "#b55088", n=10, speed=30, up=50, life=0.6, gravity=-20)
+        world.sounds.append("rage")
         return
     if kind == "rain":
         world.text(u, "ЦЕЛЕБНЫЙ ДОЖДЬ", "#63c74d", big=True)
@@ -406,6 +497,8 @@ def resolve_action(world: "World", u: "Unit", a: dict) -> None:
             world.cast_orb(u, t, "holy", speed=180)
         elif u.key == "shaman":
             chain_lightning(world, u, t)
+        elif u.key == "goblin_shaman":
+            world.cast_orb(u, t, "spore", speed=140)
         return
     _melee(world, u, t, counter=bool(a.get("counter")))
 
@@ -442,6 +535,16 @@ def _melee(world: "World", u: "Unit", t: "Unit", counter: bool = False) -> None:
         dmg *= COUNTER_BONUS
         crit = True
         label = "КОНТРУДАР"
+    if u.key == "goblin":
+        if t.target is not u:
+            dmg *= 1.5
+            crit = True
+            label = "ИСПОДТИШКА"
+        crowd = sum(1 for a in world.allies(u) if a.type.goblin and math.hypot(a.x - u.x, a.y - u.y) < 50)
+        dmg *= 1.0 + 0.1 * min(3, crowd)
+        _poison(t, 4.0)
+    if u.key == "mad_goblin":
+        _bleed(t, 3.0)
     if u.key == "wolf":
         pack = sum(1 for a in world.allies(u) if a.key == "wolf" and math.hypot(a.x - u.x, a.y - u.y) < 60)
         dmg *= 1.0 + 0.2 * pack
@@ -526,6 +629,16 @@ def think(world: "World", u: "Unit", dt: float) -> None:
         u.set_anim("idle")
         return
 
+    if u.has("panic"):                       # cowardly goblin running for its life
+        threat = nearest_threat(world, u) or t
+        fx, fy = _norm(u.x - threat.x, (u.y - threat.y) * 1.5)
+        fx += -0.8 if u.team == 0 else 0.8
+        if (u.x < FIELD[0] + 12 and fx < 0) or (u.x > FIELD[2] - 12 and fx > 0):
+            fx, fy = 0.0, (1.0 if u.y < (FIELD[1] + FIELD[3]) / 2 else -1.0)
+        nx, ny = _norm(fx, fy)
+        _move(u, nx, ny, dt)
+        return
+
     if _try_abilities(world, u):
         return
 
@@ -583,7 +696,7 @@ def think(world: "World", u: "Unit", dt: float) -> None:
             _move(u, 0, (t.y - u.y) * 0.3, dt, scale=0.4)
             return
         want_x, want_y = _melee_slot(world, u, t)
-        if u.key in ("rogue", "wolf", "monk") and t.ranged and abs(t.x - u.x) > 70:
+        if u.key in ("rogue", "wolf", "monk", "wolf_rider") and t.ranged and abs(t.x - u.x) > 70:
             # flank: run along the nearest field edge before diving in
             edge = FIELD[1] + 4 if u.y < (FIELD[1] + FIELD[3]) / 2 else FIELD[3] - 4
             want_y = edge

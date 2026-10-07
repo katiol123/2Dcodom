@@ -128,6 +128,10 @@ class QuadSpec:
     ears: str = "pointy"     # pointy | round
     tusks: Optional[ColorLike] = None
     collar: Optional[ColorLike] = None   # e.g. a team color
+    rider_skin: Optional[ColorLike] = None   # set to seat a goblin rider on the back
+    rider_top: ColorLike = "#124e89"
+    rider_eye: ColorLike = "#fee761"
+    rider_blade: ColorLike = "#c0cbdc"
     size: Tuple[int, int] = (48, 32)
 
 
@@ -173,6 +177,8 @@ def build_quad_rig(spec: QuadSpec) -> Rig:
         w = 3 if spec.tail == "bushy" else 1
         rig.bone("tail", "root", 7 if spec.tail == "bushy" else 6, world=-160, z=9, material=fur,
                  shapes=[Limb(width=w, t0=0.1, t1=1.0, width_end=w + (1 if spec.tail == "bushy" else 0))])
+    if spec.rider_skin is not None:
+        _add_rider(rig, spec)
     ll = spec.leg_len
     # legs tuck *behind* the body (z < spine) so only the part below the belly
     # shows - drawing them on top makes noisy contour lines across the torso
@@ -192,8 +198,35 @@ def build_quad_rig(spec: QuadSpec) -> Rig:
     return rig
 
 
+def _add_rider(rig: Rig, spec: QuadSpec) -> None:
+    """A goblin sitting on the back: torso, big-eared head, dangling leg, sword arm."""
+    skin = Material.of("rskin", spec.rider_skin)
+    top = Material.of("rtop", spec.rider_top)
+    eye = Material.of("reye", spec.rider_eye, flat=True)
+    blade = Material.of("rblade", spec.rider_blade, shiny=True)
+    wood = Material.of("rwood", "#733e39")
+    rig.bone("rider_hip", "spine", 0, attach=0.42, offset=(0, -spec.body_w / 2 + 0.5), z=13, material=top)
+    rig.bone("rider_leg", "rider_hip", 4, world=75, z=13.2, material=top, group="rleg",
+             shapes=[Limb(width=2, t0=0.0, t1=1.0)])
+    rig.bone("rider_torso", "rider_hip", 5, world=-95, z=13.4, material=top, group="rtorso",
+             shapes=[Limb(width=4, t0=0.0, t1=0.95)])
+    rig.bone("rider_head", "rider_torso", 0, world=0, z=13.6, material=skin, group="rhead", shapes=[
+        Blob(rx=2.5, ry=2.2, t=0, offset=(0.5, -2.2)),
+        Poly(z=-0.1, group="rear", points=[(-1, -3), (-6, -5.5), (-1.5, -1.5)]),
+        Poly(z=0.1, group="rnose", points=[(2.5, -2.5), (5, -1.2), (2.5, -1.2)]),
+        Pixels(material=eye, level=BASE, z=0.3, outline=False, points=[(1.8, -2.6)]),
+    ])
+    rig.bone("rider_arm", "rider_torso", 3.5, world=30, attach=0.8, z=14, material=skin, group="rarm",
+             shapes=[Limb(width=2)])
+    rig.bone("rider_blade", "rider_arm", 8, world=-60, z=13.9, material=blade, group="rblade", shapes=[
+        Limb(width=1, t0=0.2, t1=1.0),
+        Limb(material=wood, width=1, t0=-0.1, t1=0.2, group="rhilt"),
+    ])
+
+
 def _qbase(spec: QuadSpec) -> Pose:
-    return Pose(body={"spine": -3, "neck": -40, "head": 0, "snout": 10, "jaw": 25, "tail": -165},
+    return Pose(body={"spine": -3, "neck": -40, "head": 0, "snout": 10, "jaw": 25, "tail": -165,
+                      "rider_torso": -95, "rider_arm": 30, "rider_blade": -60, "rider_leg": 75},
                 ground=spec.size[1] - 3)
 
 
@@ -240,12 +273,14 @@ def build_quadruped(spec: QuadSpec = QuadSpec(), shadow: bool = True) -> Sprite:
     _legs(crouch, 0.0, amp=0)
     crouch.body.update(spine=6, neck=-15, head=10, jaw=25, tail=-150,
                        shoulder_f=125, wrist_f=60, shoulder_b=120, wrist_b=65, hip_f=50, hock_f=130, hip_b=55, hock_b=125)
+    crouch.body.update(rider_torso=-105, rider_arm=-120, rider_blade=-150)
     lunge = base.copy(duration=60, shift=(4, 0))
     _legs(lunge, 0.0, amp=0)
     lunge.body.update(spine=-8, neck=-10, head=0, jaw=65, tail=-185,
                       shoulder_f=40, wrist_f=20, shoulder_b=50, wrist_b=30, hip_f=110, hock_f=150, hip_b=105, hock_b=140)
+    lunge.body.update(rider_torso=-80, rider_arm=-20, rider_blade=-10)
     bite = lunge.copy(duration=200, events=["hit"])
-    bite.body.update(jaw=20, neck=-5, head=15)
+    bite.body.update(jaw=20, neck=-5, head=15, rider_torso=-75, rider_arm=40, rider_blade=40)
     rec = rig.lerp(bite, idle[0], 0.5)
     rec.ground, rec.duration = base.ground, 120
     attack = [crouch, lunge, bite, rec, idle[0].copy(duration=100)]

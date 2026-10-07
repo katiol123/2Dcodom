@@ -42,13 +42,17 @@ class HumanoidSpec:
     helmet: Optional[ColorLike] = None
     helmet_style: str = "cap"            # cap | horned | hood | crown
     cape: Optional[ColorLike] = None
-    weapon: Optional[str] = "sword"      # sword | axe | spear | staff | dagger | bow | crossbow | mace | hammer | None
+    weapon: Optional[str] = "sword"      # sword | axe | greataxe | spear | staff | mushroom | dagger | bow |
+                                         # crossbow | mace | hammer | club | None
     weapon_color: ColorLike = "#c0cbdc"
     handle_color: ColorLike = "#733e39"
     magic: ColorLike = "#2ce8f5"         # staff orb, spell sparks
     string_color: ColorLike = "#ead4aa"  # bow string / fletching
     shield: Optional[ColorLike] = None
     build: str = "normal"                # normal | stocky | slim
+    goblin: bool = False                 # long pointed ears + hooked nose
+    tusks: Optional[ColorLike] = None    # two tusks from the lower jaw (trolls, orcs)
+    passengers: Optional[ColorLike] = None   # little goblins living on the head/shoulder (skin color)
     size: int = 32
     outline: str = "selout"
 
@@ -126,6 +130,28 @@ def build_rig(spec: HumanoidSpec) -> Rig:
                 (-4 * s, -6 * s), (-3 * s, -10 * s), (-1 * s, -7.5 * s), (0.5 * s, -10.5 * s),
                 (2 * s, -7.5 * s), (4 * s, -9 * s), (4 * s, -6 * s)]))
         head.shapes.extend(hs)
+    if spec.goblin:
+        # big ears sweeping back (the far one peeks out behind the head) and a hooked nose
+        head.shapes.append(Poly(material=m["skin"], z=0.2, group="ear", points=[
+            (-1.5 * s, -4.5 * s), (-9 * s, -8 * s), (-2 * s, -2 * s)]))
+        head.shapes.append(Poly(material=m["skin"], z=-0.5, group="ear_far", points=[
+            (1.5 * s, -5 * s), (-4 * s, -10 * s), (0 * s, -4 * s)]))
+        head.shapes.append(Poly(material=m["skin"], z=0.3, group="nose", points=[
+            (3.5 * s, -3.5 * s), (7.5 * s, -1.5 * s), (3.5 * s, -1.5 * s)]))
+    if spec.tusks is not None:
+        tusk = Material.of("tusk", spec.tusks)
+        head.shapes.append(Pixels(material=tusk, level=LIGHT, z=0.6, outline=True, group="tusk",
+                                  points=[(3.2 * s, -1.6 * s), (3.2 * s, -0.8 * s), (1.6 * s, -1.2 * s)]))
+    if spec.passengers is not None:
+        # tiny goblins nesting on the head: green heads with ears and a bright eye
+        gm = Material.of("gob", spec.passengers)
+        gem = Material.of("gobeye", "#fee761", flat=True)
+        for i, (ox, oy) in enumerate(((-2.5 * s, -8.2 * s), (2.5 * s, -8.6 * s))):
+            head.shapes.append(Blob(material=gm, rx=2, ry=1.8, t=0, offset=(ox, oy), z=1 + i, group=f"gob{i}"))
+            head.shapes.append(Poly(material=gm, z=0.9 + i, group=f"gob{i}", points=[
+                (ox - 1, oy - 1), (ox - 4.5, oy - 3), (ox - 1, oy + 0.5)]))
+            head.shapes.append(Pixels(material=gem, level=BASE, z=1.2 + i, outline=False,
+                                      points=[(ox + 1, oy - 0.5)]))
     if spec.beard is not None:
         head.shapes.append(Poly(material=m["beard"], z=0.45, group="beard", points=[
             (0.5 * s, -2 * s), (4.5 * s, -2.2 * s), (4 * s, 1 * s), (1.5 * s, 2 * s)]))
@@ -207,6 +233,32 @@ def _add_weapon(rig: Rig, spec: HumanoidSpec, m: Dict[str, Material], s: float) 
             Limb(width=1, t0=-0.15, t1=1.0),
             Poly(material=m["steel"], group="axehead", z=0.2, points=[
                 (0.5, -L + 0.5), (3.5, -L - 1.5), (4.5, -L + 2), (3.5, -L + 5.5), (0.5, -L + 3.5)]),
+        ])
+    elif w == "greataxe":
+        L = 13 * s
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=1, t0=-0.2, t1=1.0),
+            Poly(material=m["steel"], group="axehead", z=0.2, points=[
+                (0.5, -L + 0.5), (5, -L - 3), (6.5, -L + 2.5), (5, -L + 8), (0.5, -L + 5)]),
+            Pixels(material=m["steel"], level=SHADOW, z=0.3, outline=False, group="nick", t=0.0,
+                   points=[(6, -L + 1.5), (5.5, -L + 5)]),
+        ])
+    elif w == "mushroom":
+        L = 7 * s
+        cap = Material.of("cap", spec.magic, shiny=True)
+        spot = Material.of("spot", "#ffffff", flat=True)
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=2, t0=-0.15, t1=0.85),
+            Blob(material=cap, rx=3.5, ry=2.2, t=1.0, z=0.3, group="cap"),
+            Pixels(material=spot, level=BASE, z=0.5, outline=False, group="spots", t=0.0,
+                   points=[(-1.5, -L - 0.5), (1, -L - 1), (2.5, -L + 0.5)]),
+        ])
+    elif w == "club":
+        L = 12 * s
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=2, t0=-0.15, t1=0.5),
+            Limb(width=4, t0=0.45, t1=1.0, group="clubhead"),
+            Pixels(level=SHADOW, z=0.3, outline=False, group="knots", t=0.0, points=[(0.5, -L * 0.7), (-0.5, -L * 0.88)]),
         ])
     elif w == "spear":
         L = 15 * s
@@ -583,6 +635,19 @@ def hurt_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
     return [flash_frame, recoil, back]
 
 
+def stupor_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
+    """Dazed: slumped, arms dangling, weapon drooping, slow sway (looping)."""
+    base = _base(spec)
+    out = []
+    for i, k in enumerate((0, 1, 2, 1)):
+        p = _with(base, torso=-80 + k * 2, upper_f=98 - k, fore_f=95, hand_f=95, upper_b=96 + k, fore_b=92,
+                  weapon=60 + k * 4, thigh_f=86, shin_f=92, thigh_b=96, shin_b=96, cape=100)
+        p.offsets = {"torso": (0, 1)}
+        p.duration = 260
+        out.append(p)
+    return out
+
+
 def death_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
     base = _base(spec)
     g = base.ground
@@ -622,6 +687,7 @@ def build_humanoid(spec: HumanoidSpec, shadow: bool = True) -> Sprite:
     sp.add(finish(from_poses(rig, "attack", attack_poses(spec, rig), loop=False)))
     sp.add(finish(from_poses(rig, "cast", cast_poses(spec, rig), loop=False)))
     sp.add(finish(from_poses(rig, "hurt", hurt_poses(spec, rig), loop=False)))
+    sp.add(finish(from_poses(rig, "stupor", stupor_poses(spec, rig))))
     death = finish(from_poses(rig, "death", death_poses(spec, rig), loop=False))
     sp.add(death)
     corpse = death.frames[-1].image

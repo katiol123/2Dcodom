@@ -262,7 +262,7 @@ class Renderer:
             tint = "stealth"
         elif u.has("slow"):
             tint = "slow"
-        elif u.rage and int(real_time * 6) % 2 == 0:
+        elif (u.rage or u.has("frenzy")) and int(real_time * 6) % 2 == 0:
             tint = "rage"
         elif u.has("divine") and int(real_time * 8) % 2 == 0:
             tint = "hit"
@@ -273,7 +273,7 @@ class Renderer:
         for u in world.units:
             if u.raised:
                 continue                       # corpse got up as someone's skeleton
-            items.append((0 if u.dead else 1, u.y, 0, u))
+            items.append((2 if u.kicked else 0 if u.dead else 1, u.y, 0, u))
         for p in world.projectiles:
             items.append((1, p.y, 1, p))
         items.sort(key=lambda it: (it[0], it[1]))
@@ -291,8 +291,24 @@ class Renderer:
                 art = self.art(u.look)
                 img = self._unit_sprite(u, real_time)
                 ax = art.anchor[0] if u.facing > 0 else art.w - 1 - art.anchor[0]
-                s.blit(img, (round(u.x) - ax, round(u.y) - art.anchor[1]))
+                if u.kicked:
+                    # tumbling through the air after a troll's kick: quarter-turn rotations stay pixel-crisp
+                    turn = int(u.spin * 14) % 4
+                    rimg = pygame.transform.rotate(img, -90 * turn * (1 if u.kvx > 0 else -1))
+                    s.blit(rimg, rimg.get_rect(center=(round(u.x), round(u.y - u.kz - art.h * 0.4))))
+                    continue
+                lift = 0
+                if u.hop > 0:                     # jumping out of the troll's nest
+                    k = 1 - u.hop / 0.45
+                    lift = round(4 * k * (1 - k) * 14)
+                s.blit(img, (round(u.x) - ax, round(u.y) - art.anchor[1] - lift))
                 top = round(u.y) - self._height(u)
+                if u.has("stupor"):
+                    bob = round(math.sin(real_time * 3) * 1.5)
+                    self.font.draw(s, "?", round(u.x) + 4, top - 6 + bob, "#c0cbdc", anchor="midbottom")
+                    self.font.draw(s, "?", round(u.x) - 3, top - 2 - bob, "#8b9bb4", anchor="midbottom")
+                if u.has("panic") and int(real_time * 6) % 2 == 0:
+                    self.font.draw(s, "!", round(u.x), top - 4, "#ffffff", anchor="midbottom")
                 if u.has("stun"):
                     for k in range(3):
                         a = real_time * 7 + k * math.tau / 3
@@ -320,7 +336,8 @@ class Renderer:
                     f = self.fireball.frame((world.time * 1.0) % 0.28, flip=p.tx < p.sx) or self.fireball.frames[0]
                     s.blit(f, (px - 10 if p.tx >= p.sx else px - 5, py - 8))
                 else:
-                    outer, inner = ((38, 92, 66), (99, 199, 77)) if p.kind == "dark" else ((254, 174, 52), (254, 231, 97))
+                    outer, inner = {"dark": ((38, 92, 66), (99, 199, 77)),
+                                    "spore": ((104, 56, 108), (181, 80, 136))}.get(p.kind, ((254, 174, 52), (254, 231, 97)))
                     pulse = 1 if int(real_time * 12) % 2 else 0
                     pygame.draw.circle(s, outer, (px, py), 3 + pulse)
                     pygame.draw.circle(s, inner, (px, py), 2)
@@ -436,6 +453,10 @@ class Renderer:
                 icons.append((255, 255, 255))
             if u.has("divine"):
                 icons.append((255, 241, 232))
+            if u.has("poison"):
+                icons.append((167, 240, 112))
+            if u.has("frenzy"):
+                icons.append((181, 80, 136))
             for i, col in enumerate(icons):
                 pygame.draw.rect(s, INK, (x + i * 4, y - 4, 4, 4))
                 pygame.draw.rect(s, col, (x + 1 + i * 4, y - 3, 2, 2))

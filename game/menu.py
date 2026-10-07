@@ -17,6 +17,7 @@ import pygame
 from .assets import cache_dir
 from .render import INK, Renderer, _c
 from .sim import H, W
+from .match import random_squad
 from .units import ALL, CLASSIC, ROSTER, SQUAD_MAX, TEAMS
 
 PANEL_W = 116
@@ -123,7 +124,7 @@ class Menu:
             return self._start()
         if action.startswith("rand"):
             t = int(action[-1])
-            self.squads[t] = [self.rng.choice(ALL) for _ in range(SQUAD_MAX)]
+            self.squads[t] = random_squad(self.rng)
         elif action.startswith("clear"):
             self.squads[int(action[-1])] = []
         elif action == "classic":
@@ -206,7 +207,7 @@ class Menu:
         pygame.draw.rect(s, (38, 43, 68) if not hot else (58, 68, 102), r.inflate(-2, -2))
         por = self.r.portrait(f"{key}_{tm.key}", flip=self.active == 1)
         s.blit(por, (r.centerx - 9, r.y + 1), area=pygame.Rect(0, 0, 18, 13))
-        name = ROSTER[key].name
+        name = ROSTER[key].short or ROSTER[key].name
         if len(name) > 8:
             name = name[:7] + "."
         self.font.draw(s, name, r.centerx, r.bottom - 8, "#ffffff" if hot else "#c0cbdc", anchor="midtop")
@@ -217,7 +218,8 @@ class Menu:
     LINE = 6           # px between lines
 
     def _draw_info(self, s: pygame.Surface) -> None:
-        x, y = GRID_X, GRID_Y + 3 * CARD_H + 1
+        rows = -(-len(ALL) // COLS)
+        x, y = GRID_X, GRID_Y + rows * CARD_H + 1
         w, h = 6 * CARD_W - 2, 231 - y
         s.blit(self.r.panel(w, h, base="#181425", border="#5a6988"), (x, y))
         key = self.hover
@@ -228,7 +230,7 @@ class Menu:
                 f.draw(s, label, x + w // 2 + (i - 1) * 64, y + h // 2 + 8, self.COLORS[grp][0], anchor="midtop")
             return
         u = ROSTER[key]
-        f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2)
+        f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2 if len(u.name) <= 13 else 1)
         f.draw(s, u.role, x + 6, y + 18, "#8b9bb4")
         lo, hi = u.damage
         dtype = {"physical": "", "magic": " МАГ", "holy": " СВЯТ"}[u.damage_type]
@@ -272,7 +274,8 @@ class Menu:
                     else:
                         s.blit(f.render(line, dim), (x + 5, yy - 1))
                     yy += self.LINE
-            yy += 2
+            yy += 1
+        self.text_bottom = (yy, y + h)
 
     def _wrap(self, text: str, y0: int, preview_bottom: int, narrow: int) -> List[str]:
         """Word wrap where lines beside the preview are shorter; continuation lines indented."""

@@ -8,7 +8,9 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - `python -m pixelforge unit <preset|random:SEED> out`
 - `python battle.py` — auto-battle demo (pygame); `--record x.mp4` renders headless; `--seed N`
 - `python -m game.balance 300 random` — per-class win rates on random squads; run after any stat/AI change
-  (aim: every class ~41-60%, 30-50 s fights); `python -m game.balance 40` — classic mirror (~50/50)
+  (aim: every class ~41-60%, 30-50 s fights;
+  goblin is meant below average ~38%, wolf rider above ~58%; `boss=True` classes (troll) are excluded from random
+  squads and from the report); `python -m game.balance 40` — classic mirror (~50/50)
 
 ## Battle game (game/)
 - `sim.py`/`ai.py` must stay pygame-free (tests and balance run headless). Rendering only in `render.py`.
@@ -16,6 +18,8 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Every unit has a seeded look (`look_for` in units.py: class-defining gear fixed, faces vary). Sheets are named
   `<class>_<team>_<spec hash>` and cached in `.cache/battle/<hash of pixelforge>/`; `SpriteFactory` builds missing
   ones in worker processes and prefetches the next battle. Tests/balance use `match.headless_world` (seed-0 timings).
+- Summons (skeletons, nest goblins, rider who survives) need a sheet: list them in `SUMMONS` (assets.py) by owner,
+  then `world.summon(owner, x, y, key)`. After 90 s healing fades out (`FATIGUE_AT` in sim.py) to end stalemates.
 - New class: `UnitType` in `ROSTER` + `TRAITS` entry + branch in `look_for` + behaviour in `ai.py`, then rebalance.
 - Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait
   per entry, `("NAME", "short description")`; keep them true to the mechanics. Menu shows them in that order.

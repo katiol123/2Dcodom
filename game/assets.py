@@ -111,14 +111,19 @@ def look_name(key: str, team_key: str, spec: Look) -> str:
     return f"{key}_{team_key}_{digest}"
 
 
-def plan_battle(squads: Sequence[Sequence[str]], seed: int) -> Tuple[List[Slot], Dict[int, str], Dict[str, Look]]:
+SUMMONS = {"necromancer": ("skeleton",), "troll": ("goblin",), "wolf_rider": ("goblin",)}
+
+
+def plan_battle(squads: Sequence[Sequence[str]], seed: int
+                ) -> Tuple[List[Slot], Dict[Tuple[int, str], str], Dict[str, Look]]:
     """Seeded looks for every unit of both squads.
 
-    Returns (slots, summon looks per team, {look name: spec}).  A team with a
-    necromancer also gets the look its raised skeletons will wear."""
+    Returns (slots, summon looks {(team, class): look name}, {look name: spec}).  Classes that
+    bring units into the battle (necromancer's skeletons, troll's goblins, the wolf rider who
+    can survive his wolf) get the look those units will wear."""
     slots: List[Slot] = []
     looks: Dict[str, Look] = {}
-    summons: Dict[int, str] = {}
+    summons: Dict[Tuple[int, str], str] = {}
     for team, squad in enumerate(squads):
         t = TEAMS[team]
         for i, key in enumerate(squad):
@@ -126,11 +131,11 @@ def plan_battle(squads: Sequence[Sequence[str]], seed: int) -> Tuple[List[Slot],
             name = look_name(key, t.key, spec)
             looks[name] = spec
             slots.append(Slot(team, key, name))
-        if "necromancer" in squad:
-            spec = look_for("skeleton", t, seed * 131 + 999)
-            name = look_name("skeleton", t.key, spec)
+        for key in sorted({k for owner in squad for k in SUMMONS.get(owner, ())}):
+            spec = look_for(key, t, seed * 131 + 999)
+            name = look_name(key, t.key, spec)
             looks[name] = spec
-            summons[team] = name
+            summons[(team, key)] = name
     return slots, summons, looks
 
 

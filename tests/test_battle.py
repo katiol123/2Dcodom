@@ -14,10 +14,10 @@ def run(w, limit=180.0):
 
 class RosterTest(unittest.TestCase):
     def test_roster(self):
-        self.assertEqual(len(ALL), 17)
+        self.assertEqual(len(ALL), 22)
         self.assertEqual(len(CLASSIC), 7)
         self.assertEqual({k for k, u in ROSTER.items() if u.ranged},
-                         {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman"})
+                         {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman", "goblin_shaman"})
         for u in ROSTER.values():
             self.assertTrue(u.perks and u.behavior, u.key)
             for name, desc in u.perks + u.flaws + u.behavior:
@@ -36,7 +36,7 @@ class RosterTest(unittest.TestCase):
     def test_plan_gives_every_unit_its_own_look(self):
         slots, summons, looks = plan_battle([["knight"] * 4, ["necromancer", "wolf"]], 3)
         self.assertEqual(len({s.look for s in slots if s.team == 0}), 4)
-        self.assertIn(1, summons)
+        self.assertIn((1, "skeleton"), summons)
         self.assertEqual(len(looks), len({s.look for s in slots}) + 1)
 
 
@@ -182,7 +182,8 @@ class BattleTest(unittest.TestCase):
                 if not u.summoned:
                     dealt[u.key] += u.dealt + u.healed
         for k in ALL:
-            self.assertGreater(dealt[k], 0, k)
+            if not ROSTER[k].boss:                     # bosses are never in random squads
+                self.assertGreater(dealt[k], 0, k)
 
     def test_abilities_happen(self):
         seen = set()
@@ -200,6 +201,106 @@ class BattleTest(unittest.TestCase):
                     seen.add("summon")
         for key in ("arrow", "fireball", "dark", "lightning", "summon", "ВААГХ!", "ТЕНЬ!", "АУУУ!"):
             self.assertIn(key, seen)
+
+
+class GoblinTest(unittest.TestCase):
+    def test_goblin_panics_once_unless_mad_goblin_is_near(self):
+        from game import ai
+        w = headless_world([["goblin"], ["knight"]], 1)
+        g = next(u for u in w.units if u.key == "goblin")
+        g.hp = g.max_hp * 0.2
+        ai.passives(w, g)
+        self.assertTrue(g.has("panic"))
+        g.status.clear()
+        ai.passives(w, g)
+        self.assertFalse(g.has("panic"))            # only once per battle
+        w = headless_world([["goblin", "mad_goblin"], ["knight"]], 1)
+        g = next(u for u in w.units if u.key == "goblin")
+        mad = next(u for u in w.units if u.key == "mad_goblin")
+        mad.x, mad.y = g.x + 10, g.y
+        g.hp = g.max_hp * 0.2
+        ai.passives(w, g)
+        self.assertFalse(g.has("panic"))
+
+    def test_troll_nest_kick_and_stupor(self):
+        from game import ai
+        w = headless_world([["troll"], ["knight"]], 1)
+        w.time = 1.0
+        troll = next(u for u in w.units if u.key == "troll")
+        ai.passives(w, troll)
+        troll.abil["nest"] = 0
+        ai.passives(w, troll)
+        gobs = [u for u in w.units if u.key == "goblin"]
+        self.assertEqual(len(gobs), 4)
+        self.assertEqual(troll.abil["nest"], ai.NEST_EVERY)
+        self.assertEqual(ai.NEST_EVERY, 24.0)
+        kicked = 0
+        for _ in range(40):                           # each goblin is checked exactly once
+            for g in gobs:
+                g.hop, g.rising = 0.0, 0.0
+                if g.alive:
+                    g.x, g.y = troll.x + 5, troll.y
+            ai.passives(w, troll)
+        self.assertTrue(all(g.kick_checked for g in gobs))
+        kicked = sum(g.kicked for g in gobs)
+        self.assertLessEqual(kicked, 4)
+        stupors = 0
+        for _ in range(200):
+            troll.status.pop("stupor", None)
+            troll.abil["dumb"] = 0
+            ai.passives(w, troll)
+            stupors += troll.has("stupor")
+        self.assertTrue(20 < stupors < 70, stupors)   # ~20 %
+
+    def test_kick_sends_goblin_flying_and_kills_it(self):
+        w = headless_world([["troll", "goblin"], ["knight"]], 1)
+        w.time = 1.0
+        troll = next(u for u in w.units if u.key == "troll")
+        g = next(u for u in w.units if u.key == "goblin")
+        x0 = g.x
+        w.kick(troll, g)
+        self.assertTrue(g.dead and g.kicked)
+        for _ in range(60):
+            w.step(1 / 60)
+        self.assertGreater(abs(g.x - x0), 60)
+
+    def test_wolf_rider_dodges_magic_and_rider_may_survive(self):
+        w = headless_world([["wolf_rider"], ["mage"]], 1)
+        w.time = 1.0
+        rider = next(u for u in w.units if u.key == "wolf_rider")
+        mage = next(u for u in w.units if u.key == "mage")
+        misses = 0
+        for _ in range(300):
+            rider.hp = rider.max_hp
+            misses += w.deal(mage, rider, 10, "magic") == 0
+        self.assertTrue(60 < misses < 120, misses)    # ~30 %
+        survived = 0
+        for seed in range(40):
+            w = headless_world([["wolf_rider", "knight"], ["mage"]], seed)
+            w.time = 1.0
+            w.kill(next(u for u in w.units if u.key == "wolf_rider"), None)
+            gob = [u for u in w.units if u.key == "goblin"]
+            if gob:
+                survived += 1
+                self.assertEqual(gob[0].hp, ROSTER["goblin"].hp * 0.5)
+        self.assertTrue(4 < survived < 22, survived)
+
+    def test_mad_goblin_blocks_from_the_front_only(self):
+        w = headless_world([["mad_goblin"], ["archer", "knight"]], 1)
+        w.time = 1.0
+        mad = next(u for u in w.units if u.key == "mad_goblin")
+        knight = next(u for u in w.units if u.key == "knight")
+        mad.facing = 1
+        knight.x, knight.y = mad.x + 15, mad.y
+        blocked = 0
+        for _ in range(300):
+            mad.hp = mad.max_hp
+            blocked += w.deal(knight, mad, 10, "physical") == 0
+        self.assertTrue(30 < blocked < 95, blocked)   # ~20 %
+        knight.x = mad.x - 15                          # from behind: never blocked
+        for _ in range(100):
+            mad.hp = mad.max_hp
+            self.assertGreater(w.deal(knight, mad, 10, "physical"), 0)
 
 
 class FactoryTest(unittest.TestCase):

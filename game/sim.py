@@ -21,6 +21,7 @@ FIELD = (16.0, 150.0, 464.0, 256.0)   # x0, y0, x1, y1 for unit feet
 COUNTDOWN = 2.6
 SUMMON_HP = 130
 REVIVE_DELAY = 2.5
+FATIGUE_AT, FATIGUE_SPAN = 90.0, 45.0   # healing fades to zero between 90 and 135 s (no endless stalemates)
 
 
 # --- small effect records (rendered by render.py) -----------------------------------
@@ -114,6 +115,7 @@ TRAILS = {
     "fireball": ["#feae34", "#f77622", "#e43b44", "#5a6988"],
     "dark": ["#63c74d", "#265c42", "#68386c", "#181425"],
     "holy": ["#fee761", "#ffffff", "#ead4aa"],
+    "spore": ["#b55088", "#a7f070", "#68386c"],
 }
 
 
@@ -174,6 +176,12 @@ class Unit:
         self.revived = False
         self.rising = 0.0             # >0 while climbing out of the ground
         self.raised = False           # corpse consumed by a necromancer
+        self.panic_used = False       # cowardly goblin already ran away once
+        self.kick_checked = False     # a troll already decided whether to kick this goblin
+        self.kicked = False           # flying off the field after a troll's kick
+        self.kvx = self.kvz = self.kz = 0.0
+        self.spin = 0.0
+        self.hop = 0.0                # >0 while jumping out of the troll's nest
         self.bias = random.random()   # replaced by world rng
 
     # convenience
@@ -196,10 +204,14 @@ class Unit:
             v *= 1.9
         if self.has("stealth"):
             v *= 1.3
+        if self.has("frenzy"):
+            v *= 1.2
+        if self.has("panic"):
+            v *= 1.25
         return v
 
     def cooldown(self) -> float:
-        return self.type.cooldown * (0.6 if self.rage else 1.0)
+        return self.type.cooldown * (0.6 if (self.rage or self.has("frenzy")) else 1.0)
 
     def set_anim(self, name: str, speed: float = 1.0, restart: bool = False) -> None:
         if name not in self.anims:
@@ -220,10 +232,10 @@ class Unit:
 
 class World:
     """``slots``: one :class:`~game.assets.Slot` per unit; ``anims``: AnimInfo per look name;
-    ``summon_looks``: look name of the necromancer's skeletons for each team (optional)."""
+    ``summon_looks``: look names of units that can join a team mid-battle, keyed (team, class)."""
 
     def __init__(self, slots: Sequence[Slot], anims: Dict[str, Dict[str, AnimInfo]], seed: int = 1,
-                 summon_looks: Optional[Dict[int, str]] = None, teams: Tuple[Team, Team] = TEAMS):
+                 summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS):
         self.rng = random.Random(seed)
         self.seed = seed
         self.teams = teams
@@ -273,16 +285,22 @@ class World:
                 u.anim_t = self.rng.uniform(0, 1)
                 self.units.append(u)
 
-    def summon(self, necro: Unit, x: float, y: float) -> Optional[Unit]:
-        look = self.summon_looks.get(necro.team)
+    def summon(self, owner: Unit, x: float, y: float, key: str = "skeleton", hp: Optional[float] = None,
+               rising: float = 0.0) -> Optional[Unit]:
+        """Bring a new unit of ``key`` onto ``owner``'s side (raised skeleton, nest goblin, rider)."""
+        look = self.summon_looks.get((owner.team, key))
         if look is None:
             return None
-        u = Unit(ROSTER["skeleton"], necro.team, x, y, self.anims[look], look)
+        u = Unit(ROSTER[key], owner.team, min(FIELD[2], max(FIELD[0], x)), min(FIELD[3], max(FIELD[1], y)),
+                 self.anims[look], look)
         u.summoned = True
-        u.summoner = necro
+        u.summoner = owner
         u.revived = True               # summons do not get the free revive
-        u.hp = u.max_hp = u.chip = float(SUMMON_HP)
-        u.rising = 0.6
+        if hp is not None:
+            u.max_hp = float(hp) if key == "skeleton" else u.max_hp
+            u.hp = u.chip = float(hp)
+        u.rising = rising
+        u.facing = owner.facing
         u.bias = self.rng.random()
         self.units.append(u)
         return u
@@ -334,7 +352,7 @@ class World:
     def deal(self, src: Optional[Unit], dst: Unit, amount: float, dtype: str, *, crit: bool = False,
              ranged: bool = False, source_xy: Optional[Tuple[float, float]] = None, quiet: bool = False,
              label: Optional[str] = None, pierce: bool = False) -> float:
-        """Apply damage. dtype: physical | magic | holy | burn | bleed."""
+        """Apply damage. dtype: physical | magic | holy | burn | bleed | poison."""
         if dst.dead:
             return 0.0
         if dst.has("divine"):
@@ -343,23 +361,27 @@ class World:
             return 0.0
         stunned = dst.has("stun")
         sx = source_xy[0] if source_xy else (src.x if src else dst.x)
-        if dtype == "physical" and not stunned and self.rng.random() < dst.type.dodge:
+        dodgeable = dtype == "physical" or (dst.type.dodge_magic and dtype in ("magic", "holy"))
+        if dodgeable and not stunned and not dst.has("stupor") and self.rng.random() < dst.type.dodge:
             self.text(dst, "УКЛОН", "#c0cbdc")
             self.sounds.append("dodge")
             return 0.0
-        # knight shield: works against hits from the front; crossbow bolts punch through
-        if dst.key == "knight" and dtype == "physical" and not stunned and not pierce:
+        # shield / axe block (knight, mad goblin): only from the front; crossbow bolts punch through
+        if dst.type.shield and dtype == "physical" and not stunned and not pierce and not dst.has("stupor"):
+            vs_missile, vs_melee, kept = dst.type.shield
             front = (sx - dst.x) * dst.facing >= -2
-            if front and self.rng.random() < (0.6 if ranged else 0.3):
+            if front and self.rng.random() < (vs_missile if ranged else vs_melee):
                 self.text(dst, "БЛОК", "#2ce8f5")
                 self.vfx.append(Vfx("hit_spark", dst.x + dst.facing * 6, dst.y - 18))
                 self.burst(dst.x + dst.facing * 6, dst.y, 18, "#fee761", n=5, speed=50, up=40, life=0.3)
                 self.sounds.append("block")
-                if ranged:
+                if ranged or kept <= 0:
                     return 0.0
-                amount *= 0.3
+                amount *= kept
         mult = 1.0
         if src is not None and src.has("warcry"):
+            mult *= 1.2
+        if src is not None and src.has("frenzy"):
             mult *= 1.2
         blunt = bool(src is not None and src.type.blunt and dtype == "physical" and not ranged)
         if dst.type.undead and (blunt or dtype == "holy"):
@@ -375,7 +397,7 @@ class World:
         dst.taken += dmg
         dst.last_dtype = dtype
         dst.last_blunt = blunt
-        if dtype not in ("burn", "bleed"):
+        if dtype not in ("burn", "bleed", "poison"):
             dst.flash = 0.07
             dst.flash_crit = crit
         dst.last_hit = self.time
@@ -384,7 +406,8 @@ class World:
             if src.rage and dtype == "physical" and not ranged:
                 self.heal(src, src, dmg * 0.25, quiet=True)
         if not quiet:
-            col = {"magic": "#c08cff", "holy": "#fee761", "burn": "#feae34", "bleed": "#f6757a"}.get(dtype, "#ffffff")
+            col = {"magic": "#c08cff", "holy": "#fee761", "burn": "#feae34", "bleed": "#f6757a",
+                   "poison": "#a7f070"}.get(dtype, "#ffffff")
             if crit:
                 col = "#fee761"
             self.text(dst, (label + " " if label else "") + str(int(dmg)), col, big=crit,
@@ -406,6 +429,8 @@ class World:
     def heal(self, src: Optional[Unit], dst: Unit, amount: float, quiet: bool = False) -> float:
         if dst.dead:
             return 0.0
+        if self.time > FATIGUE_AT:                  # long stalemates: healing fades out
+            amount *= max(0.0, 1.0 - (self.time - FATIGUE_AT) / FATIGUE_SPAN)
         amount = min(amount, dst.max_hp - dst.hp)
         if amount <= 0:
             return 0.0
@@ -431,6 +456,12 @@ class World:
             src.kills += 1
         self.feed.append((self.time, src.type.name if src else "ОГОНЬ", u.team, u.type.name))
         self.sounds.append("death")
+        # the goblin on the dire wolf may jump off alive
+        if u.key == "wolf_rider" and self.rng.random() < 0.3:
+            g = self.summon(u, u.x - u.facing * 6, u.y + 2, "goblin", hp=ROSTER["goblin"].hp * 0.5)
+            if g is not None:
+                g.hop = 0.45
+                self.text(g, "НАЕЗДНИК ЖИВ!", "#a7f070", big=True)
         # skeletons get back up unless smashed (blunt) or purified (holy)
         if u.key == "skeleton" and not u.revived and not (u.last_blunt or u.last_dtype == "holy"):
             u.revive_at = self.time + REVIVE_DELAY
@@ -438,6 +469,26 @@ class World:
         for a in self.allies(u):
             if a.key == "orc" and a.abil.get("warcry", 0) > 4:
                 a.abil["warcry"] = 4          # a fallen ally makes the orc roar sooner
+
+    def kick(self, troll: Unit, gob: Unit) -> None:
+        """Troll's kick: the goblin tumbles far away and does not come back."""
+        gob.hp = 0
+        gob.dead = True
+        gob.status.clear()
+        gob.action = None
+        gob.set_anim("hurt", 0.0)
+        gob.anim_t = 0.08
+        gob.death_t = self.time
+        gob.kicked = True
+        side = 1 if gob.x >= troll.x else -1
+        gob.kvx = side * self.rng.uniform(170, 230)
+        gob.kvz = self.rng.uniform(110, 150)
+        gob.kz = 10.0
+        self.text(troll, "ПИНОК!", "#feae34", big=True)
+        self.burst(gob.x, gob.y, 12, "#ffffff", n=8, speed=50, up=40, life=0.4)
+        self.feed.append((self.time, "ПИНОК", gob.team, gob.type.name))
+        self.sounds.append("hit")
+        self._check_winner()
 
     def _check_winner(self) -> None:
         for team in (0, 1):
@@ -501,7 +552,16 @@ class World:
 
     def _update_unit(self, u: Unit, dt: float) -> None:
         u.anim_t += dt * u.anim_speed
+        u.hop = max(0.0, u.hop - dt)
         if u.dead:
+            if u.kicked:                          # tumbling through the air, off the field
+                u.x += u.kvx * dt
+                u.kz += u.kvz * dt
+                u.kvz -= 260.0 * dt
+                u.spin += dt
+                if u.x < -60 or u.x > W + 60 or (u.kz < 0 and u.spin > 0.3):
+                    u.raised = True               # gone: no corpse
+                    u.kicked = False
             if u.revive_at is not None and self.time >= u.revive_at:
                 ai.revive(self, u)
             return
@@ -530,6 +590,11 @@ class World:
             u.action = None
             u.set_anim("hurt", 0.0)
             u.anim_t = 0.08     # recoil frame, frozen
+            u.vx = u.vy = 0.0
+            return
+        if u.has("stupor"):     # troll staring into nothing
+            u.action = None
+            u.set_anim("stupor", 1.0)
             u.vx = u.vy = 0.0
             return
 
@@ -561,6 +626,12 @@ class World:
             self.deal(None, u, 3, "bleed", quiet=True)
             u.dot_acc += 3
             self.burst(u.x, u.y, 14, "#a22633", n=2, speed=8, up=10, life=0.4)
+            if u.dead:
+                return
+        if u.has("poison"):
+            self.deal(None, u, 2, "poison", quiet=True)
+            u.dot_acc += 2
+            self.burst(u.x, u.y, 18, "#a7f070", n=1, speed=6, up=20, life=0.5, gravity=-20)
             if u.dead:
                 return
         if u.key == "orc" and u.hp < u.max_hp:
@@ -720,13 +791,15 @@ class World:
                         u.status["burn"] = 3.0
                         if u.alive and not u.ranged:
                             u.x += (u.x - p.x) / (d + 0.1) * 4
-        else:  # dark / holy orbs: single target
+        else:  # dark / holy / spore orbs: single target
             v = self._victim_at(p, slack=4.0)
             color = TRAILS[p.kind][0]
             self.burst(p.x, p.y, 14, color, n=12, speed=60, up=60, life=0.45)
             self.rings.append(Ring(p.x, p.y, 2, 12, color, 0.3))
             if v is not None:
-                dealt = self.deal(owner, v, p.damage, "magic" if p.kind == "dark" else "holy", source_xy=(p.sx, p.sy))
+                dealt = self.deal(owner, v, p.damage, "holy" if p.kind == "holy" else "magic", source_xy=(p.sx, p.sy))
+                if p.kind == "spore" and v.alive and not v.type.undead:
+                    v.status["poison"] = max(v.status.get("poison", 0.0), 3.0)
                 if p.kind == "dark" and owner.alive and dealt > 0:
                     got = self.heal(owner, owner, dealt * 0.5, quiet=True)
                     if got >= 3:
