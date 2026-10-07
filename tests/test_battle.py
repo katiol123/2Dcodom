@@ -94,6 +94,41 @@ class BattleTest(unittest.TestCase):
         w.deal(None, pal, 10_000, "magic")
         self.assertTrue(pal.dead)
 
+    def test_spearman_counters_only_a_charge_at_him(self):
+        from game import ai
+        w = headless_world([["spearman", "archer"], ["barbarian"]], 1)
+        w.time = 1.0
+        spear, archer = w.units[0], w.units[1]
+        barb = next(u for u in w.units if u.key == "barbarian")
+        barb.x, barb.y = spear.x + 30, spear.y
+        barb.status["charge"] = 1.0
+        barb.target = archer                       # rushing past him at someone else: no brace
+        self.assertFalse(ai._try_abilities(w, spear))
+        barb.target = spear                        # rushing at him: brace and counter
+        self.assertTrue(ai._try_abilities(w, spear))
+        self.assertTrue(spear.action["counter"])
+        x0, hp0 = barb.x, barb.hp
+        ai._melee(w, spear, barb, counter=True)
+        self.assertFalse(barb.has("charge"))
+        self.assertGreater(barb.x - x0, 15)        # knocked back
+        lo = ROSTER["spearman"].damage[0] * ai.COUNTER_BONUS * (1 - ROSTER["barbarian"].armor)
+        self.assertGreaterEqual(hp0 - barb.hp, round(lo) - 1)
+        x0 = barb.x
+        ai._melee(w, spear, barb)                  # an ordinary thrust: no knockback
+        self.assertAlmostEqual(barb.x, x0)
+
+    def test_rush_is_not_spammed_after_a_counter(self):
+        for enemy in ("barbarian", "orc", "wolf"):
+            w = headless_world([["spearman"], [enemy]], 3)
+            seen, counters = set(), 0
+            while w.time < 9 and w.winner is None:
+                w.step(1 / 60)
+                for t in w.texts:
+                    if id(t) not in seen:
+                        seen.add(id(t))
+                        counters += t.text.startswith("КОНТРУДАР")
+            self.assertEqual(counters, 1, enemy)
+
     def test_every_class_contributes(self):
         dealt = {k: 0.0 for k in ALL}
         rng = random.Random(3)

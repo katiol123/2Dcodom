@@ -6,7 +6,8 @@ itself differently:
 
 * **knight**      bodyguard: protects own shooters, taunts enemies diving them;
 * **barbarian**   executioner: hunts wounded enemies, cleaves, rages at low HP;
-* **spearman**    anti-charge: prefers fast/charging enemies, keeps them at spear length;
+* **spearman**    anti-charge: braces against an enemy charging *at him* and meets it with
+                  the spear first (+100% damage, knockback, the charge is broken);
 * **orc**         frontline brute: war cry charge + stun, buffs nearby allies;
 * **rogue**       assassin: flanks along the field edge, shadow-steps behind shooters;
 * **archer**      kiter: keeps distance, retreats from melee, volleys clusters;
@@ -37,8 +38,8 @@ if TYPE_CHECKING:  # pragma: no cover
 from .sim import FIELD, Lightning, Ring, Vfx
 
 RETARGET = 0.35
+COUNTER_BONUS = 2.0    # spearman meeting a charge with the spear: +100% damage
 DANGER = 50.0          # shooters start backing off when melee is this close
-FAST = ("rogue", "wolf")
 
 
 # --- helpers ------------------------------------------------------------------------
@@ -98,11 +99,11 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
     if u.key == "knight" and not e.ranged and e.target is not None and e.target.ranged \
             and e.target.team == u.team:
         s += 70.0                                   # bodyguard
-    if u.key == "spearman" and (e.has("charge") or e.key in FAST):
-        s += 30.0
+    if u.key == "spearman" and e.has("charge"):
+        s += 70.0 if e.target is u else 30.0     # a charger coming at me is the best target
     if u.key in divers:
         if e.key == "spearman":
-            s -= 40.0
+            s -= 15.0                           # long reach: an awkward target for divers
         if e.key in ("knight", "paladin"):
             s -= 25.0
     if u.key == "crossbowman":
@@ -280,6 +281,14 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
             world.text(u, "ТЕНЬ!", "#c0cbdc", big=True)
             world.sounds.append("smoke")
             return False
+    if u.key == "spearman" and u.cd <= 0.35:
+        # brace: meet an enemy rushing at me with the spear before it reaches me
+        for e in world.enemies(u):
+            if charging_at(e, u) and in_melee_range(u, e, slack=10):
+                world.start_action(u, "strike", e, cooldown=0.45)   # a quick thrust
+                u.action["counter"] = True
+                u.cd = u.cooldown()
+                return True
     if u.key == "barbarian" and u.abil.get("leap", 0) <= 0 and u.target is not None:
         if 35 < u.dist(u.target) < 95:
             u.abil["leap"] = 10.0
@@ -387,10 +396,15 @@ def resolve_action(world: "World", u: "Unit", a: dict) -> None:
         elif u.key == "shaman":
             chain_lightning(world, u, t)
         return
-    _melee(world, u, t)
+    _melee(world, u, t, counter=bool(a.get("counter")))
 
 
-def _melee(world: "World", u: "Unit", t: "Unit") -> None:
+def charging_at(e: "Unit", u: "Unit") -> bool:
+    """``e`` is in a rush (barbarian leap, orc war cry, wolf howl) aimed at ``u``."""
+    return e.has("charge") and e.target is u
+
+
+def _melee(world: "World", u: "Unit", t: "Unit", counter: bool = False) -> None:
     rng = world.rng
     if not in_melee_range(u, t, slack=6):
         world.text(u, "МИМО", "#8b9bb4")
@@ -413,10 +427,10 @@ def _melee(world: "World", u: "Unit", t: "Unit") -> None:
         dmg *= 1.5
         crit = True
         label = "КАЗНЬ"
-    if u.key == "spearman" and (t.has("charge") or t.key in FAST):
-        dmg *= 1.6
+    if counter:
+        dmg *= COUNTER_BONUS
         crit = True
-        label = label or "ПРОТИВ РЫВКА"
+        label = "КОНТРУДАР"
     if u.key == "wolf":
         pack = sum(1 for a in world.allies(u) if a.key == "wolf" and math.hypot(a.x - u.x, a.y - u.y) < 60)
         dmg *= 1.0 + 0.2 * pack
@@ -427,8 +441,16 @@ def _melee(world: "World", u: "Unit", t: "Unit") -> None:
     world.deal(u, t, dmg, u.type.damage_type, crit=crit, label=label)
     fx_x = (u.x + t.x) / 2 + u.facing * 3
     world.vfx.append(Vfx("hit_spark", fx_x, t.y - 16 - rng.uniform(0, 6), flip=u.facing < 0))
-    if u.key == "spearman" and t.alive:
-        t.x += u.facing * 6
+    if counter:
+        # the charge breaks on the spear: knocked back, the rush (and its stun) is lost
+        t.status.pop("charge", None)
+        t.status.pop("stunhit", None)
+        if t.alive:
+            t.x = min(FIELD[2], max(FIELD[0], t.x + u.facing * 20))
+            t.vx = t.vy = 0.0
+            t.action = None
+        world.vfx.append(Vfx("dust", t.x, t.y - 6, flip=u.facing > 0))
+        world.burst(t.x, t.y, 16, "#c0cbdc", n=8, speed=50, up=40, life=0.4)
     if u.key == "monk" and combo and t.alive:
         _stun(world, t, 0.7)
         t.x += u.facing * 10
