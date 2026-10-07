@@ -145,7 +145,7 @@ class Renderer:
         self.font = Font()
         self.metas = metas
         self.art = {k: UnitArt(m) for k, m in metas.items()}
-        bg_path = assets.CACHE / "background.png"
+        bg_path = assets.cache_dir() / "background.png"
         if bg_path.exists():
             self.bg = pygame.image.load(str(bg_path)).convert()
         else:

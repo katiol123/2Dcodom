@@ -21,6 +21,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
 
+def _icon_surface():
+    """Window/taskbar icon: the engine's sword icon, scaled up pixel-perfect."""
+    import pygame
+    from pixelforge.assets.items import sword
+    img = sword().scaled(2).to_image()
+    return pygame.image.frombuffer(img.tobytes(), img.size, "RGBA")
+
+
 def _loading(screen, scale, font, name, i, n):
     import pygame
     from game.render import INK
@@ -58,6 +66,7 @@ def main(argv=None) -> int:
 
     pygame.init()
     pygame.display.set_caption("PixelForge - Автобитва")
+    pygame.display.set_icon(_icon_surface())
     if args.record:
         scale = args.scale or 2
         screen = pygame.display.set_mode((W * scale, H * scale))
@@ -162,5 +171,33 @@ def _record(args, world, renderer, logical, screen, scale) -> int:
     return 0
 
 
+def _crash(exc: BaseException) -> None:
+    """In the windowed .exe there is no console: log the error and show it in a dialog."""
+    import traceback
+    text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    log = None
+    try:
+        from game.assets import CACHE
+        CACHE.mkdir(parents=True, exist_ok=True)
+        log = CACHE / "crash.log"
+        log.write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+    msg = f"Игра завершилась с ошибкой:\n\n{exc}\n\nПодробности: {log or '-'}"
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, msg, "Автобитва", 0x10)
+    else:
+        print(text, file=sys.stderr)
+
+
 if __name__ == "__main__":
+    if getattr(sys, "frozen", False):
+        try:
+            sys.exit(main())
+        except SystemExit:
+            raise
+        except BaseException as e:  # noqa: BLE001 - last-resort handler for the packaged game
+            _crash(e)
+            sys.exit(1)
     sys.exit(main())

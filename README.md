@@ -18,6 +18,14 @@ pygame…), и GIF-превью.
 
 ## Автобитва (демо-игра)
 
+**Без Python:** скачайте `AutoBattle.exe` со страницы
+[Releases](https://github.com/katiol123/2Dcodom/releases/latest) и запустите двойным щелчком.
+Exe собирает GitHub Actions (`.github/workflows/build-exe.yml`) при каждом изменении кода;
+локально можно собрать так: `pip install pyinstaller && python tools/make_icon.py &&
+pyinstaller --onefile --windowed --name AutoBattle --icon build/icon.ico battle.py`.
+
+Из исходников:
+
 ```bash
 pip install -r requirements.txt
 python battle.py                    # два отряда по 7 юнитов дерутся сами, бои идут один за другим

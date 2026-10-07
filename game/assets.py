@@ -27,8 +27,25 @@ from pixelforge.units.humanoid import build_humanoid
 
 from .units import ORDER, TEAMS, spec_for
 
+import sys
+
 ROOT = Path(__file__).resolve().parent.parent
-CACHE = ROOT / ".cache" / "battle"
+FROZEN = getattr(sys, "frozen", False)          # running from a PyInstaller .exe
+APP_VERSION = "1.0"
+
+
+def _user_cache_root() -> Path:
+    """Writable per-user folder for the packaged game (sources are not shipped)."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "PixelForgeBattle"
+
+
+CACHE = _user_cache_root() if FROZEN else ROOT / ".cache" / "battle"
 
 
 @dataclass
@@ -63,6 +80,8 @@ class AnimInfo:
 
 
 def _source_hash() -> str:
+    if FROZEN:
+        return "app-" + APP_VERSION
     h = hashlib.sha1()
     for p in sorted((ROOT / "pixelforge").rglob("*.py")):
         h.update(p.read_bytes())
@@ -70,11 +89,16 @@ def _source_hash() -> str:
     return h.hexdigest()[:12]
 
 
+def cache_dir() -> Path:
+    """Folder for generated sprites; its name changes whenever the art code does."""
+    d = CACHE / _source_hash()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def ensure_unit_sheets(progress: Optional[Callable[[str, int, int], None]] = None) -> Dict[str, dict]:
     """Return ``{"knight_blue": meta, ...}``; builds missing sheets (~0.6 s each)."""
-    key = _source_hash()
-    out_dir = CACHE / key
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = cache_dir()
     metas: Dict[str, dict] = {}
     jobs = [(k, t) for t in TEAMS for k in ORDER]
     for i, (k, team) in enumerate(jobs):

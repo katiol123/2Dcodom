@@ -1,0 +1,70 @@
+name: Build Windows exe
+
+# Builds AutoBattle.exe (one file, no console) with PyInstaller on a Windows
+# runner and publishes it as a GitHub Release, so the game can be downloaded
+# and started with a double click: https://github.com/<owner>/<repo>/releases/latest
+
+on:
+  push:
+    branches: [main, master, "claude/**"]
+    paths: ["battle.py", "game/**", "pixelforge/**", "tools/**", "requirements.txt", ".github/workflows/build-exe.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Tests
+        run: python -m unittest discover -s tests
+
+      - name: Build exe
+        run: |
+          python tools/make_icon.py
+          pyinstaller --noconfirm --onefile --windowed --name AutoBattle --icon build/icon.ico battle.py
+
+      - name: Smoke test (headless, 15 s)
+        shell: pwsh
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: |
+          $p = Start-Process -FilePath dist/AutoBattle.exe -ArgumentList "--seed","3","--quit-after","15" -PassThru -Wait
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:LOCALAPPDATA/PixelForgeBattle/crash.log" -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoBattle-windows
+          path: dist/AutoBattle.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: autobattle-${{ github.run_number }}
+          name: "Автобитва (сборка ${{ github.run_number }})"
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: dist/AutoBattle.exe
+          body: |
+            Скачайте **AutoBattle.exe** и запустите двойным щелчком — Python не нужен.
+            Первый запуск несколько секунд рисует спрайты, дальше игра стартует сразу.
+            Windows может показать «Windows защитила ваш компьютер»: нажмите «Подробнее» → «Выполнить в любом случае»
+            (exe не подписан цифровой подписью).
+
+            Клавиши: ПРОБЕЛ — пауза, R — новый бой, 1–4 — скорость, F — полный экран, ESC — выход.
