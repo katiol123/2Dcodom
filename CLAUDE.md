@@ -7,13 +7,17 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - `python -m pixelforge build out` — render all presets to `out/` (~10s); `out/` is gitignored
 - `python -m pixelforge unit <preset|random:SEED> out`
 - `python battle.py` — auto-battle demo (pygame); `--record x.mp4` renders headless; `--seed N`
-- `python -m game.balance 60` — headless balance stats; run after any stat/AI change (aim: ~50/50 wins, 30-50 s fights,
-  every unit type contributing)
+- `python -m game.balance 300 random` — per-class win rates on random squads; run after any stat/AI change
+  (aim: every class ~41-60%, 30-50 s fights); `python -m game.balance 40` — classic mirror (~50/50)
 
 ## Battle game (game/)
 - `sim.py`/`ai.py` must stay pygame-free (tests and balance run headless). Rendering only in `render.py`.
 - Damage happens on the sprite's `hit`/`cast` event frame (timings come from the exported sheet JSON).
-- Sprites are cached in `.cache/battle/<hash of pixelforge + game/units.py>`; editing art code rebuilds them.
+- Every unit has a seeded look (`look_for` in units.py: class-defining gear fixed, faces vary). Sheets are named
+  `<class>_<team>_<spec hash>` and cached in `.cache/battle/<hash of pixelforge>/`; `SpriteFactory` builds missing
+  ones in worker processes and prefetches the next battle. Tests/balance use `match.headless_world` (seed-0 timings).
+- New class: `UnitType` in `ROSTER` + branch in `look_for` + behaviour in `ai.py`, then rebalance.
+- No screen shake (user request); impact feel comes from hit-stop and slow-mo.
 - Inspect visually: record with `--record`, then `ffmpeg ... -vf "fps=6,tile=3x3"` to look at frame sequences.
 
 ## How to add graphics

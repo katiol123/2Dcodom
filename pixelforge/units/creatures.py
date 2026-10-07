@@ -126,6 +126,7 @@ class QuadSpec:
     tail: str = "bushy"      # bushy | thin | none
     ears: str = "pointy"     # pointy | round
     tusks: Optional[ColorLike] = None
+    collar: Optional[ColorLike] = None   # e.g. a team color
     size: Tuple[int, int] = (48, 32)
 
 
@@ -147,6 +148,9 @@ def build_quad_rig(spec: QuadSpec) -> Rig:
     rig.bones["spine"].shapes[1] = Poly(material=belly, z=0.1, group="belly", points=[
         (1, bw / 2 - 1.5), (L - 1, bw / 2 - 1.5), (L - 2, bw / 2 + 0.2), (2, bw / 2 + 0.2)])
     rig.bone("neck", "spine", 4, world=-35, attach=0.92, z=11, material=fur, shapes=[Limb(width=bw - 2)])
+    if spec.collar is not None:
+        rig.bones["neck"].shapes.append(Limb(material=Material.of("collar", spec.collar), width=bw - 1.5,
+                                             t0=0.1, t1=0.25, z=0.2, group="collar"))
     head = rig.bone("head", "neck", 0, world=0, z=12, material=fur, shapes=[
         Blob(rx=3.5, ry=3, t=0, offset=(0.5, -0.5)),
         Pixels(material=eye, level=BASE, z=0.5, outline=False, points=[(1.5, -1.5)]),

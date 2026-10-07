@@ -141,10 +141,14 @@ class VfxArt:
 # --- renderer ---------------------------------------------------------------------------------
 
 class Renderer:
-    def __init__(self, world: World, metas: Dict[str, dict], seed: int = 0):
+    """Draws battles.  Unit art is loaded lazily per look name from ``metas``
+    (call :meth:`add_metas` with the sheets of every new battle)."""
+
+    def __init__(self, metas: Dict[str, dict], seed: int = 0):
         self.font = Font()
-        self.metas = metas
-        self.art = {k: UnitArt(m) for k, m in metas.items()}
+        self.metas: Dict[str, dict] = dict(metas)
+        self._art: Dict[str, UnitArt] = {}
+        self._portraits: Dict[tuple, pygame.Surface] = {}
         bg_path = assets.cache_dir() / "background.png"
         if bg_path.exists():
             self.bg = pygame.image.load(str(bg_path)).convert()
@@ -153,6 +157,7 @@ class Renderer:
             canvas.save(str(bg_path))
             self.bg = to_surface(canvas)
         self.arrows = [to_surface(assets.arrow_canvas(a * 360 / 32)) for a in range(32)]
+        self.bolts = [to_surface(assets.arrow_canvas(a * 360 / 32, length=7, bolt=True)) for a in range(32)]
         self.vfx = {
             "explosion": VfxArt(pvfx.explosion(32)),
             "hit_spark": VfxArt(pvfx.hit_spark(16)),
@@ -162,15 +167,6 @@ class Renderer:
         self.fireball = VfxArt(pvfx.fireball(16))
         self.scorch = to_surface(assets.scorch(10))
         self.panel_cache: Dict[tuple, pygame.Surface] = {}
-        self.portraits = {}
-        for k, m in metas.items():
-            idle = self.art[k].frames["idle"][0]
-            top = idle.get_bounding_rect().top
-            ax = m["anchor"][0]
-            self.portraits[k] = idle.subsurface((ax - 8, max(0, top - 1), 18, 14)).copy()
-            grey = self.portraits[k].copy()
-            grey.fill((90, 90, 110, 255), special_flags=pygame.BLEND_RGBA_MULT)
-            self.portraits[k + "_dead"] = grey
         self.world_surf = pygame.Surface((W, H))
         self.rnd = random.Random(seed)
         self.blood = []
@@ -182,6 +178,35 @@ class Renderer:
             self.blood.append(s)
         self.hud_flash: Dict[int, float] = {}
         self.prev_hp: Dict[int, float] = {}
+
+    def add_metas(self, metas: Dict[str, dict]) -> None:
+        self.metas.update(metas)
+
+    def art(self, look: str) -> UnitArt:
+        a = self._art.get(look)
+        if a is None:
+            a = self._art[look] = UnitArt(self.metas[look])
+        return a
+
+    def portrait(self, look: str, dead: bool = False, flip: bool = False) -> pygame.Surface:
+        """18x14 head crop of idle frame 0 (for quadrupeds: the head end of the body)."""
+        key = (look, dead, flip)
+        p = self._portraits.get(key)
+        if p is None:
+            art = self.art(look)
+            idle = art.frames["idle"][0]
+            r = idle.get_bounding_rect()
+            if r.w > r.h * 1.3:
+                x = min(art.w - 18, r.right - 17)
+            else:
+                x = min(art.w - 18, max(0, art.anchor[0] - 8))
+            p = idle.subsurface((x, max(0, r.top - 1), 18, min(14, art.h - max(0, r.top - 1)))).copy()
+            if dead:
+                p.fill((90, 90, 110, 255), special_flags=pygame.BLEND_RGBA_MULT)
+            if flip:
+                p = pygame.transform.flip(p, True, False)
+            self._portraits[key] = p
+        return p
 
     def panel(self, w: int, h: int, base="#262b44", border="#5a6988") -> pygame.Surface:
         key = (w, h, base, border)
@@ -199,14 +224,10 @@ class Renderer:
         self._rings(world, ws)
         self._vfx(world, ws)
         self._particles(world, ws)
+        self._lightning(world, ws)
         self._bars(world, ws, real_time)
         self._texts(world, ws, real_time)
-        sx = sy = 0
-        if world.shake > 0:
-            s = int(round(world.shake))
-            sx, sy = self.rnd.randint(-s, s), self.rnd.randint(-s, s)
-        screen.fill(INK)
-        screen.blit(ws, (sx, sy))
+        screen.blit(ws, (0, 0))
         self._hud(world, screen, real_time)
         self._overlays(world, screen, real_time, paused, speed)
 
@@ -223,25 +244,35 @@ class Renderer:
                 s.blit(img, (round(d.x) - 6, round(d.y) - 9))
 
     def _unit_sprite(self, u: Unit, real_time: float) -> pygame.Surface:
-        art = self.art[f"{u.key}_{u.team_key}"]
-        i = min(u.frame(), len(art.frames[u.anim]) - 1)
+        art = self.art(u.look)
+        anim, i = u.anim, None
+        if u.rising > 0:                       # climbing out of the ground: death played backwards
+            anim = "death"
+            n = len(art.frames["death"])
+            i = max(0, min(n - 1, int(u.rising / 0.6 * (n - 1))))
+        if i is None:
+            i = min(u.frame(), len(art.frames[anim]) - 1)
         tint = None
         if u.dead:
             if u.anim_t > u.anims["death"].total:
                 tint = "corpse"
         elif u.flash > 0:
-            tint = "white" if getattr(u, "flash_crit", False) else "hit"
+            tint = "white" if u.flash_crit else "hit"
         elif u.has("stealth"):
             tint = "stealth"
         elif u.has("slow"):
             tint = "slow"
         elif u.rage and int(real_time * 6) % 2 == 0:
             tint = "rage"
-        return art.get(u.anim, i, u.facing < 0, tint)
+        elif u.has("divine") and int(real_time * 8) % 2 == 0:
+            tint = "hit"
+        return art.get(anim, i, u.facing < 0, tint)
 
     def _units(self, world: World, s: pygame.Surface, real_time: float) -> None:
         items = []
         for u in world.units:
+            if u.raised:
+                continue                       # corpse got up as someone's skeleton
             items.append((0 if u.dead else 1, u.y, 0, u))
         for p in world.projectiles:
             items.append((1, p.y, 1, p))
@@ -250,36 +281,75 @@ class Renderer:
         for u in world.units:
             if u.alive:
                 col = _c(world.teams[u.team].accent)
-                r = pygame.Rect(0, 0, 15, 5)
+                w = int(u.type.radius * 2)
+                r = pygame.Rect(0, 0, w, 5)
                 r.center = (round(u.x), round(u.y) + 2)
                 pygame.draw.ellipse(s, col, r, 1)
         for _, _, kind, obj in items:
             if kind == 0:
                 u = obj
-                art = self.art[f"{u.key}_{u.team_key}"]
+                art = self.art(u.look)
                 img = self._unit_sprite(u, real_time)
                 ax = art.anchor[0] if u.facing > 0 else art.w - 1 - art.anchor[0]
                 s.blit(img, (round(u.x) - ax, round(u.y) - art.anchor[1]))
+                top = round(u.y) - self._height(u)
                 if u.has("stun"):
                     for k in range(3):
                         a = real_time * 7 + k * math.tau / 3
                         x = round(u.x + math.cos(a) * 6)
-                        y = round(u.y - 36 + math.sin(a) * 2)
+                        y = round(top + 2 + math.sin(a) * 2)
                         s.set_at((x, y), (254, 231, 97))
                         s.set_at((x + 1, y), (255, 255, 255))
                 if u.has("warcry") and int(real_time * 10) % 3 == 0:
                     s.set_at((round(u.x) + self.rnd.randint(-6, 6), round(u.y) - self.rnd.randint(4, 30)),
                              (254, 174, 52))
+                if u.has("divine"):
+                    r = pygame.Rect(0, 0, 26, self._height(u) + 6)
+                    r.midbottom = (round(u.x), round(u.y) + 3)
+                    pygame.draw.ellipse(s, (254, 231, 97) if int(real_time * 10) % 2 else (255, 255, 255), r, 1)
             else:
                 p = obj
                 # ground shadow
                 pygame.draw.line(s, (24, 20, 37), (round(p.x) - 2, round(p.y)), (round(p.x) + 1, round(p.y)))
-                if p.kind == "arrow":
-                    img = self.arrows[int(((p.angle % 360) / 360) * 32 + 0.5) % 32]
-                    s.blit(img, (round(p.x) - 6, round(p.y - p.z) - 6))
-                else:
+                px, py = round(p.x), round(p.y - p.z)
+                if p.kind in ("arrow", "bolt"):
+                    bank = self.arrows if p.kind == "arrow" else self.bolts
+                    img = bank[int(((p.angle % 360) / 360) * 32 + 0.5) % 32]
+                    s.blit(img, (px - 6, py - 6))
+                elif p.kind == "fireball":
                     f = self.fireball.frame((world.time * 1.0) % 0.28, flip=p.tx < p.sx) or self.fireball.frames[0]
-                    s.blit(f, (round(p.x) - 10 if p.tx >= p.sx else round(p.x) - 5, round(p.y - p.z) - 8))
+                    s.blit(f, (px - 10 if p.tx >= p.sx else px - 5, py - 8))
+                else:
+                    outer, inner = ((38, 92, 66), (99, 199, 77)) if p.kind == "dark" else ((254, 174, 52), (254, 231, 97))
+                    pulse = 1 if int(real_time * 12) % 2 else 0
+                    pygame.draw.circle(s, outer, (px, py), 3 + pulse)
+                    pygame.draw.circle(s, inner, (px, py), 2)
+                    s.set_at((px, py), (255, 255, 255))
+
+    def _height(self, u: Unit) -> int:
+        """Pixel height of a unit's body above its feet (for bars and overhead icons)."""
+        art = self.art(u.look)
+        h = getattr(art, "_body_h", None)
+        if h is None:
+            r = art.frames["idle"][0].get_bounding_rect()
+            h = art._body_h = art.anchor[1] - r.top + 1
+        return h
+
+    def _lightning(self, world: World, s: pygame.Surface) -> None:
+        for b in world.bolts:
+            if b.t > b.life * 0.6 and int(b.t * 40) % 2:
+                continue
+            pts = []
+            for (x0, y0), (x1, y1) in zip(b.points, b.points[1:]):
+                n = max(2, int(math.hypot(x1 - x0, y1 - y0) / 6))
+                for i in range(n):
+                    k = i / n
+                    j = 0 if i == 0 else self.rnd.uniform(-3, 3)
+                    pts.append((round(x0 + (x1 - x0) * k), round(y0 + (y1 - y0) * k + j)))
+            pts.append((round(b.points[-1][0]), round(b.points[-1][1])))
+            if len(pts) > 1:
+                pygame.draw.lines(s, (44, 232, 245), False, [(x, y + 1) for x, y in pts], 1)
+                pygame.draw.lines(s, (255, 255, 255), False, pts, 1)
 
     def _rings(self, world: World, s: pygame.Surface) -> None:
         for r in world.rings:
@@ -344,8 +414,10 @@ class Renderer:
             if u.dead:
                 continue
             team = world.teams[u.team]
+            if u.rising > 0:
+                continue
             x = round(u.x) - 9
-            y = round(u.y) - 41
+            y = round(u.y) - self._height(u) - 6
             self._bar(s, x, y, 19, 4, u.hp / u.max_hp, u.chip / u.max_hp, team.accent,
                       ticks=int(u.max_hp // 50), real_time=real_time)
             # status pips above the bar
@@ -362,6 +434,8 @@ class Renderer:
                 icons.append((254, 231, 97))
             if u.has("taunt"):
                 icons.append((255, 255, 255))
+            if u.has("divine"):
+                icons.append((255, 241, 232))
             for i, col in enumerate(icons):
                 pygame.draw.rect(s, INK, (x + i * 4, y - 4, 4, 4))
                 pygame.draw.rect(s, col, (x + 1 + i * 4, y - 3, 2, 2))
@@ -385,13 +459,13 @@ class Renderer:
             s.blit(self.panel(158, 44, base="#181425", border=tm.color), (px, 3))
             name_x = px + 158 - 6 if right else px + 6
             self.font.draw(s, tm.name, name_x, 6, tm.light, anchor="topright" if right else "topleft")
-            alive = world.alive_count(team)
-            self.font.draw(s, f"{alive}/7", px + 6 if right else px + 158 - 6, 6, "#c0cbdc",
+            units = world.roster(team)
+            alive = sum(1 for u in units if u.alive)
+            self.font.draw(s, f"{alive}/{len(units)}", px + 6 if right else px + 158 - 6, 6, "#c0cbdc",
                            anchor="topleft" if right else "topright")
-            chip = sum(u.chip for u in world.units if u.team == team)
+            chip = sum(u.chip for u in units)
             self._bar(s, px + 5, 14, 148, 5, hp / mx, chip / mx, tm.accent, ticks=7, real_time=real_time)
             # portraits
-            units = [u for u in world.units if u.team == team]
             for i, u in enumerate(units):
                 cx = px + 5 + i * 21 if not right else px + 158 - 5 - 20 - i * 21
                 cy = 22
@@ -403,10 +477,7 @@ class Renderer:
                 border = "#ffffff" if flash else (tm.color if u.alive else "#3a4466")
                 pygame.draw.rect(s, _c(border), (cx, cy, 20, 18))
                 pygame.draw.rect(s, (38, 43, 68), (cx + 1, cy + 1, 18, 16))
-                key = f"{u.key}_{tm.key}" + ("" if u.alive else "_dead")
-                por = self.portraits[key]
-                if right:
-                    por = pygame.transform.flip(por, True, False)
+                por = self.portrait(u.look, dead=u.dead, flip=right)
                 s.blit(por, (cx + 1, cy + 1), area=pygame.Rect(0, 0, 18, 13))
                 if u.alive:
                     self._bar(s, cx + 1, cy + 14, 18, 3, u.hp / u.max_hp, u.chip / u.max_hp, tm.accent,
@@ -461,4 +532,4 @@ class Renderer:
             self.font.draw(s, "ПАУЗА", W // 2, H // 2, "#ffffff", scale=3, anchor="center")
         if speed != 1.0:
             self.font.draw(s, f"X{speed:g}", W - 4, H - 8, "#fee761", anchor="topright")
-        self.font.draw(s, "ПРОБЕЛ-ПАУЗА  R-ЗАНОВО  1-4 СКОРОСТЬ", 4, H - 8, "#5a6988")
+        self.font.draw(s, "ПРОБЕЛ-ПАУЗА  R-РЕВАНШ  M-СОСТАВ  1-4 СКОРОСТЬ", 4, H - 8, "#5a6988")

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""АВТОБИТВА: two squads of 7 fight on their own.
+"""АВТОБИТВА: two squads of up to 7 units fight on their own.
 
-    python battle.py                 # window, endless battles (new seed each round)
-    python battle.py --seed 7        # a specific battle
-    python battle.py --record b.mp4  # render a battle to video (needs ffmpeg), no window
+    python battle.py                 # squad builder, then endless battles (new faces every round)
+    python battle.py --auto          # skip the builder, fight with the last / given squads
+    python battle.py --blue knight,mage,wolf --red ogre,necromancer --auto
+    python battle.py --record b.mp4  # render one battle to video (needs ffmpeg), no window
     python battle.py --record b.gif  # ...or to an animated GIF
 
-Keys: SPACE pause, R new battle, 1-4 speed (x0.5, x1, x2, x4), F fullscreen, ESC quit.
+Battle keys: SPACE pause, R rematch, M / ESC squad builder, 1-4 speed (x0.5, x1, x2, x4), F fullscreen.
 """
 
 from __future__ import annotations
@@ -44,10 +45,22 @@ def _loading(screen, scale, font, name, i, n):
     pygame.event.pump()
 
 
+def _squad(arg):
+    from game.units import ROSTER, SQUAD_MAX
+    keys = [k.strip() for k in arg.split(",") if k.strip()]
+    bad = [k for k in keys if k not in ROSTER]
+    if bad or not keys or len(keys) > SQUAD_MAX:
+        raise argparse.ArgumentTypeError(f"1-{SQUAD_MAX} of: {', '.join(ROSTER)}")
+    return keys
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--scale", type=int, default=0, help="window scale (default: fit screen)")
+    ap.add_argument("--blue", type=_squad, help="comma separated unit keys for the left squad")
+    ap.add_argument("--red", type=_squad, help="comma separated unit keys for the right squad")
+    ap.add_argument("--auto", action="store_true", help="skip the squad builder")
     ap.add_argument("--record", metavar="FILE", help="render one battle to .mp4/.gif without a window")
     ap.add_argument("--fps", type=int, default=30, help="recording frame rate")
     ap.add_argument("--mute", action="store_true")
@@ -59,10 +72,13 @@ def main(argv=None) -> int:
         os.environ["SDL_AUDIODRIVER"] = "dummy"
     os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
     import pygame
-    from game.assets import anim_infos, ensure_unit_sheets
+    from game.assets import SpriteFactory, ensure_unit_sheets
     from game.audio import Sfx
+    from game.match import new_battle, prefetch
+    from game.menu import Menu
     from game.render import Font, Renderer
-    from game.sim import H, W, World
+    from game.sim import H, W
+    from game.units import CLASSIC
 
     pygame.init()
     pygame.display.set_caption("PixelForge - Автобитва")
@@ -75,55 +91,100 @@ def main(argv=None) -> int:
         scale = args.scale or max(1, min((info.current_w - 40) // W, (info.current_h - 80) // H))
         screen = pygame.display.set_mode((W * scale, H * scale))
     font = Font()
-    metas = ensure_unit_sheets(lambda name, i, n: _loading(screen, scale, font, name, i, n))
-    anims = {k: anim_infos(m) for k, m in metas.items()}
-    seed = args.seed if args.seed is not None else int(time.time()) % 100000
-    world = World(anims, seed)
-    renderer = Renderer(world, metas, seed)
-    logical = pygame.Surface((W, H))
-    sfx = Sfx(enabled=not (args.mute or args.record))
+    loading = lambda name, i, n: _loading(screen, scale, font, name, i, n)  # noqa: E731
+    factory = SpriteFactory(workers=1 if args.record else None)
+    try:
+        renderer = Renderer(ensure_unit_sheets(loading), seed=args.seed or 0)
+        logical = pygame.Surface((W, H))
+        seed = args.seed if args.seed is not None else int(time.time()) % 100000
+        menu = Menu(renderer)
+        if args.blue:
+            menu.squads[0] = args.blue
+        if args.red:
+            menu.squads[1] = args.red
+        if args.record:
+            world, metas = new_battle(menu.squads, seed, factory)
+            renderer.add_metas(metas)
+            return _record(args, world, renderer, logical, screen, scale)
+        return _run(args, screen, scale, font, factory, renderer, logical, menu, seed, loading, Sfx,
+                    new_battle, prefetch)
+    finally:
+        factory.close()
 
-    if args.record:
-        return _record(args, world, renderer, logical, screen, scale)
 
+def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, loading, Sfx, new_battle, prefetch):
+    import pygame
+    from game.sim import H, W
+    sfx = Sfx(enabled=not args.mute)
     clock = pygame.time.Clock()
     speed, paused, fullscreen = 1.0, False, False
     acc = 0.0
     step = 1.0 / 60.0
     real = 0.0
+    world = None
+
+    def start(new_seed):
+        w, metas = new_battle(menu.squads, new_seed, factory, loading)
+        renderer.add_metas(metas)
+        prefetch(menu.squads, new_seed + 1, factory)     # draw the next battle's faces in the background
+        return w
+
+    if args.auto:
+        world = start(seed)
     while True:
         dt = clock.tick(60) / 1000.0
         real += dt
         if args.quit_after and real > args.quit_after:
             pygame.quit()
-            print(f"ok: t={world.time:.1f}s seed={seed} sfx={'on' if sfx.ok else 'off'}")
+            where = f"battle t={world.time:.1f}s" if world else "menu"
+            print(f"ok: {where} seed={seed} sfx={'on' if sfx.ok else 'off'}")
             return 0
+        mx, my = pygame.mouse.get_pos()
+        sw, sh = screen.get_size()
+        mouse = (mx * W // max(1, sw), my * H // max(1, sh))
         for ev in pygame.event.get():
-            if ev.type == pygame.QUIT or (ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE):
+            if ev.type == pygame.QUIT:
                 pygame.quit()
                 return 0
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_f:
+                fullscreen = not fullscreen
+                flags = pygame.FULLSCREEN | pygame.SCALED if fullscreen else 0
+                screen = pygame.display.set_mode((W * scale, H * scale), flags)
+                continue
+            if world is None:
+                action = menu.handle(ev, mouse)
+                if action == "quit":
+                    pygame.quit()
+                    return 0
+                if action == "start":
+                    seed += 1
+                    world = start(seed)
+                    paused = False
+                continue
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_SPACE:
                     paused = not paused
                 elif ev.key == pygame.K_r:
                     seed += 1
-                    world = World(anims, seed)
+                    world = start(seed)
+                elif ev.key in (pygame.K_m, pygame.K_ESCAPE):
+                    world = None
                 elif ev.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
                     speed = {pygame.K_1: 0.5, pygame.K_2: 1.0, pygame.K_3: 2.0, pygame.K_4: 4.0}[ev.key]
-                elif ev.key == pygame.K_f:
-                    fullscreen = not fullscreen
-                    flags = pygame.FULLSCREEN | pygame.SCALED if fullscreen else 0
-                    screen = pygame.display.set_mode((W * scale, H * scale), flags)
-        if not paused:
-            acc += min(dt, 0.1) * speed
-            while acc >= step:
-                world.step(step)
-                acc -= step
-            sfx.play(world.sounds)
-        if world.winner is not None and world.time - world.end_time > 7.0:
-            seed += 1
-            world = World(anims, seed)
-        renderer.draw(world, logical, real, paused, speed)
+        if world is None:
+            menu.update(dt, mouse)
+            menu.draw(logical)
+        else:
+            if not paused:
+                acc += min(dt, 0.1) * speed
+                while acc >= step:
+                    world.step(step)
+                    acc -= step
+                sfx.play(world.sounds)
+            if world.winner is not None and world.time - world.end_time > 7.0:
+                seed += 1
+                world = start(seed)                       # rematch: same squads, new faces
+            renderer.draw(world, logical, real, paused, speed)
         pygame.transform.scale(logical, screen.get_size(), screen)
         pygame.display.flip()
 
@@ -192,6 +253,8 @@ def _crash(exc: BaseException) -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()   # sprite workers inside the packaged .exe
     if getattr(sys, "frozen", False):
         try:
             sys.exit(main())

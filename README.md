@@ -28,17 +28,25 @@ pyinstaller --onefile --windowed --name AutoBattle --icon build/icon.ico battle.
 
 ```bash
 pip install -r requirements.txt
-python battle.py                    # два отряда по 7 юнитов дерутся сами, бои идут один за другим
+python battle.py                    # экран сбора отрядов, затем бой; реванши идут один за другим
 python battle.py --record b.mp4     # записать бой в видео без окна
-python -m game.balance 60           # статистика баланса по 60 боям
+python -m game.balance 300 random   # баланс 17 классов на случайных составах
 ```
+
+![menu](docs/images/menu.png)
 
 ![battle](docs/images/battle.gif)
 
-Рыцарь, варвар, копейщик, орк, разбойник, лучник и маг. У каждого свои
-характеристики, способности, сильные и слабые стороны и модель поведения
-ИИ. Есть эффекты, стильные полоски здоровья и HUD. Подробно —
-в [docs/BATTLE.md](docs/BATTLE.md).
+Перед боем на экране сбора каждая сторона выбирает до 7 бойцов из 17
+классов. Классы: рыцарь, варвар, копейщик, орк, разбойник, лучник, маг,
+паладин, жрица, арбалетчик, некромант, скелет, монах, молотобоец, шаман,
+волк и огр.
+- У каждого класса свои характеристики, способности, сильные и слабые
+  стороны и модель поведения ИИ.
+- У каждого бойца в каждом бою своё лицо: внешность варьируется в
+  пределах класса.
+
+Подробно — в [docs/BATTLE.md](docs/BATTLE.md).
 
 ## Быстрый старт
 
@@ -70,7 +78,7 @@ red_team = sprite.map(lambda c: c.replace({"#ead4aa": "#e43b44"}))  # палит
 
 Параметры `HumanoidSpec`: цвета кожи/волос/одежды/обуви, причёски
 (`short|long|spiky|none`), борода, шлем (`cap|horned|hood|crown`), плащ,
-роба, оружие (`sword|axe|spear|staff|dagger|bow|None`), щит, телосложение
+роба, оружие (`sword|axe|spear|staff|dagger|bow|crossbow|mace|hammer|None`), щит, телосложение
 (`normal|stocky|slim`), размер (`size=32` → кадр 48×40, оружию и смазам
 есть куда вылетать). Готовые пресеты: `knight barbarian mage spearman rogue orc archer king`.
 

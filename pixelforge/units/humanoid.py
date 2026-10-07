@@ -42,7 +42,7 @@ class HumanoidSpec:
     helmet: Optional[ColorLike] = None
     helmet_style: str = "cap"            # cap | horned | hood | crown
     cape: Optional[ColorLike] = None
-    weapon: Optional[str] = "sword"      # sword | axe | spear | staff | dagger | bow | None
+    weapon: Optional[str] = "sword"      # sword | axe | spear | staff | dagger | bow | crossbow | mace | hammer | None
     weapon_color: ColorLike = "#c0cbdc"
     handle_color: ColorLike = "#733e39"
     magic: ColorLike = "#2ce8f5"         # staff orb, spell sparks
@@ -86,8 +86,8 @@ def build_rig(spec: HumanoidSpec) -> Rig:
 
     torso_len = {"stocky": 6.5, "slim": 7.5}.get(spec.build, 7.0) * s
     torso_w = {"stocky": 7, "slim": 5}.get(spec.build, 6) * s
-    leg_w = 3 if spec.build != "slim" else 2
-    arm_w = 2 if spec.build != "stocky" else 3
+    leg_w = round((3 if spec.build != "slim" else 2) * s)
+    arm_w = round((2 if spec.build != "stocky" else 3) * s)
 
     rig.bone("root", None, 0)
     # torso (+ hips in trouser color)
@@ -153,7 +153,7 @@ def build_rig(spec: HumanoidSpec) -> Rig:
         rig.bone(f"fore_{side}", f"upper_{side}", 4 * s, world=75, z=z + 0.1, depth=depth,
                  material=m["sleeves"], group=f"arm_{side}", shapes=[Limb(width=arm_w)])
         rig.bone(f"hand_{side}", f"fore_{side}", 0, world=75, z=z + 1, depth=depth,
-                 material=m["skin"], group=f"hand_{side}", shapes=[Blob(rx=1.5, ry=1.5, t=0)])
+                 material=m["skin"], group=f"hand_{side}", shapes=[Blob(rx=1.5 * s, ry=1.5 * s, t=0)])
 
     # legs
     for side, z, depth in (("b", 3, -1), ("f", 12, 0)):
@@ -163,7 +163,7 @@ def build_rig(spec: HumanoidSpec) -> Rig:
                  group=f"leg_{side}", shapes=[Limb(width=leg_w, t1=0.5),
                                               Limb(material=m["boots"], width=leg_w, t0=0.45, group=f"boot_{side}")])
         rig.bone(f"foot_{side}", f"shin_{side}", 2.5 * s, world=0, z=z + 0.2, depth=depth, ground=True,
-                 material=m["boots"], group=f"boot_{side}", shapes=[Limb(width=2, t0=-0.2)])
+                 material=m["boots"], group=f"boot_{side}", shapes=[Limb(width=round(2 * s), t0=-0.2)])
 
     if spec.cape is not None:
         rig.bone("cape", "torso", 9 * s, world=100, attach=0.9, offset=(-1.5, 0), z=1, material=m["cape"],
@@ -226,8 +226,55 @@ def _add_weapon(rig: Rig, spec: HumanoidSpec, m: Dict[str, Material], s: float) 
         rig.bone("bowstring", "weapon", 0, attach=0.0, z=z - 0.2, material=string, group="string",
                  shapes=[Custom(level=BASE, outline=False,
                                 fn=lambda buf, st, ink: _draw_string(buf, st, ink))])
+    elif w == "mace":
+        L = 8 * s
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=1, t0=-0.2, t1=0.85),
+            Blob(material=m["steel"], rx=2, ry=2, t=1.0, z=0.2, group="macehead"),
+            Pixels(material=m["steel"], level=LIGHT, z=0.3, group="spikes", t=1.0,
+                   points=[(0, -2.6), (2.4, 0), (-2.6, 0)]),
+        ])
+    elif w == "hammer":
+        L = 11 * s
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=1, t0=-0.2, t1=0.9),
+            Poly(material=m["steel"], group="hammerhead", z=0.2, points=[
+                (-3, -L - 1.5), (4, -L - 1.5), (4, -L + 2.5), (-3, -L + 2.5)]),
+        ])
+    elif w == "crossbow":
+        L = 9.0
+        string = Material.of("string", spec.string_color, flat=True)
+        rig.bone("weapon", "hand_f", L, world=0, z=z, material=m["wood"], shapes=[
+            Limb(width=2, t0=-0.35, t1=0.95),
+            Custom(material=m["steel"], group="prod", z=0.3, fn=lambda buf, st, ink: _draw_prod(buf, st, ink)),
+            Custom(material=string, group="string", z=0.25, level=BASE, outline=False,
+                   fn=lambda buf, st, ink: _draw_xbow_string(buf, st, ink)),
+        ])
+        rig.bone("bolt", "weapon", 6, world=0, attach=0.35, offset=(0, -1), z=z + 0.4, material=m["steel"],
+                 group="bolt", shapes=[Limb(width=1, t0=0.0, t1=1.0)])
     else:
         raise ValueError(f"unknown weapon {w!r}")
+
+
+def _prod_points(st):
+    pts = []
+    for i in range(7):
+        u = -1 + i / 3
+        pts.append(st.point(0.92, (1.6 * (1 - u * u), 5.0 * u)))
+    return pts
+
+
+def _draw_prod(buf, st, ink):
+    pts = _prod_points(st)
+    for a, b in zip(pts, pts[1:]):
+        buf.line(math.floor(a[0]), math.floor(a[1]), math.floor(b[0]), math.floor(b[1]), ink)
+
+
+def _draw_xbow_string(buf, st, ink):
+    pts = _prod_points(st)
+    latch = st.point(0.4)
+    for tip in (pts[0], pts[-1]):
+        buf.line(math.floor(tip[0]), math.floor(tip[1]), math.floor(latch[0]), math.floor(latch[1]), ink)
 
 
 BOW_LEN = 13.0     # tip to tip
@@ -279,7 +326,7 @@ def _base(spec: HumanoidSpec) -> Pose:
         "thigh_f": 80, "shin_f": 95, "thigh_b": 100, "shin_b": 100,
         "foot_f": 0, "foot_b": 0,
         "hand_f": 20, "hand_b": 70,
-        "weapon": {"spear": -80, "bow": -75}.get(spec.weapon, -60),
+        "weapon": {"spear": -80, "bow": -75, "crossbow": -35}.get(spec.weapon, -60),
         "cape": 105,
     }, ground=ground_row(spec))
 
@@ -382,9 +429,55 @@ def bow_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
     return [nock, draw, release, follow, settle]
 
 
+def crossbow_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
+    """Shoulder & aim (held) -> release (``hit``) with recoil -> crank the string back -> settle."""
+    base = _base(spec)
+    stance = dict(thigh_f=72, shin_f=88, thigh_b=108, shin_b=108, foot_f=0, foot_b=0)
+    aim = _with(base, torso=-90, upper_f=-2, fore_f=-2, hand_f=0, weapon=0,
+                upper_b=40, fore_b=-15, hand_b=0, **stance)
+    aim.duration = 300
+    fire = _with(aim, torso=-96, weapon=-10, hand_f=-10)
+    fire.shift, fire.duration, fire.events = (-1, 0), 70, ["hit"]
+    fire.hidden = frozenset({"bolt"})
+    crank1 = _with(base, torso=-80, upper_f=50, fore_f=60, hand_f=60, weapon=70,
+                   upper_b=70, fore_b=10, hand_b=10, **stance)
+    crank1.hidden, crank1.duration = frozenset({"bolt"}), 200
+    crank2 = _with(crank1, upper_b=100, fore_b=40)
+    crank2.hidden, crank2.duration = frozenset({"bolt"}), 200
+    settle = base.copy(duration=140)
+    return [aim, fire, crank1, crank2, settle]
+
+
+def fist_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
+    """Unarmed jab: chamber the fist (held) -> straight punch (``hit``) -> recoil."""
+    base = _base(spec)
+    stance = dict(thigh_f=62, shin_f=82, thigh_b=112, shin_b=118, foot_f=0, foot_b=0)
+    guard = _with(base, torso=-95, upper_f=120, fore_f=-40, hand_f=-40, upper_b=60, fore_b=-60, hand_b=-60, **stance)
+    guard.shift, guard.duration = (-1, 0), 180
+    jab = _with(guard, torso=-72, upper_f=-5, fore_f=-5, hand_f=0, upper_b=110, fore_b=-20)
+    jab.shift, jab.duration, jab.events = (2, 0), 160, ["hit"]
+
+    def streak(buf, states, rig_):
+        from ..shading import Ink
+        hx, hy = states["hand_f"].start
+        mat = Material.of("swish", "#ffffff", flat=True)
+        ink = Ink(mat, "swish", 50, level=BASE, contour=False, outline=False)
+        for dy in (-1, 1):
+            buf.line(math.floor(hx) - 8, math.floor(hy) + dy, math.floor(hx) - 3, math.floor(hy) + dy, ink)
+    jab.fx = [streak]
+    hold = jab.copy(fx=[], events=[], duration=120)
+    recover = rig.lerp(hold, base, 0.5)
+    recover.ground, recover.duration = base.ground, 120
+    return [guard, jab, hold, recover]
+
+
 def attack_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
     if spec.weapon == "bow":
         return bow_poses(spec, rig)
+    if spec.weapon == "crossbow":
+        return crossbow_poses(spec, rig)
+    if spec.weapon is None:
+        return fist_poses(spec, rig)
     base = _base(spec)
     m = _materials(spec)
     smear_mat = Material.from_ramp("smear", [mix(spec.weapon_color, "#ffffff", t) for t in (0, .3, .55, .8, 1)])
