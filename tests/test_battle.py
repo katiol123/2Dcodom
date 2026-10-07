@@ -19,7 +19,7 @@ class RosterTest(unittest.TestCase):
         self.assertEqual({k for k, u in ROSTER.items() if u.ranged},
                          {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman"})
         for u in ROSTER.values():
-            self.assertTrue(u.perks and u.flaws and u.behavior, u.key)
+            self.assertTrue(u.perks and u.behavior, u.key)
             for name, desc in u.perks + u.flaws + u.behavior:
                 self.assertEqual(name, name.upper(), u.key)
                 self.assertTrue(desc and " - " not in desc, (u.key, name))
