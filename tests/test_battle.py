@@ -14,10 +14,12 @@ def run(w, limit=180.0):
 
 class RosterTest(unittest.TestCase):
     def test_roster(self):
-        self.assertEqual(len(ALL), 22)
+        self.assertEqual(len(ALL), 56)
         self.assertEqual(len(CLASSIC), 7)
         self.assertEqual({k for k, u in ROSTER.items() if u.ranged},
-                         {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman", "goblin_shaman"})
+                         {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman", "goblin_shaman",
+                          "ranger", "dryad", "druid", "banshee", "horse_archer", "ice_witch", "frost_giant",
+                          "alchemist", "rune_priest", "slinger"})
         for u in ROSTER.values():
             self.assertTrue(u.perks and u.behavior, u.key)
             for name, desc in u.perks + u.flaws + u.behavior:
@@ -97,17 +99,24 @@ class BattleTest(unittest.TestCase):
         w.deal(None, pal, 10_000, "magic")
         self.assertTrue(pal.dead)
 
-    def test_spearman_counters_only_a_charge_at_him(self):
+    def test_spearman_counters_any_charge_in_reach(self):
         from game import ai
         w = headless_world([["spearman", "archer"], ["barbarian"]], 1)
         w.time = 1.0
-        spear, archer = w.units[0], w.units[1]
+        spear = next(u for u in w.units if u.key == "spearman")
+        archer = next(u for u in w.units if u.key == "archer")
         barb = next(u for u in w.units if u.key == "barbarian")
         barb.x, barb.y = spear.x + 30, spear.y
-        barb.status["charge"] = 1.0
-        barb.target = archer                       # rushing past him at someone else: no brace
+        barb.target = archer
+        self.assertFalse(ai._try_abilities(w, spear))   # not rushing: nothing to counter
+        barb.status["charge"] = 1.0                # rushing past him at the archer: still caught
+        self.assertTrue(ai._try_abilities(w, spear))
+        spear.action = None
+        spear.cd = 0.0
+        barb.x = spear.x + 90                      # out of reach: no counter
         self.assertFalse(ai._try_abilities(w, spear))
-        barb.target = spear                        # rushing at him: brace and counter
+        barb.x = spear.x + 30
+        barb.target = spear
         self.assertTrue(ai._try_abilities(w, spear))
         self.assertTrue(spear.action["counter"])
         x0, hp0 = barb.x, barb.hp
@@ -176,11 +185,11 @@ class BattleTest(unittest.TestCase):
     def test_every_class_contributes(self):
         dealt = {k: 0.0 for k in ALL}
         rng = random.Random(3)
-        for seed in range(10):
+        for seed in range(30):
             w = run(headless_world([random_squad(rng), random_squad(rng)], seed))
             for u in w.units:
                 if not u.summoned:
-                    dealt[u.key] += u.dealt + u.healed
+                    dealt[u.base_key] += u.dealt + u.healed
         for k in ALL:
             if not ROSTER[k].boss:                     # bosses are never in random squads
                 self.assertGreater(dealt[k], 0, k)
@@ -301,6 +310,88 @@ class GoblinTest(unittest.TestCase):
         for _ in range(100):
             mad.hp = mad.max_hp
             self.assertGreater(w.deal(knight, mad, 10, "physical"), 0)
+
+
+class RealmUnitsTest(unittest.TestCase):
+    def test_prices_follow_power_tiers(self):
+        avg = lambda tier: sum(u.cost for u in ROSTER.values() if u.tier == tier) / max(
+            1, sum(1 for u in ROSTER.values() if u.tier == tier))
+        self.assertLess(avg("weak"), avg("below"))
+        self.assertLess(avg("below"), avg("average"))
+        self.assertLess(avg("average"), avg("above"))
+        cheap = [k for k in ALL if ROSTER[k].cost <= 50]
+        self.assertGreaterEqual(len(cheap), 5, cheap)
+        for u in ROSTER.values():
+            self.assertGreater(u.upkeep, 0)
+
+    def test_cornered_shooter_fights_back(self):
+        from game import ai
+        from game.sim import FIELD
+        w = headless_world([["shaman"], ["barbarian"]], 1)
+        w.time = 1.0
+        sh = next(u for u in w.units if u.key == "shaman")
+        barb = next(u for u in w.units if u.key == "barbarian")
+        sh.x, sh.y = FIELD[0], FIELD[1]            # in the corner
+        barb.x, barb.y = sh.x + 12, sh.y + 2
+        barb.target = sh
+        sh.target = barb
+        shots = 0
+        for _ in range(240):
+            barb.cd = 99.0                         # keep the barbarian from killing it
+            w.step(1 / 60)
+            shots += sh.action is not None and sh.action["kind"] == "shot"
+        self.assertGreater(shots, 0)
+
+    def test_harpoon_pulls_a_shooter(self):
+        from game import ai
+        w = headless_world([["harpooner"], ["archer", "knight"]], 1)
+        w.time = 1.0
+        h = next(u for u in w.units if u.key == "harpooner")
+        a = next(u for u in w.units if u.key == "archer")
+        a.x, a.y = h.x + 90, h.y
+        h.facing = 1
+        self.assertTrue(ai._try_abilities(w, h))
+        ai.resolve_action(w, h, h.action)
+        self.assertLess(abs(a.x - h.x), 20)
+        self.assertTrue(a.has("stun") or a.dead)
+
+    def test_druid_turns_into_a_bear_once(self):
+        from game import ai
+        w = headless_world([["druid"], ["knight"]], 1)
+        w.time = 1.0
+        d = w.units[0] if w.units[0].base_key == "druid" else w.units[1]
+        d.hp = d.max_hp * 0.3
+        ai.passives(w, d)
+        self.assertEqual(d.key, "bear")
+        self.assertEqual(d.base_key, "druid")
+        self.assertGreater(d.hp / d.max_hp, 0.6)
+
+    def test_valkyrie_brings_back_a_fallen_ally(self):
+        from game import ai
+        w = headless_world([["valkyrie", "archer"], ["knight"]], 1)
+        w.time = 5.0
+        v = next(u for u in w.units if u.key == "valkyrie")
+        a = next(u for u in w.units if u.key == "archer")
+        w.kill(a, None)
+        w.time = 7.0
+        a.x, a.y = v.x + 5, v.y
+        self.assertTrue(ai._try_abilities(w, v))
+        ai.resolve_action(w, v, v.action)
+        self.assertTrue(a.alive)
+        self.assertAlmostEqual(a.hp, a.max_hp * 0.4)
+        self.assertIsNone(ai._valk_body(w, v))          # only once per battle
+
+    def test_bomber_blast_ignores_shields(self):
+        from game import ai
+        w = headless_world([["goblin_bomber"], ["knight"]], 1)
+        w.time = 1.0
+        b = next(u for u in w.units if u.key == "goblin_bomber")
+        k = next(u for u in w.units if u.key == "knight")
+        k.x, k.y, k.facing = b.x + 8, b.y, -1
+        hp = k.hp
+        ai.explode(w, b, 1.0)
+        self.assertTrue(b.dead)
+        self.assertGreater(hp - k.hp, ROSTER["goblin_bomber"].damage[0] * 0.9)
 
 
 class FactoryTest(unittest.TestCase):

@@ -589,8 +589,9 @@ class WorldMapScreen:
             if unit_exists(key):
                 por = self.r.portrait(f"{key}_{team.key}")
                 s.blit(por, (box.x + 1, box.y + 1), area=pygame.Rect(0, 0, 18, 13))
+                from .units import ROSTER
                 font.draw(s, unit_name(key), box.right + 4, y + 1, "#ffffff")
-                font.draw(s, unit_role(key), box.right + 4, y + 8, "#8b9bb4")
+                font.draw(s, f"{unit_role(key)}  {ROSTER[key].cost} ЗОЛ.", box.right + 4, y + 8, "#8b9bb4")
             else:
                 font.draw(s, "?", box.centerx, box.centery, "#5a6988", anchor="center")
                 font.draw(s, unit_name(key), box.right + 4, y + 1, "#c0cbdc")

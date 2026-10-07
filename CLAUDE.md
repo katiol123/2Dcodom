@@ -7,10 +7,13 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - `python -m pixelforge build out` — render all presets to `out/` (~10s); `out/` is gitignored
 - `python -m pixelforge unit <preset|random:SEED> out`
 - `python battle.py` — auto-battle demo (pygame); `--record x.mp4` renders headless; `--seed N`
-- `python -m game.balance 300 random` — per-class win rates on random squads; run after any stat/AI change
-  (aim: every class ~41-60%, 30-50 s fights;
-  goblin is meant below average ~38%, wolf rider above ~58%; `boss=True` classes (troll) are excluded from random
-  squads and from the report); `python -m game.balance 40` — classic mirror (~50/50)
+- `python -m game.balance 2000 random` — per-class win rates on random squads; run after any stat/AI change.
+  Every class has an intended `tier` (weak / below / average / above / boss) chosen *before* its stats; the
+  report flags classes outside their tier's aim (`TIER_AIM` in balance.py: weak ~28-40%, average 43-57%,
+  above 53-65%). Bosses (troll) are excluded. `python -m game.balance 40` — classic mirror (~50/50)
+- Hire price / upkeep (`PRICES` in units.py) come from those measured win rates (formula in the comment);
+  re-derive them after big balance changes. Cheap weak units (militia, slinger, zombie, war dog, goblins) exist
+  so realms short of gold can still hire.
 
 ## Battle game (game/)
 - `sim.py`/`ai.py` must stay pygame-free (tests and balance run headless). Rendering only in `render.py`.
@@ -20,7 +23,12 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   ones in worker processes and prefetches the next battle. Tests/balance use `match.headless_world` (seed-0 timings).
 - Summons (skeletons, nest goblins, rider who survives) need a sheet: list them in `SUMMONS` (assets.py) by owner,
   then `world.summon(owner, x, y, key)`. After 90 s healing fades out (`FATIGUE_AT` in sim.py) to end stalemates.
-- New class: `UnitType` in `ROSTER` + `TRAITS` entry + branch in `look_for` + behaviour in `ai.py`, then rebalance.
+- New class: `UnitType` in `ROSTER` (set `tier` first) + `TRAITS` entry + branch in `look_for` + behaviour in
+  `ai.py` (per-unit hooks: `NEW_PASSIVES`, `NEW_ABILITIES`, `NEW_ACTIONS`, `_new_melee_mods/_after`), then rebalance
+  and add it to some city pools in factions.py. Damage modifiers are data: `missile_mult`, `physical_mult`,
+  `magic_mult`, `fire_mult`, `immune`, `incorporeal`, `shield`. `Unit.base_key` is the hired class (druid -> bear).
+- Charges (`status["charge"]`) are countered by `COUNTERS` (spearman, halberdier, militia) whenever the rusher
+  comes within reach, not only when it targets them. Cornered shooters (`cornered`) stop kiting and shoot.
 - Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait
   per entry, `("NAME", "short description")`; keep them true to the mechanics. Menu shows them in that order.
   Plain stats (HP, armor, speed, damage, range, cooldown, dodge) are shown as stats, never as traits.

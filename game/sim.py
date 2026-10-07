@@ -19,7 +19,7 @@ from .units import ROSTER, TEAMS, Team, UnitType
 W, H = 480, 270
 FIELD = (16.0, 150.0, 464.0, 256.0)   # x0, y0, x1, y1 for unit feet
 COUNTDOWN = 2.6
-SUMMON_HP = 130
+SUMMON_HP = 100
 REVIVE_DELAY = 2.5
 FATIGUE_AT, FATIGUE_SPAN = 90.0, 45.0   # healing fades to zero between 90 and 135 s (no endless stalemates)
 
@@ -116,7 +116,13 @@ TRAILS = {
     "dark": ["#63c74d", "#265c42", "#68386c", "#181425"],
     "holy": ["#fee761", "#ffffff", "#ead4aa"],
     "spore": ["#b55088", "#a7f070", "#68386c"],
+    "thorn": ["#63c74d", "#a7f070", "#265c42"],
+    "wailorb": ["#c0cbdc", "#ffffff", "#73eff7"],
+    "frost": ["#73eff7", "#ffffff", "#41a6f6"],
+    "rune": ["#2ce8f5", "#41a6f6", "#ffffff"],
+    "web": ["#ffffff", "#c0cbdc"],
 }
+ARCED = ("arrow", "bolt", "stone", "boulder", "flask_fire", "flask_acid")
 
 
 # --- units --------------------------------------------------------------------------
@@ -130,6 +136,7 @@ class Unit:
         self.id = Unit._ids
         self.type = utype
         self.key = utype.key
+        self.base_key = utype.key     # class as hired (the druid stays a druid even as a bear)
         self.team = team
         self.team_key = TEAMS[team].key
         self.look = look
@@ -181,7 +188,13 @@ class Unit:
         self.kicked = False           # flying off the field after a troll's kick
         self.kvx = self.kvz = self.kz = 0.0
         self.spin = 0.0
-        self.hop = 0.0                # >0 while jumping out of the troll's nest
+        self.hop = 0.0                # >0 while jumping out of the troll's nest / landing from a dive
+        self.fear_src = (0.0, 0.0)    # where the scream came from (fleeing units run away from it)
+        self.last_target: Optional["Unit"] = None   # duelist's lunge: the first hit on a new target
+        self.once: set = set()        # one-per-battle abilities already used (bats, rampage, shape, valhalla)
+        self.exploded = False         # goblin bomber went off
+        self.kite_pos = (x, y)        # shooters notice when running away gets them nowhere (cornered)
+        self.stuck = 0.0
         self.bias = random.random()   # replaced by world rng
 
     # convenience
@@ -197,7 +210,15 @@ class Unit:
         return self.status.get(s, 0.0) > 0
 
     def speed(self) -> float:
+        if self.has("root"):
+            return 0.0
         v = self.type.speed
+        if self.has("rhythm"):
+            v *= 1.15
+        if self.has("rampage"):
+            v *= 1.5
+        if self.has("bats"):
+            v *= 1.8
         if self.has("slow"):
             v *= 0.5
         if self.has("charge"):
@@ -211,7 +232,10 @@ class Unit:
         return v
 
     def cooldown(self) -> float:
-        return self.type.cooldown * (0.6 if (self.rage or self.has("frenzy")) else 1.0)
+        k = 0.6 if (self.rage or self.has("frenzy")) else 1.0
+        if self.has("rhythm"):
+            k *= 0.85
+        return self.type.cooldown * k
 
     def set_anim(self, name: str, speed: float = 1.0, restart: bool = False) -> None:
         if name not in self.anims:
@@ -351,13 +375,16 @@ class World:
     # --- combat -------------------------------------------------------------------
     def deal(self, src: Optional[Unit], dst: Unit, amount: float, dtype: str, *, crit: bool = False,
              ranged: bool = False, source_xy: Optional[Tuple[float, float]] = None, quiet: bool = False,
-             label: Optional[str] = None, pierce: bool = False) -> float:
-        """Apply damage. dtype: physical | magic | holy | burn | bleed | poison."""
+             label: Optional[str] = None, pierce: bool = False, fire: bool = False, unblockable: bool = False,
+             riposte: bool = False) -> float:
+        """Apply damage. dtype: physical | magic | holy | burn | bleed | poison.
+        ``fire`` marks fire damage (fireballs, fire flasks, the fire dervish); ``unblockable`` ignores
+        shields (halberd hook)."""
         if dst.dead:
             return 0.0
-        if dst.has("divine"):
+        if dst.has("divine") or dst.has("bats"):
             if not quiet:
-                self.text(dst, "ЩИТ", "#fee761")
+                self.text(dst, "ЩИТ" if dst.has("divine") else "МИМО", "#fee761" if dst.has("divine") else "#c0cbdc")
             return 0.0
         stunned = dst.has("stun")
         sx = source_xy[0] if source_xy else (src.x if src else dst.x)
@@ -365,9 +392,22 @@ class World:
         if dodgeable and not stunned and not dst.has("stupor") and self.rng.random() < dst.type.dodge:
             self.text(dst, "УКЛОН", "#c0cbdc")
             self.sounds.append("dodge")
+            if dst.key == "bladedancer":
+                dst.cd = 0.0                      # the dance: a dodge flows straight into a strike
+            return 0.0
+        # duelist: parry a melee blow from the front and answer it
+        if (dst.key == "duelist" and src is not None and not ranged and dtype == "physical" and not riposte
+                and not stunned and (sx - dst.x) * dst.facing >= -2 and self.rng.random() < 0.3):
+            self.text(dst, "ПАРИРОВАНИЕ", "#2ce8f5")
+            self.vfx.append(Vfx("hit_spark", dst.x + dst.facing * 7, dst.y - 16))
+            self.sounds.append("block")
+            if src.alive:
+                lo, hi = dst.type.damage
+                self.deal(dst, src, self.rng.uniform(lo, hi), "physical", label="ОТВЕТ", riposte=True)
             return 0.0
         # shield / axe block (knight, mad goblin): only from the front; crossbow bolts punch through
-        if dst.type.shield and dtype == "physical" and not stunned and not pierce and not dst.has("stupor"):
+        if (dst.type.shield and dtype == "physical" and not stunned and not pierce and not unblockable
+                and not dst.has("stupor")):
             vs_missile, vs_melee, kept = dst.type.shield
             front = (sx - dst.x) * dst.facing >= -2
             if front and self.rng.random() < (vs_missile if ranged else vs_melee):
@@ -386,8 +426,21 @@ class World:
         blunt = bool(src is not None and src.type.blunt and dtype == "physical" and not ranged)
         if dst.type.undead and (blunt or dtype == "holy"):
             mult *= 1.5
+        t = dst.type
         if dtype == "physical":
-            red = dst.type.armor * (0.25 if pierce else 0.7 if blunt else 1.0)
+            mult *= t.physical_mult * (t.missile_mult if ranged else 1.0)
+        elif dtype in ("magic", "holy"):
+            mult *= t.magic_mult
+        if fire or dtype == "burn":
+            mult *= t.fire_mult
+        if dst.has("rune"):
+            mult *= 0.65
+        if ranged and dtype == "physical" and dst.ranged and any(
+                a.key == "shieldbearer" and math.hypot(a.x - dst.x, a.y - dst.y) < 40 for a in self.allies(dst)):
+            mult *= 0.7                            # shieldbearer's cover
+        if dtype == "physical":
+            armor = t.armor * (0.5 if dst.has("corrode") else 1.0)
+            red = armor * (0.25 if pierce else 0.7 if blunt else 1.0)
         elif dtype in ("magic", "holy"):
             red = dst.type.resist
         else:
@@ -405,6 +458,8 @@ class World:
             src.dealt += dmg
             if src.rage and dtype == "physical" and not ranged:
                 self.heal(src, src, dmg * 0.25, quiet=True)
+            if not ranged and src.key in ("death_knight", "vampire") and dtype in ("physical", "magic"):
+                self.heal(src, src, dmg * (0.3 if src.key == "death_knight" else 0.4), quiet=True)
         if not quiet:
             col = {"magic": "#c08cff", "holy": "#fee761", "burn": "#feae34", "bleed": "#f6757a",
                    "poison": "#a7f070"}.get(dtype, "#ffffff")
@@ -462,6 +517,8 @@ class World:
             if g is not None:
                 g.hop = 0.45
                 self.text(g, "НАЕЗДНИК ЖИВ!", "#a7f070", big=True)
+        if u.key == "goblin_bomber" and not u.exploded:
+            ai.explode(self, u, 0.5)
         # skeletons get back up unless smashed (blunt) or purified (holy)
         if u.key == "skeleton" and not u.revived and not (u.last_blunt or u.last_dtype == "holy"):
             u.revive_at = self.time + REVIVE_DELAY
@@ -585,8 +642,12 @@ class World:
             self._tick(u)
             if u.dead:
                 return
+        for st in u.type.immune:
+            u.status.pop(st, None)
         ai.passives(self, u)
-        if u.has("stun"):
+        if u.dead:
+            return
+        if u.has("stun") or u.has("freeze"):
             u.action = None
             u.set_anim("hurt", 0.0)
             u.anim_t = 0.08     # recoil frame, frozen
@@ -608,8 +669,9 @@ class World:
                 u.action = None
                 u.set_anim("idle")
             else:
-                u.vx *= 0.8
-                u.vy *= 0.8
+                if not a.get("moving"):           # horse archers keep riding while they shoot
+                    u.vx *= 0.8
+                    u.vy *= 0.8
                 return
 
         ai.think(self, u, dt)
@@ -670,7 +732,11 @@ class World:
     def _separate(self, dt: float) -> None:
         alive = [u for u in self.units if u.alive]
         for i, a in enumerate(alive):
+            if a.type.incorporeal:
+                continue
             for b in alive[i + 1:]:
+                if b.type.incorporeal:
+                    continue
                 dx, dy = b.x - a.x, (b.y - a.y) * 1.6
                 d = math.hypot(dx, dy)
                 min_d = a.type.radius + b.type.radius
@@ -692,16 +758,17 @@ class World:
             u.y = min(FIELD[3], max(FIELD[1], u.y))
 
     # --- projectiles -----------------------------------------------------------------
-    def shoot_arrow(self, u: Unit, target: Unit, dmg_mult: float = 1.0, spread: float = 0.0) -> None:
-        sx, sy, sz = u.x + u.facing * 10, u.y, 19.0
+    def shoot_arrow(self, u: Unit, target: Unit, dmg_mult: float = 1.0, spread: float = 0.0,
+                    damage: Optional[float] = None, sz: float = 19.0) -> None:
+        sx, sy = u.x + u.facing * 10, u.y
         dist = math.hypot(target.x - sx, target.y - sy)
         dur = 0.18 + dist / 270.0
         # lead the target, with a bit of human error
         tx = target.x + target.vx * dur * 0.85 + self.rng.uniform(-3, 3) + spread
         ty = target.y + target.vy * dur * 0.85 + self.rng.uniform(-2, 2)
         lo, hi = u.type.damage
-        crit = self.rng.random() < 0.2
-        dmg = self.rng.uniform(lo, hi) * dmg_mult * (2.0 if crit else 1.0)
+        crit = self.rng.random() < 0.2 and u.key == "archer"
+        dmg = (self.rng.uniform(lo, hi) if damage is None else damage) * dmg_mult * (2.0 if crit else 1.0)
         self.projectiles.append(Projectile("arrow", u, sx, sy, sz, tx, ty, dur, dmg, crit, target,
                                            arc=min(40.0, dist * 0.16)))
         self.sounds.append("bow")
@@ -729,6 +796,17 @@ class World:
                                            False, target))
         self.sounds.append("fireball" if kind == "fireball" else "nova")
 
+    def throw(self, u: Unit, target: Unit, kind: str, damage: float) -> None:
+        """Lobbed missile (frost giant's boulder, alchemist's flasks): high arc, area damage on landing."""
+        sx, sy, sz = u.x + u.facing * 8, u.y, {"boulder": 30.0, "stone": 22.0}.get(kind, 26.0)
+        dist = math.hypot(target.x - sx, target.y - sy)
+        dur = (0.2 + dist / 300.0) if kind == "stone" else (0.35 + dist / 230.0)
+        tx = target.x + target.vx * dur * 0.7
+        ty = target.y + target.vy * dur * 0.7
+        self.projectiles.append(Projectile(kind, u, sx, sy, sz, tx, ty, dur, damage, False, target,
+                                           arc=min(30.0, dist * 0.12) if kind == "stone" else min(60.0, 18 + dist * 0.25)))
+        self.sounds.append("bow")
+
     def cast_fireball(self, u: Unit, target: Unit) -> None:
         self.cast_orb(u, target, "fireball")
 
@@ -743,7 +821,7 @@ class World:
             ox, oy = p.x, p.y - p.z
             p.x = p.sx + (p.tx - p.sx) * k
             p.y = p.sy + (p.ty - p.sy) * k
-            if p.kind in ("arrow", "bolt"):
+            if p.kind in ARCED:
                 p.z = p.sz + (10.0 - p.sz) * k + p.arc * 4 * k * (1 - k)
             else:
                 p.z = p.sz + (14.0 - p.sz) * k
@@ -765,7 +843,7 @@ class World:
 
     def _impact(self, p: Projectile) -> None:
         owner = p.owner
-        if p.kind in ("arrow", "bolt"):
+        if p.kind in ("arrow", "bolt", "stone"):
             v = self._victim_at(p)
             if v is not None:
                 self.deal(owner, v, p.damage, "physical", crit=p.crit, ranged=True, source_xy=(p.sx, p.sy),
@@ -773,9 +851,15 @@ class World:
                 self.vfx.append(Vfx("hit_spark", v.x, v.y - 18))
                 if p.kind == "bolt" and v.alive:
                     v.x += 4 if p.tx > p.sx else -4      # heavy bolt knocks back
+                if p.kind == "stone" and v.alive and self.rng.random() < 0.15:
+                    ai._stun(self, v, 0.5)
+            elif p.kind == "stone":
+                self.burst(p.x, p.y, 0, "#8b9bb4", n=3, speed=20, up=20, life=0.3)
             else:
                 self.decals.append(Decal("arrow", p.x, p.y, p.angle))
                 self.burst(p.x, p.y, 0, "#b86f50", n=3, speed=20, up=20, life=0.3)
+        elif p.kind in ("boulder", "flask_fire", "flask_acid"):
+            ai.land(self, p)
         elif p.kind == "fireball":
             self.vfx.append(Vfx("explosion", p.x, p.y - 14))
             self.decals.append(Decal("scorch", p.x, p.y))
@@ -787,7 +871,7 @@ class World:
                     d = math.hypot(u.x - p.x, (u.y - p.y) * 1.5)
                     if d < 26:
                         k = 1.0 if d < 9 else 0.6
-                        self.deal(owner, u, p.damage * k, "magic", source_xy=(p.x, p.y))
+                        self.deal(owner, u, p.damage * k, "magic", source_xy=(p.x, p.y), fire=True)
                         u.status["burn"] = 3.0
                         if u.alive and not u.ranged:
                             u.x += (u.x - p.x) / (d + 0.1) * 4
@@ -796,8 +880,15 @@ class World:
             color = TRAILS[p.kind][0]
             self.burst(p.x, p.y, 14, color, n=12, speed=60, up=60, life=0.45)
             self.rings.append(Ring(p.x, p.y, 2, 12, color, 0.3))
+            if v is not None and p.kind == "web":
+                v.status["root"] = 2.5
+                v.status["slow"] = max(v.status.get("slow", 0.0), 2.5)
+                self.text(v, "ПАУТИНА!", "#ffffff", big=True)
+                return
             if v is not None:
                 dealt = self.deal(owner, v, p.damage, "holy" if p.kind == "holy" else "magic", source_xy=(p.sx, p.sy))
+                if p.kind in ("frost", "wailorb") and v.alive:
+                    v.status["slow"] = max(v.status.get("slow", 0.0), 2.0 if p.kind == "frost" else 1.0)
                 if p.kind == "spore" and v.alive and not v.type.undead:
                     v.status["poison"] = max(v.status.get("poison", 0.0), 3.0)
                 if p.kind == "dark" and owner.alive and dealt > 0:

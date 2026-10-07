@@ -30,7 +30,7 @@ class HumanoidSpec:
     skin: ColorLike = "#e8b796"
     eye: ColorLike = "#181425"
     hair: Optional[ColorLike] = "#733e39"
-    hair_style: str = "short"            # short | long | spiky | none
+    hair_style: str = "short"            # short | long | spiky | leaves | none
     beard: Optional[ColorLike] = None
     top: ColorLike = "#124e89"           # tunic / armor / robe
     top_shiny: bool = False              # metal armor
@@ -40,19 +40,27 @@ class HumanoidSpec:
     boots: ColorLike = "#3e2731"
     robe: bool = False                   # long robe instead of trousers
     helmet: Optional[ColorLike] = None
-    helmet_style: str = "cap"            # cap | horned | hood | crown
+    helmet_style: str = "cap"            # cap | horned | hood | crown | winged | plume | turban
     cape: Optional[ColorLike] = None
     weapon: Optional[str] = "sword"      # sword | axe | greataxe | spear | staff | mushroom | dagger | bow |
-                                         # crossbow | mace | hammer | club | None
+                                         # crossbow | mace | hammer | club | halberd | saber | rapier |
+                                         # scythe | flask | bomb | sticks | sling | harpoon | None
+    offhand: Optional[str] = None        # second weapon in the back hand: sword | dagger | saber
     weapon_color: ColorLike = "#c0cbdc"
     handle_color: ColorLike = "#733e39"
     magic: ColorLike = "#2ce8f5"         # staff orb, spell sparks
     string_color: ColorLike = "#ead4aa"  # bow string / fletching
     shield: Optional[ColorLike] = None
+    big_shield: bool = False             # tall tower shield instead of a round one
     build: str = "normal"                # normal | stocky | slim
     goblin: bool = False                 # long pointed ears + hooked nose
     tusks: Optional[ColorLike] = None    # two tusks from the lower jaw (trolls, orcs)
     passengers: Optional[ColorLike] = None   # little goblins living on the head/shoulder (skin color)
+    drum: Optional[ColorLike] = None     # war drum hanging in front of the belly
+    wings: Optional[ColorLike] = None    # feathered wings on the back (they flap)
+    ghost: bool = False                  # no legs: a ragged robe hem floating above the ground
+    lean: float = 0.0                    # degrees the torso leans forward in every pose (hunched ghouls)
+    claws: bool = False                  # bony claws on both hands
     size: int = 32
     outline: str = "selout"
 
@@ -107,10 +115,24 @@ def build_rig(spec: HumanoidSpec) -> Rig:
     if spec.belt is not None:
         torso.shapes.append(Limb(material=m["belt"], width=torso_w, t0=0.22, t1=0.22, z=0.05,
                                  group="belt", level=BASE))
-    if spec.robe:
+    if spec.robe and spec.ghost:
+        # ragged hem, no legs underneath
+        torso.shapes.append(Poly(material=m["top"], z=0.2, group="torso", points=[
+            (-torso_w / 2, -torso_len * 0.3), (torso_w / 2, -torso_len * 0.3), (torso_w / 2 + 3, 10 * s),
+            (torso_w / 2 + 1, 8 * s), (0.5, 10.5 * s), (-1.5, 8 * s), (-torso_w / 2 - 2.5, 10 * s)]))
+    elif spec.robe:
         torso.shapes.append(Poly(material=m["top"], z=0.2, group="torso", points=[
             (-torso_w / 2, -torso_len * 0.3), (torso_w / 2, -torso_len * 0.3),
             (torso_w / 2 + 2.5, 9), (-torso_w / 2 - 1.5, 9)]))
+    if spec.drum is not None:
+        hide = Material.of("hide", "#ead4aa")
+        drum = Material.of("drum", spec.drum)
+        torso.shapes.append(Blob(material=drum, rx=3.5 * s, ry=3 * s, t=0.35, offset=(4 * s, 0), z=15,
+                                 group="drum"))
+        torso.shapes.append(Limb(material=hide, width=2, t0=0.2, t1=0.5, z=15.2, group="drumhead", level=LIGHT))
+        torso.shapes[-1] = Poly(material=hide, z=15.2, group="drumhead", points=[
+            (6.5 * s, -torso_len * 0.35 - 2.5 * s), (7.5 * s, -torso_len * 0.35 - 2.5 * s),
+            (7.5 * s, -torso_len * 0.35 + 2.5 * s), (6.5 * s, -torso_len * 0.35 + 2.5 * s)])
 
     rig.bone("neck", "torso", 1.5 * s, angle=0)
     head = rig.bone("head", "neck", 0, angle=0, material=m["skin"], z=20, shapes=[
@@ -125,6 +147,12 @@ def build_rig(spec: HumanoidSpec) -> Rig:
         if spec.hair_style == "long":
             hs.append(Custom(material=hm, z=-1, group="hair_back", fn=lambda buf, st, ink: buf.capsule(
                 *_snapped(st.point(0, (-3 * s, -4 * s))), *_snapped(st.point(0, (-3.5 * s, 2 * s))), 3, ink)))
+        if spec.hair_style == "leaves":
+            hs.append(Blob(material=hm, rx=5.5 * s, ry=3.4 * s, t=0, offset=(-0.5 * s, -10.5 * s), z=0.4, group="hair"))
+            hs.append(Poly(material=hm, z=0.36, group="hair", points=[
+                (-5 * s, -9 * s), (-9 * s, -13 * s), (-3 * s, -12 * s)]))
+            hs.append(Pixels(material=hm, level=LIGHT, z=0.5, outline=False, group="hair", t=0.0,
+                             points=[(-3 * s, -12 * s), (1 * s, -13 * s), (3 * s, -11 * s)]))
         if spec.hair_style == "spiky":
             hs.append(Poly(material=hm, z=0.35, group="hair", points=[
                 (-4 * s, -6 * s), (-3 * s, -10 * s), (-1 * s, -7.5 * s), (0.5 * s, -10.5 * s),
@@ -163,14 +191,35 @@ def build_rig(spec: HumanoidSpec) -> Rig:
             head.shapes.append(Poly(material=hm, z=0.3, group="helmet", points=[
                 (-4.5 * s, -6 * s), (4.5 * s, -7.5 * s), (5 * s, -6 * s), (-1 * s, -3 * s), (-5 * s, -3 * s)]))
         else:
-            head.shapes.append(Blob(material=hm, rx=4.5 * s, ry=2.3 * s, t=0, offset=(0.3 * s, -6.1 * s),
-                                    z=0.6, group="helmet"))
+            if spec.helmet_style not in ("plume", "turban"):
+                head.shapes.append(Blob(material=hm, rx=4.5 * s, ry=2.3 * s, t=0, offset=(0.3 * s, -6.1 * s),
+                                        z=0.6, group="helmet"))
             if spec.helmet_style == "horned":
                 horn = Material.of("horn", "#ead4aa")
                 head.shapes.append(Poly(material=horn, z=0.55, group="horn", points=[
                     (-3 * s, -6.5 * s), (-6.5 * s, -10 * s), (-5.5 * s, -7 * s), (-4 * s, -5 * s)]))
                 head.shapes.append(Poly(material=horn, z=0.55, group="horn2", points=[
                     (3 * s, -7 * s), (5.5 * s, -10.5 * s), (6 * s, -7.5 * s), (4.5 * s, -5.5 * s)]))
+            elif spec.helmet_style == "winged":
+                feather = Material.of("feather", "#ffffff")
+                head.shapes.append(Poly(material=feather, z=0.65, group="hwing", points=[
+                    (-3 * s, -6.5 * s), (-8 * s, -11 * s), (-7 * s, -7.5 * s), (-8.5 * s, -6.5 * s), (-4 * s, -5 * s)]))
+                head.shapes.append(Poly(material=feather, z=0.5, group="hwing2", points=[
+                    (2 * s, -7 * s), (0 * s, -12 * s), (3 * s, -9 * s)]))
+            elif spec.helmet_style == "plume":
+                feather = Material.of("plume", "#ffffff")
+                head.shapes.append(Poly(material=hm, z=0.65, group="brim", points=[
+                    (-6.5 * s, -6.2 * s), (7 * s, -6.2 * s), (6 * s, -4.8 * s), (-6 * s, -4.8 * s)]))
+                head.shapes.append(Blob(material=hm, rx=3.5 * s, ry=2.2 * s, t=0, offset=(0, -7.5 * s),
+                                        z=0.66, group="brim"))
+                head.shapes.append(Poly(material=feather, z=0.7, group="plume", points=[
+                    (-2 * s, -8 * s), (-8 * s, -12 * s), (-6.5 * s, -9.5 * s), (-4 * s, -8 * s)]))
+            elif spec.helmet_style == "turban":
+                gem = Material.of("gem", "#e43b44", shiny=True)
+                head.shapes.append(Blob(material=hm, rx=5 * s, ry=3.2 * s, t=0, offset=(-0.2 * s, -6.6 * s),
+                                        z=0.7, group="turban"))
+                head.shapes.append(Pixels(material=gem, level=LIGHT, z=0.8, outline=False, t=0.0,
+                                          points=[(3 * s, -6.5 * s)]))
             elif spec.helmet_style == "crown":
                 gold = Material.of("gold", "#feae34", shiny=True)
                 head.shapes.append(Poly(material=gold, z=0.7, group="crown", points=[
@@ -188,26 +237,61 @@ def build_rig(spec: HumanoidSpec) -> Rig:
 
     # legs
     for side, z, depth in (("b", 3, -1), ("f", 12, 0)):
+        ghost = spec.ghost
         rig.bone(f"thigh_{side}", "root", 5 * s, world=90, z=z, depth=depth, material=m["bottom"],
-                 group=f"leg_{side}", shapes=[Limb(width=leg_w)])
+                 group=f"leg_{side}", shapes=[] if ghost else [Limb(width=leg_w)])
         rig.bone(f"shin_{side}", f"thigh_{side}", 5 * s, world=90, z=z + 0.1, depth=depth, material=m["bottom"],
-                 group=f"leg_{side}", shapes=[Limb(width=leg_w, t1=0.5),
-                                              Limb(material=m["boots"], width=leg_w, t0=0.45, group=f"boot_{side}")])
-        rig.bone(f"foot_{side}", f"shin_{side}", 2.5 * s, world=0, z=z + 0.2, depth=depth, ground=True,
-                 material=m["boots"], group=f"boot_{side}", shapes=[Limb(width=round(2 * s), t0=-0.2)])
+                 group=f"leg_{side}", shapes=[] if ghost else [
+                     Limb(width=leg_w, t1=0.5), Limb(material=m["boots"], width=leg_w, t0=0.45, group=f"boot_{side}")])
+        rig.bone(f"foot_{side}", f"shin_{side}", 2.5 * s, world=0, z=z + 0.2, depth=depth, ground=not ghost,
+                 material=m["boots"], group=f"boot_{side}", shapes=[] if ghost else [Limb(width=round(2 * s), t0=-0.2)])
+    if spec.claws:
+        bone_m = Material.of("claw", "#ead4aa")
+        for side in ("b", "f"):
+            rig.bones[f"hand_{side}"].shapes.append(Pixels(material=bone_m, level=LIGHT, z=0.3, t=0.0,
+                                                           group=f"claw_{side}", points=[(2, -1), (2.5, 0.5), (1.5, 1.5)]))
+    if spec.wings is not None:
+        wm = Material.of("wings", spec.wings)
+        rig.bone("wings", "torso", 9 * s, world=-150, attach=0.85, offset=(-1.5, 0), z=2, material=wm, shapes=[
+            Poly(points=[(0, 0), (-3 * s, -6 * s), (-8 * s, -11 * s), (-11 * s, -9 * s), (-10 * s, -4 * s),
+                         (-7 * s, 0), (-3 * s, 2 * s)]),
+            Pixels(level=SHADOW, z=0.1, outline=False, t=0.0,
+                   points=[(-5 * s, -4 * s), (-7 * s, -6 * s), (-8 * s, -2 * s), (-4 * s, -1 * s)]),
+        ])
 
     if spec.cape is not None:
         rig.bone("cape", "torso", 9 * s, world=100, attach=0.9, offset=(-1.5, 0), z=1, material=m["cape"],
                  shapes=[Poly(points=[(-1, 0), (1.5, 0), (2.5, 9 * s), (-3.5, 8.5 * s)])])
 
     if spec.shield is not None:
-        rig.bone("shield", "fore_b", 0, world=0, attach=0.7, z=16, material=m["shield"], shapes=[
-            Blob(rx=2.5, ry=4.5, t=0, offset=(1.5, 0), rotate=False),
-            Pixels(level=HIGHLIGHT, z=0.2, outline=False, points=[(1.5, -0.5)]),
-        ])
+        rx, ry = (3.5, 7.5) if spec.big_shield else (2.5, 4.5)
+        shield_shapes = [Blob(rx=rx, ry=ry, t=0, offset=(1.5, 0), rotate=False),
+                         Pixels(level=HIGHLIGHT, z=0.2, outline=False, points=[(1.5, -0.5)])]
+        if spec.big_shield:
+            rim = Material.of("rim", "#c0cbdc", shiny=True)
+            shield_shapes = [Blob(material=rim, rx=rx + 1, ry=ry + 1, t=0, offset=(2.5, 0), group="rim"),
+                             Blob(rx=rx, ry=ry, t=0, offset=(2.5, 0), z=0.1, group="shieldface"),
+                             Pixels(level=HIGHLIGHT, z=0.2, outline=False, group="shieldface",
+                                    points=[(1.5, -4.5)])]
+            boss = Material.of("boss", "#c0cbdc", shiny=True)
+            shield_shapes.append(Pixels(material=boss, level=LIGHT, z=0.3, outline=False, t=0.0,
+                                        points=[(2.5, -0.5), (3.5, -0.5), (2.5, 0.5), (3.5, 0.5)]))
+        rig.bone("shield", "fore_b", 0, world=0, attach=0.7, z=16, material=m["shield"], shapes=shield_shapes)
 
     _add_weapon(rig, spec, m, s)
+    _add_offhand(rig, spec, m, s)
     return rig
+
+
+def _add_offhand(rig: Rig, spec: HumanoidSpec, m: Dict[str, Material], s: float) -> None:
+    w = spec.offhand
+    if w is None:
+        return
+    L = {"sword": 10, "dagger": 6, "saber": 9}[w] * s
+    shapes = [Limb(width=1, t0=0.2, t1=1.0), Limb(material=m["wood"], width=1, t0=-0.15, t1=0.1, group="hilt_b")]
+    if w == "saber":
+        shapes[0] = Poly(points=[(-0.5, -1), (0.5, -1), (2.5, -L * 0.6), (2.5, -L), (1, -L * 0.62), (-0.5, -2)])
+    rig.bone("weapon_b", "hand_b", L, world=-90, z=4.6, depth=-1, material=m["steel"], shapes=shapes)
 
 
 def _snapped(p):
@@ -243,6 +327,69 @@ def _add_weapon(rig: Rig, spec: HumanoidSpec, m: Dict[str, Material], s: float) 
             Pixels(material=m["steel"], level=SHADOW, z=0.3, outline=False, group="nick", t=0.0,
                    points=[(6, -L + 1.5), (5.5, -L + 5)]),
         ])
+    elif w in ("halberd", "scythe"):
+        L = (16 if w == "halberd" else 15) * s
+        if w == "halberd":
+            head = [Poly(material=m["steel"], group="blade", z=0.2, points=[
+                        (0.5, -L + 2), (4.5, -L + 0.5), (5, -L + 4.5), (4, -L + 7), (0.5, -L + 5.5)]),
+                    Poly(material=m["steel"], group="spike", z=0.25, points=[
+                        (-1, -L + 1.5), (0.5, -L - 3.5), (2, -L + 1.5)]),
+                    Pixels(material=m["steel"], level=LIGHT, z=0.3, group="hook", t=0.0, points=[(-1.5, -L + 3.5)])]
+        else:
+            head = [Poly(material=m["steel"], group="blade", z=0.2, points=[
+                (1, -L), (-2, -L - 2), (-7, -L - 1), (-10, -L + 2), (-6, -L + 0.5), (-1, -L + 1.5)])]
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"],
+                 shapes=[Limb(width=1, t0=-0.25, t1=1.0)] + head)
+    elif w == "saber":
+        L = 10 * s
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["steel"], shapes=[
+            Poly(points=[(-0.5, -1), (0.5, -1), (2.5, -L * 0.6), (2.5, -L), (1, -L * 0.62), (-0.5, -2)]),
+            Limb(material=m["wood"], width=1, t0=-0.15, t1=0.1, group="hilt"),
+        ])
+        rig.bone("guard", "weapon", 1.5, world=0, attach=0.12, z=z + 0.2, material=m["steel"],
+                 group="guard", shapes=[Limb(width=1, t0=-1.0, t1=1.0)])
+    elif w == "rapier":
+        L = 12 * s
+        gold = Material.of("cup", "#feae34", shiny=True)
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["steel"], shapes=[
+            Limb(width=1, t0=0.12, t1=1.0),
+            Blob(material=gold, rx=1.5, ry=1.5, t=0.08, z=0.2, group="cup"),
+        ])
+    elif w == "flask":
+        glass = Material.of("glass", "#c0cbdc", shiny=True)
+        rig.bone("weapon", "hand_f", 4, world=-90, z=z, material=glass, shapes=[
+            Blob(material=m["magic"], rx=2, ry=2, t=0.25, z=0.1, group="potion"),
+            Limb(width=1, t0=0.7, t1=1.0, group="neck"),
+            Pixels(material=m["wood"], level=BASE, z=0.2, group="cork", points=[(0, -0.5)]),
+        ])
+    elif w == "bomb":
+        iron = Material.of("bomb", "#3a4466", shiny=True)
+        spark = Material.of("spark", "#fee761", flat=True)
+        rig.bone("weapon", "hand_f", 5, world=-90, z=z, material=iron, shapes=[
+            Blob(rx=2.5, ry=2.5, t=0.3, group="bomb"),
+            Limb(material=m["wood"], width=1, t0=0.75, t1=1.0, group="fuse"),
+            Pixels(material=spark, level=BASE, z=0.3, outline=False, group="spark", points=[(0, -1)]),
+        ])
+    elif w == "sling":
+        cord = Material.of("cord", spec.string_color)
+        stone = Material.of("stone", "#8b9bb4")
+        rig.bone("weapon", "hand_f", 6, world=-90, z=z, material=cord, shapes=[
+            Limb(width=1, t0=0.0, t1=0.85, level=BASE, outline=False),
+            Blob(material=stone, rx=1.5, ry=1.5, t=1.0, z=0.2, group="stone")])
+    elif w == "harpoon":
+        L = 15 * s
+        rope = Material.of("rope", spec.string_color)
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=1, t0=-0.25, t1=0.9),
+            Poly(material=m["steel"], group="tip", z=0.2, points=[
+                (-1.5, -L + 2.5), (0.5, -L - 2.5), (2.5, -L + 2.5), (0.5, -L + 3.5)]),
+            Pixels(material=m["steel"], level=LIGHT, z=0.25, group="barb", t=0.0, points=[(-2, -L + 4), (3, -L + 4)]),
+            Pixels(material=rope, level=BASE, z=0.3, outline=False, group="rope", t=0.0,
+                   points=[(1, -2), (2, -1), (2, 0), (1, 1)])])
+    elif w == "sticks":
+        L = 6 * s
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Limb(width=1, t0=-0.1, t1=1.0), Blob(rx=1, ry=1, t=1.0, z=0.2, group="knob")])
     elif w == "mushroom":
         L = 7 * s
         cap = Material.of("cap", spec.magic, shiny=True)
@@ -383,7 +530,7 @@ def _base(spec: HumanoidSpec) -> Pose:
         "thigh_f": 80, "shin_f": 95, "thigh_b": 100, "shin_b": 100,
         "foot_f": 0, "foot_b": 0,
         "hand_f": 20, "hand_b": 70,
-        "weapon": {"spear": -80, "bow": -75, "crossbow": -35}.get(spec.weapon, -60),
+        "weapon": {"spear": -80, "harpoon": -80, "halberd": -80, "scythe": -80, "bow": -75, "crossbow": -35}.get(spec.weapon, -60),
         "cape": 105,
     }, ground=ground_row(spec))
 
@@ -539,7 +686,7 @@ def attack_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
     m = _materials(spec)
     smear_mat = Material.from_ramp("smear", [mix(spec.weapon_color, "#ffffff", t) for t in (0, .3, .55, .8, 1)])
     legs = dict(thigh_f=65, shin_f=85, thigh_b=110, shin_b=115, foot_f=0, foot_b=0)
-    if spec.weapon in ("spear",):
+    if spec.weapon in ("spear", "rapier", "harpoon"):
         wind = _with(base, torso=-96, upper_f=150, fore_f=170, hand_f=0, weapon=-5,
                      upper_b=60, fore_b=10 if spec.shield else 20, **legs)
         wind.shift, wind.duration = (-1, 0), 220
@@ -682,12 +829,28 @@ def build_humanoid(spec: HumanoidSpec, shadow: bool = True) -> Sprite:
     def finish(anim: Animation) -> Animation:
         return anim.map(lambda img: _shadowed(img, ground_row(spec), rig.origin[0] + 1)) if shadow else anim
 
-    sp.add(finish(from_poses(rig, "idle", idle_poses(spec, rig))))
-    sp.add(finish(from_poses(rig, "walk", walk_poses(spec, rig))))
-    sp.add(finish(from_poses(rig, "attack", attack_poses(spec, rig), loop=False)))
-    sp.add(finish(from_poses(rig, "cast", cast_poses(spec, rig), loop=False)))
-    sp.add(finish(from_poses(rig, "hurt", hurt_poses(spec, rig), loop=False)))
-    sp.add(finish(from_poses(rig, "stupor", stupor_poses(spec, rig))))
+    def styled(poses: List[Pose], name: str) -> List[Pose]:
+        """Per-spec touches on every pose: hunched lean, flapping wings, ghostly hover."""
+        for i, p in enumerate(poses):
+            if spec.lean and name != "death":
+                if "torso" in p.body:
+                    p.body["torso"] += spec.lean
+                elif "torso" in p.angles:
+                    p.angles["torso"] += spec.lean
+            if spec.wings is not None and name != "death":
+                flap = 25 if name == "walk" else (10 if name in ("idle", "stupor") else 18)
+                p.body["wings"] = -150 + flap * math.sin(i * math.tau / max(2, len(poses)))
+            if spec.ghost and name != "death":
+                bob = 1 if (i % 4) in (1, 2) else 0
+                p.shift = (p.shift[0], p.shift[1] - 3 - bob)
+        return poses
+
+    sp.add(finish(from_poses(rig, "idle", styled(idle_poses(spec, rig), "idle"))))
+    sp.add(finish(from_poses(rig, "walk", styled(walk_poses(spec, rig), "walk"))))
+    sp.add(finish(from_poses(rig, "attack", styled(attack_poses(spec, rig), "attack"), loop=False)))
+    sp.add(finish(from_poses(rig, "cast", styled(cast_poses(spec, rig), "cast"), loop=False)))
+    sp.add(finish(from_poses(rig, "hurt", styled(hurt_poses(spec, rig), "hurt"), loop=False)))
+    sp.add(finish(from_poses(rig, "stupor", styled(stupor_poses(spec, rig), "stupor"))))
     death = finish(from_poses(rig, "death", death_poses(spec, rig), loop=False))
     sp.add(death)
     corpse = death.frames[-1].image

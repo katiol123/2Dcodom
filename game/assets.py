@@ -27,7 +27,7 @@ from pixelforge.color import mix, ramp, rgba
 from pixelforge.export import save_sheet, sheet
 from pixelforge.anim import Animation, Sprite
 from pixelforge.shading import Ink, Material, PartBuffer, Shader
-from pixelforge.units.creatures import QuadSpec, build_quadruped
+from pixelforge.units.creatures import QuadSpec, SpiderSpec, build_quadruped, build_spider
 from pixelforge.units.humanoid import HumanoidSpec, build_humanoid
 
 from .units import TEAMS, Look, look_for
@@ -111,7 +111,7 @@ def look_name(key: str, team_key: str, spec: Look) -> str:
     return f"{key}_{team_key}_{digest}"
 
 
-SUMMONS = {"necromancer": ("skeleton",), "troll": ("goblin",), "wolf_rider": ("goblin",)}
+SUMMONS = {"necromancer": ("skeleton",), "troll": ("goblin",), "wolf_rider": ("goblin",), "druid": ("bear",)}
 
 
 def plan_battle(squads: Sequence[Sequence[str]], seed: int
@@ -141,7 +141,12 @@ def plan_battle(squads: Sequence[Sequence[str]], seed: int
 
 def build_sheet(name: str, spec: Look, out_dir: str) -> str:
     """Worker-process entry point: render one look's animations to PNG+JSON."""
-    sprite = build_quadruped(spec) if isinstance(spec, QuadSpec) else build_humanoid(spec)
+    if isinstance(spec, QuadSpec):
+        sprite = build_quadruped(spec)
+    elif isinstance(spec, SpiderSpec):
+        sprite = build_spider(spec)
+    else:
+        sprite = build_humanoid(spec)
     save_sheet(sprite, os.path.join(out_dir, f"{name}.png"))
     return name
 
@@ -210,11 +215,11 @@ class SpriteFactory:
 
 def ensure_unit_sheets(progress: Optional[Callable[[str, int, int], None]] = None) -> Dict[str, dict]:
     """Seed-0 looks of every class for both teams, keyed ``"knight_blue"`` (menus, tests)."""
-    from .units import ALL
+    from .units import ROSTER
     looks = {}
     keys = {}
     for t in TEAMS:
-        for k in ALL:
+        for k in ROSTER:                 # hidden forms too (druid's bear)
             spec = look_for(k, t, 0)
             name = look_name(k, t.key, spec)
             looks[name] = spec

@@ -100,6 +100,9 @@ class UnitArt:
                     s.fill((255, 255, 255, 0), special_flags=pygame.BLEND_RGBA_MAX)
                 elif tint == "hit":
                     s.fill((150, 140, 140, 0), special_flags=pygame.BLEND_RGBA_ADD)
+                elif tint == "freeze":
+                    s.fill((170, 230, 255, 255), special_flags=pygame.BLEND_RGBA_MULT)
+                    s.fill((60, 90, 120, 0), special_flags=pygame.BLEND_RGBA_ADD)
                 elif tint == "slow":
                     s.fill((150, 210, 255, 255), special_flags=pygame.BLEND_RGBA_MULT)
                     s.fill((10, 30, 60, 0), special_flags=pygame.BLEND_RGBA_ADD)
@@ -260,6 +263,8 @@ class Renderer:
             tint = "white" if u.flash_crit else "hit"
         elif u.has("stealth"):
             tint = "stealth"
+        elif u.has("freeze"):
+            tint = "freeze"
         elif u.has("slow"):
             tint = "slow"
         elif (u.rage or u.has("frenzy")) and int(real_time * 6) % 2 == 0:
@@ -307,6 +312,17 @@ class Renderer:
                     bob = round(math.sin(real_time * 3) * 1.5)
                     self.font.draw(s, "?", round(u.x) + 4, top - 6 + bob, "#c0cbdc", anchor="midbottom")
                     self.font.draw(s, "?", round(u.x) - 3, top - 2 - bob, "#8b9bb4", anchor="midbottom")
+                if u.has("root"):
+                    for k in (-5, -2, 2, 5):
+                        h = 3 + (k + int(real_time * 4)) % 3
+                        pygame.draw.line(s, (99, 199, 77), (round(u.x) + k, round(u.y)), (round(u.x) + k, round(u.y) - h))
+                        s.set_at((round(u.x) + k + 1, round(u.y) - h), (38, 92, 66))
+                if u.has("rune"):
+                    r = pygame.Rect(0, 0, int(u.type.radius * 2) + 6, 7)
+                    r.center = (round(u.x), round(u.y) + 1)
+                    pygame.draw.ellipse(s, (44, 232, 245) if int(real_time * 6) % 2 else (65, 166, 246), r, 1)
+                if u.has("fear") and int(real_time * 6) % 2 == 0:
+                    self.font.draw(s, "!", round(u.x), top - 4, "#c49be8", anchor="midbottom")
                 if u.has("panic") and int(real_time * 6) % 2 == 0:
                     self.font.draw(s, "!", round(u.x), top - 4, "#ffffff", anchor="midbottom")
                 if u.has("stun"):
@@ -335,9 +351,26 @@ class Renderer:
                 elif p.kind == "fireball":
                     f = self.fireball.frame((world.time * 1.0) % 0.28, flip=p.tx < p.sx) or self.fireball.frames[0]
                     s.blit(f, (px - 10 if p.tx >= p.sx else px - 5, py - 8))
+                elif p.kind in ("stone", "boulder", "flask_fire", "flask_acid"):
+                    if p.kind == "boulder":
+                        pygame.draw.circle(s, (65, 166, 246), (px, py), 4)
+                        pygame.draw.circle(s, (192, 248, 255), (px - 1, py - 1), 2)
+                    elif p.kind == "stone":
+                        pygame.draw.rect(s, INK, (px - 1, py - 1, 3, 3))
+                        s.set_at((px, py), (192, 203, 220))
+                    else:
+                        col = (167, 240, 112) if p.kind == "flask_acid" else (247, 118, 34)
+                        pygame.draw.rect(s, INK, (px - 2, py - 2, 5, 5))
+                        pygame.draw.rect(s, col, (px - 1, py - 1, 3, 3))
+                        s.set_at((px, py - 2), (192, 203, 220))
                 else:
                     outer, inner = {"dark": ((38, 92, 66), (99, 199, 77)),
-                                    "spore": ((104, 56, 108), (181, 80, 136))}.get(p.kind, ((254, 174, 52), (254, 231, 97)))
+                                    "spore": ((104, 56, 108), (181, 80, 136)),
+                                    "thorn": ((38, 92, 66), (167, 240, 112)),
+                                    "wailorb": ((90, 105, 136), (192, 203, 220)),
+                                    "frost": ((65, 166, 246), (192, 248, 255)),
+                                    "rune": ((18, 78, 137), (44, 232, 245)),
+                                    "web": ((139, 155, 180), (255, 255, 255))}.get(p.kind, ((254, 174, 52), (254, 231, 97)))
                     pulse = 1 if int(real_time * 12) % 2 else 0
                     pygame.draw.circle(s, outer, (px, py), 3 + pulse)
                     pygame.draw.circle(s, inner, (px, py), 2)
@@ -365,6 +398,9 @@ class Renderer:
                     pts.append((round(x0 + (x1 - x0) * k), round(y0 + (y1 - y0) * k + j)))
             pts.append((round(b.points[-1][0]), round(b.points[-1][1])))
             if len(pts) > 1:
+                if b.color != "#73eff7":            # a rope (harpoon): one plain coloured line, no glow
+                    pygame.draw.lines(s, _c(b.color), False, [(round(x), round(y)) for x, y in b.points], 1)
+                    continue
                 pygame.draw.lines(s, (44, 232, 245), False, [(x, y + 1) for x, y in pts], 1)
                 pygame.draw.lines(s, (255, 255, 255), False, pts, 1)
 
@@ -457,6 +493,16 @@ class Renderer:
                 icons.append((167, 240, 112))
             if u.has("frenzy"):
                 icons.append((181, 80, 136))
+            if u.has("root"):
+                icons.append((99, 199, 77))
+            if u.has("freeze"):
+                icons.append((192, 248, 255))
+            if u.has("rune"):
+                icons.append((44, 232, 245))
+            if u.has("corrode"):
+                icons.append((139, 174, 77))
+            if u.has("fear"):
+                icons.append((196, 155, 232))
             for i, col in enumerate(icons):
                 pygame.draw.rect(s, INK, (x + i * 4, y - 4, 4, 4))
                 pygame.draw.rect(s, col, (x + 1 + i * 4, y - 3, 2, 2))

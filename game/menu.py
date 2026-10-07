@@ -18,12 +18,25 @@ from .assets import cache_dir
 from .render import INK, Renderer, _c
 from .sim import H, W
 from .match import random_squad
-from .units import ALL, CLASSIC, ROSTER, SQUAD_MAX, TEAMS
+from .units import ALL, CLASSIC, ROSTER, SQUAD_MAX, TEAMS, TIER_NAMES
 
 PANEL_W = 116
-GRID_X, GRID_Y = 124, 26
+GRID_X, GRID_Y = 124, 37
 CARD_W, CARD_H = 38, 24
 COLS = 6
+ROWS = 3                 # visible card rows; the rest scrolls (mouse wheel or the arrows)
+TABS_Y = 24              # faction filter tabs above the cards
+TAB_W = 20
+
+
+def faction_units() -> dict:
+    """Units each faction can hire somewhere in its cities (filter tabs of the builder)."""
+    from .factions import ALL_FACTIONS, CITIES
+    out = {}
+    for f in ALL_FACTIONS:
+        keys = {u for c in CITIES if c.faction == f.key for u in c.pool}
+        out[f.key] = [k for k in ALL if k in keys]
+    return out
 SAVE = "squads.json"
 
 
@@ -55,6 +68,21 @@ class Menu:
             Button((GRID_X, 238, 64, 14), "КЛАССИКА", "classic"),
             Button((GRID_X + 168, 238, 64, 14), "ЗЕРКАЛО", "mirror"),
         ]
+        self.filter: Optional[str] = None
+        self.scroll = 0
+        self.by_faction = faction_units()
+        from .factions import ALL_FACTIONS, EMBLEMS
+        self.tab_factions = ALL_FACTIONS
+        self.tab_icons = {}
+        for f in ALL_FACTIONS:
+            icon = pygame.Surface((TAB_W - 2, 11))
+            icon.fill(_c(f.color))
+            pygame.draw.rect(icon, _c(f.dark), icon.get_rect(), 1)
+            for y, row in enumerate(EMBLEMS[f.emblem]):
+                for x, ch in enumerate(row):
+                    if ch == "#" and y < 9:
+                        icon.set_at(((TAB_W - 2 - 9) // 2 + x, 1 + y), _c(f.metal))
+            self.tab_icons[f.key] = icon
         self.dim = pygame.Surface((W, H), pygame.SRCALPHA)
         self.dim.fill((24, 20, 37, 170))
 
@@ -77,6 +105,22 @@ class Menu:
     def _card_rect(self, i: int) -> pygame.Rect:
         return pygame.Rect(GRID_X + (i % COLS) * CARD_W, GRID_Y + (i // COLS) * CARD_H, CARD_W - 2, CARD_H - 2)
 
+    def keys(self) -> List[str]:
+        return self.by_faction[self.filter] if self.filter else ALL
+
+    def visible(self) -> List[str]:
+        """Cards on screen: the filtered list, scrolled by whole rows."""
+        ks = self.keys()
+        rows = -(-len(ks) // COLS)
+        self.scroll = max(0, min(self.scroll, rows - ROWS))
+        return ks[self.scroll * COLS:(self.scroll + ROWS) * COLS]
+
+    def _tab_rect(self, i: int) -> pygame.Rect:
+        return pygame.Rect(GRID_X + i * TAB_W, TABS_Y, TAB_W - 2, 11)
+
+    def _arrow_rect(self, d: int) -> pygame.Rect:
+        return pygame.Rect(GRID_X + 10 * TAB_W + (0 if d < 0 else 14), TABS_Y, 12, 11)
+
     def _panel_x(self, team: int) -> int:
         return 4 if team == 0 else W - 4 - PANEL_W
 
@@ -96,9 +140,26 @@ class Menu:
                 return self._start()
             if ev.key == pygame.K_TAB:
                 self.active = 1 - self.active
+        if ev.type == pygame.MOUSEWHEEL:
+            self.scroll -= ev.y
+            return None
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (4, 5):   # older pygame wheel events
+            self.scroll += 1 if ev.button == 5 else -1
+            return None
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+            mx, my = mouse
+            for i in range(10):
+                if self._tab_rect(i).collidepoint(mx, my):
+                    self.filter = None if i == 0 else self.tab_factions[i - 1].key
+                    self.scroll = 0
+                    return None
+            for d in (-1, 1):
+                if self._arrow_rect(d).collidepoint(mx, my):
+                    self.scroll += d
+                    return None
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 3):
             mx, my = mouse
-            for i, key in enumerate(ALL):
+            for i, key in enumerate(self.visible()):
                 if self._card_rect(i).collidepoint(mx, my):
                     team = self.active if ev.button == 1 else 1 - self.active
                     if len(self.squads[team]) < SQUAD_MAX:
@@ -144,7 +205,7 @@ class Menu:
         mx, my = mouse
         self.hover = None
         self.hover_slot = None
-        for i, key in enumerate(ALL):
+        for i, key in enumerate(self.visible()):
             if self._card_rect(i).collidepoint(mx, my):
                 self.hover = key
         for team in (0, 1):
@@ -161,7 +222,8 @@ class Menu:
         f.draw(s, "СБОР ОТРЯДОВ", W // 2, 6, "#fee761", scale=2, anchor="midtop")
         for team in (0, 1):
             self._draw_squad(s, team)
-        for i, key in enumerate(ALL):
+        self._draw_tabs(s)
+        for i, key in enumerate(self.visible()):
             self._draw_card(s, i, key)
         self._draw_info(s)
         for b in self.buttons:
@@ -199,6 +261,28 @@ class Menu:
                 pygame.draw.rect(s, (58, 68, 102), r, 1)
                 f.draw(s, "+ ПУСТО", r.centerx, r.centery, "#3a4466", anchor="center")
 
+    def _draw_tabs(self, s: pygame.Surface) -> None:
+        f = self.font
+        for i in range(10):
+            r = self._tab_rect(i)
+            on = (i == 0 and self.filter is None) or (i > 0 and self.filter == self.tab_factions[i - 1].key)
+            if i == 0:
+                pygame.draw.rect(s, (58, 68, 102) if on else (38, 43, 68), r)
+                f.draw(s, "ВСЕ", r.centerx, r.centery, "#ffffff" if on else "#8b9bb4", anchor="center")
+            else:
+                s.blit(self.tab_icons[self.tab_factions[i - 1].key], r.topleft)
+            if on:
+                pygame.draw.rect(s, _c("#fee761"), r.inflate(2, 2), 1)
+        rows = -(-len(self.keys()) // COLS)
+        for d in (-1, 1):
+            r = self._arrow_rect(d)
+            live = (d < 0 and self.scroll > 0) or (d > 0 and self.scroll + ROWS < rows)
+            pygame.draw.rect(s, (58, 68, 102) if live else (38, 43, 68), r)
+            col = (255, 255, 255) if live else (90, 105, 136)
+            cx, cy = r.centerx, r.centery
+            pts = [(cx - 3, cy + 1), (cx + 3, cy + 1), (cx, cy - 2)] if d < 0 else [(cx - 3, cy - 1), (cx + 3, cy - 1), (cx, cy + 2)]
+            pygame.draw.polygon(s, col, pts)
+
     def _draw_card(self, s: pygame.Surface, i: int, key: str) -> None:
         r = self._card_rect(i)
         hot = self.hover == key and self.hover_slot is None
@@ -218,8 +302,7 @@ class Menu:
     LINE = 6           # px between lines
 
     def _draw_info(self, s: pygame.Surface) -> None:
-        rows = -(-len(ALL) // COLS)
-        x, y = GRID_X, GRID_Y + rows * CARD_H + 1
+        x, y = GRID_X, GRID_Y + ROWS * CARD_H + 1
         w, h = 6 * CARD_W - 2, 231 - y
         s.blit(self.r.panel(w, h, base="#181425", border="#5a6988"), (x, y))
         key = self.hover
@@ -231,13 +314,14 @@ class Menu:
             return
         u = ROSTER[key]
         f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2 if len(u.name) <= 13 else 1)
-        f.draw(s, u.role, x + 6, y + 18, "#8b9bb4")
+        f.draw(s, f"{u.role}   {TIER_NAMES[u.tier]}", x + 6, y + 18, "#8b9bb4")
         lo, hi = u.damage
         dtype = {"physical": "", "magic": " МАГ", "holy": " СВЯТ"}[u.damage_type]
         f.draw(s, f"HP {u.hp}   УРОН {lo}-{hi}{dtype}   ДАЛЬН {int(u.attack_range)}", x + 6, y + 26, "#c0cbdc")
         extra = f"   УКЛОН {int(u.dodge * 100)}%" if u.dodge else ""
         f.draw(s, f"БРОНЯ {int(u.armor * 100)}%   МАГЗАЩ {int(u.resist * 100)}%   СКОР {int(u.speed)}{extra}",
                x + 6, y + 33, "#c0cbdc")
+        f.draw(s, f"ЦЕНА {u.cost} ЗОЛОТА   СОДЕРЖАНИЕ {u.upkeep} ЗА ХОД", x + 6, y + 40, "#feae34")
         # animated preview (top right): the unit attacking, then walking
         look = f"{key}_{TEAMS[self.active].key}"
         art = self.r.art(look)
@@ -259,7 +343,7 @@ class Menu:
         s.blit(img, (px, py))
         # perks (green), then flaws (red), then behavior (blue); one trait per entry,
         # text flows around the preview
-        yy = y + 43
+        yy = y + 50
         for grp in ("perks", "flaws", "behavior"):
             bright, dim = self.COLORS[grp]
             for name, desc in getattr(u, grp):
