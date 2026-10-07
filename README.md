@@ -16,10 +16,26 @@ pygame…), и GIF-превью.
 тайминги анимаций) собраны из референсов и описаны в
 [docs/PIXEL_ART_GUIDE.md](docs/PIXEL_ART_GUIDE.md).
 
+## Автобитва (демо-игра)
+
+```bash
+pip install -r requirements.txt
+python battle.py                    # два отряда по 7 юнитов дерутся сами, бои идут один за другим
+python battle.py --record b.mp4     # записать бой в видео без окна
+python -m game.balance 60           # статистика баланса по 60 боям
+```
+
+![battle](docs/images/battle.gif)
+
+Рыцарь, варвар, копейщик, орк, разбойник, лучник и маг. У каждого свои
+характеристики, способности, сильные и слабые стороны и модель поведения
+ИИ. Есть эффекты, стильные полоски здоровья и HUD. Подробно —
+в [docs/BATTLE.md](docs/BATTLE.md).
+
 ## Быстрый старт
 
 ```bash
-pip install -r requirements.txt      # только Pillow (для PNG/GIF)
+pip install Pillow                   # движку нужен только Pillow (для PNG/GIF)
 python -m pixelforge build out       # все пресеты -> out/sprites, out/gif, out/preview
 python -m pixelforge unit orc out    # один юнит
 python -m pixelforge unit random:42  # случайный (детерминированно по seed)
@@ -46,9 +62,9 @@ red_team = sprite.map(lambda c: c.replace({"#ead4aa": "#e43b44"}))  # палит
 
 Параметры `HumanoidSpec`: цвета кожи/волос/одежды/обуви, причёски
 (`short|long|spiky|none`), борода, шлем (`cap|horned|hood|crown`), плащ,
-роба, оружие (`sword|axe|spear|staff|dagger|None`), щит, телосложение
+роба, оружие (`sword|axe|spear|staff|dagger|bow|None`), щит, телосложение
 (`normal|stocky|slim`), размер (`size=32` → кадр 48×40, оружию и смазам
-есть куда вылетать). Готовые пресеты: `knight barbarian mage spearman rogue orc king`.
+есть куда вылетать). Готовые пресеты: `knight barbarian mage spearman rogue orc archer king`.
 
 Существа: `build_slime(SlimeSpec(...))`, `build_quadruped(QuadSpec(...))`
 (пресеты `WOLF`, `BOAR`, `FOX`).
@@ -125,6 +141,8 @@ pixelforge/
   units/humanoid.py        гуманоиды + полный набор анимаций
   units/creatures.py       слизень, четвероногие
   assets/                  tiles, items, ui, vfx
+battle.py                  демо-игра «Автобитва» (pygame)
+game/                      юниты, симуляция боя, ИИ, рендер, звук
 tests/                     unittest
 docs/                      конспект референсов, превью
 ```

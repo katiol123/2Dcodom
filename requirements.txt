@@ -1,1 +1,3 @@
 Pillow>=9.0
+pygame>=2.1      # only for battle.py
+numpy            # only for synthesized battle sounds (optional)

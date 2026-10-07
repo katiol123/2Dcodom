@@ -42,10 +42,11 @@ class HumanoidSpec:
     helmet: Optional[ColorLike] = None
     helmet_style: str = "cap"            # cap | horned | hood | crown
     cape: Optional[ColorLike] = None
-    weapon: Optional[str] = "sword"      # sword | axe | spear | staff | dagger | None
+    weapon: Optional[str] = "sword"      # sword | axe | spear | staff | dagger | bow | None
     weapon_color: ColorLike = "#c0cbdc"
     handle_color: ColorLike = "#733e39"
     magic: ColorLike = "#2ce8f5"         # staff orb, spell sparks
+    string_color: ColorLike = "#ead4aa"  # bow string / fletching
     shield: Optional[ColorLike] = None
     build: str = "normal"                # normal | stocky | slim
     size: int = 32
@@ -215,8 +216,45 @@ def _add_weapon(rig: Rig, spec: HumanoidSpec, m: Dict[str, Material], s: float) 
             Limb(width=1, t0=-0.35, t1=0.9),
             Blob(material=m["magic"], rx=1.5, ry=1.5, t=1.0, z=0.3, group="orb"),
         ])
+    elif w == "bow":
+        L = BOW_LEN
+        string = Material.of("string", spec.string_color, flat=True)
+        rig.bone("weapon", "hand_f", L, world=-90, z=z, material=m["wood"], shapes=[
+            Custom(fn=lambda buf, st, ink: _draw_bow(buf, st, ink)),
+        ])
+        # straight string while not drawn; hidden in shooting poses (fx draws the pulled one)
+        rig.bone("bowstring", "weapon", 0, attach=0.0, z=z - 0.2, material=string, group="string",
+                 shapes=[Custom(level=BASE, outline=False,
+                                fn=lambda buf, st, ink: _draw_string(buf, st, ink))])
     else:
         raise ValueError(f"unknown weapon {w!r}")
+
+
+BOW_LEN = 13.0     # tip to tip
+BOW_BULGE = 3.0    # how far the bow limbs bow forward of the string
+
+
+def bow_tips(st) -> tuple:
+    """(top, bottom, grip) of a bow bone state; the bone runs tip-to-tip through the grip."""
+    top = st.point(0.5, (-BOW_BULGE, 0))
+    bot = st.point(-0.5, (-BOW_BULGE, 0))
+    return top, bot, st.point(0.0)
+
+
+def _draw_bow(buf, st, ink):
+    pts = []
+    for i in range(9):
+        u = -1 + i / 4
+        pts.append(st.point(u * 0.5, (BOW_BULGE * (1 - u * u) - BOW_BULGE, 0)))
+    for a, b in zip(pts, pts[1:]):
+        buf.line(math.floor(a[0]), math.floor(a[1]), math.floor(b[0]), math.floor(b[1]), ink)
+
+
+def _draw_string(buf, st, ink):
+    # the string bone sits at the bow's grip and shares its orientation
+    top = st.point(0, (-BOW_BULGE, -BOW_LEN / 2))
+    bot = st.point(0, (-BOW_BULGE, BOW_LEN / 2))
+    buf.line(math.floor(top[0]), math.floor(top[1]), math.floor(bot[0]), math.floor(bot[1]), ink)
 
 
 # --- poses --------------------------------------------------------------------
@@ -241,7 +279,7 @@ def _base(spec: HumanoidSpec) -> Pose:
         "thigh_f": 80, "shin_f": 95, "thigh_b": 100, "shin_b": 100,
         "foot_f": 0, "foot_b": 0,
         "hand_f": 20, "hand_b": 70,
-        "weapon": -60 if spec.weapon != "spear" else -80,
+        "weapon": {"spear": -80, "bow": -75}.get(spec.weapon, -60),
         "cape": 105,
     }, ground=ground_row(spec))
 
@@ -305,7 +343,48 @@ def _weapon_tip_angle(rig: Rig, pose: Pose, pivot_bone: str = "upper_f") -> floa
     return math.degrees(math.atan2(tip[1] - piv[1], tip[0] - piv[0]))
 
 
+def bow_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
+    """Nock -> full draw (held: anticipation) -> release (``hit`` = arrow leaves) -> recover."""
+    from ..shading import Ink
+    base = _base(spec)
+    string = Material.of("string", spec.string_color, flat=True)
+    shaft = Material.of("shaft", spec.handle_color)
+    tip = Material.of("tip", spec.weapon_color, shiny=True)
+    stance = dict(thigh_f=72, shin_f=88, thigh_b=108, shin_b=108, foot_f=0, foot_b=0)
+    aim = dict(torso=-92, upper_f=-5, fore_f=-5, hand_f=-5, weapon=-92, **stance)
+
+    def pulled(arrow: bool):
+        def fx_(buf, states, rig_):
+            top, bot, grip = bow_tips(states["weapon"])
+            hx, hy = states["hand_b"].start
+            ink = Ink(string, "string", 30.3, level=BASE, outline=False, contour=False)
+            buf.line(math.floor(top[0]), math.floor(top[1]), math.floor(hx), math.floor(hy), ink)
+            buf.line(math.floor(bot[0]), math.floor(bot[1]), math.floor(hx), math.floor(hy), ink)
+            if arrow:
+                y = math.floor(hy)
+                buf.line(math.floor(hx), y, math.floor(grip[0]) + 3, y, Ink(shaft, "arrow", 32, level=LIGHT))
+                buf.plot(math.floor(grip[0]) + 4, y, Ink(tip, "arrowtip", 32, level=HIGHLIGHT))
+                buf.plot(math.floor(hx) - 1, y - 1, Ink(string, "fletch", 32, level=BASE))
+                buf.plot(math.floor(hx) - 1, y + 1, Ink(string, "fletch", 32, level=BASE))
+        return fx_
+
+    nock = _with(base, upper_b=10, fore_b=-10, hand_b=0, **aim)
+    nock.hidden, nock.fx, nock.duration = frozenset({"bowstring"}), [pulled(True)], 160
+    draw = _with(base, upper_b=165, fore_b=-15, hand_b=0, **aim)
+    draw.body["torso"] = -95
+    draw.hidden, draw.fx, draw.duration = frozenset({"bowstring"}), [pulled(True)], 320
+    release = _with(base, upper_b=190, fore_b=200, hand_b=180, **aim)
+    release.duration, release.events = 70, ["hit"]
+    follow = release.copy(duration=180)
+    follow.body.update(upper_b=175, fore_b=170)
+    settle = rig.lerp(follow, base, 0.5)
+    settle.ground, settle.duration = base.ground, 140
+    return [nock, draw, release, follow, settle]
+
+
 def attack_poses(spec: HumanoidSpec, rig: Rig) -> List[Pose]:
+    if spec.weapon == "bow":
+        return bow_poses(spec, rig)
     base = _base(spec)
     m = _materials(spec)
     smear_mat = Material.from_ramp("smear", [mix(spec.weapon_color, "#ffffff", t) for t in (0, .3, .55, .8, 1)])
@@ -485,6 +564,10 @@ PRESETS: Dict[str, HumanoidSpec] = {
     "orc": HumanoidSpec(name="orc", skin="#63c74d", eye="#e43b44", top="#733e39", sleeves="#63c74d",
                         bottom="#3e2731", boots="#181425", hair="#181425", hair_style="spiky",
                         weapon="axe", weapon_color="#8b9bb4", build="stocky"),
+    "archer": HumanoidSpec(name="archer", skin="#e8b796", top="#3e8948", sleeves="#3e8948", bottom="#733e39",
+                           boots="#3e2731", hair="#feae34", helmet="#265c42", helmet_style="hood",
+                           weapon="bow", handle_color="#b86f50", weapon_color="#c0cbdc", cape="#265c42",
+                           belt="#733e39", build="slim"),
     "king": HumanoidSpec(name="king", top="#a22633", sleeves="#a22633", bottom="#3e2731",
                          hair="#ead4aa", beard="#ead4aa", helmet="#feae34", helmet_style="crown",
                          cape="#124e89", weapon="sword", weapon_color="#fee761", belt="#feae34"),
