@@ -19,7 +19,10 @@ class RosterTest(unittest.TestCase):
         self.assertEqual({k for k, u in ROSTER.items() if u.ranged},
                          {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman"})
         for u in ROSTER.values():
-            self.assertTrue(u.strong and u.weak, u.key)
+            self.assertTrue(u.perks and u.flaws and u.behavior, u.key)
+            for name, desc in u.perks + u.flaws + u.behavior:
+                self.assertEqual(name, name.upper(), u.key)
+                self.assertTrue(desc and " - " not in desc, (u.key, name))
 
     def test_looks_vary_within_class_but_keep_identity(self):
         for key in ALL:
@@ -128,6 +131,47 @@ class BattleTest(unittest.TestCase):
                         seen.add(id(t))
                         counters += t.text.startswith("КОНТРУДАР")
             self.assertEqual(counters, 1, enemy)
+
+    def test_skeleton_death_grip(self):
+        from game import ai
+        w = headless_world([["skeleton"], ["archer", "mage"]], 1)
+        sk = w.units[0]
+        archer = next(u for u in w.units if u.key == "archer")
+        mage = next(u for u in w.units if u.key == "mage")
+        sk.target = archer
+        mage.x, mage.y = sk.x + 5, sk.y               # a juicier target right next to it
+        self.assertIs(ai.pick_target(w, sk), archer)
+
+    def test_wolves_hunt_the_same_prey(self):
+        from game import ai
+        w = headless_world([["wolf", "wolf"], ["knight", "archer", "mage"]], 2)
+        w1, w2 = w.units[0], w.units[1]
+        mage = next(u for u in w.units if u.key == "mage")
+        w1.target = mage
+        self.assertIs(ai.pick_target(w, w2), mage)
+
+    def test_monk_intercepts_divers(self):
+        from game import ai
+        w = headless_world([["monk", "archer"], ["rogue", "cleric"]], 2)
+        monk, archer = w.units[0], w.units[1]
+        rogue = next(u for u in w.units if u.key == "rogue")
+        rogue.target = archer
+        self.assertIs(ai.pick_target(w, monk), rogue)
+
+    def test_necromancer_walks_to_corpses(self):
+        w = headless_world([["necromancer"], ["knight", "archer"]], 3)
+        necro = w.units[0]
+        archer = next(u for u in w.units if u.key == "archer")
+        w.time = 5.0
+        archer.x, archer.y = necro.x + 200, necro.y
+        w.kill(archer, None)
+        w.time = 7.0
+        x0 = necro.x
+        from game import ai
+        for _ in range(30):
+            ai.think(w, necro, 1 / 60)
+            w._separate(1 / 60)
+        self.assertGreater(necro.x, x0 + 2)            # heading for the body
 
     def test_every_class_contributes(self):
         dealt = {k: 0.0 for k in ALL}

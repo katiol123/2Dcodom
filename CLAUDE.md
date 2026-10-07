@@ -16,7 +16,9 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Every unit has a seeded look (`look_for` in units.py: class-defining gear fixed, faces vary). Sheets are named
   `<class>_<team>_<spec hash>` and cached in `.cache/battle/<hash of pixelforge>/`; `SpriteFactory` builds missing
   ones in worker processes and prefetches the next battle. Tests/balance use `match.headless_world` (seed-0 timings).
-- New class: `UnitType` in `ROSTER` + branch in `look_for` + behaviour in `ai.py`, then rebalance.
+- New class: `UnitType` in `ROSTER` + `TRAITS` entry + branch in `look_for` + behaviour in `ai.py`, then rebalance.
+- Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait
+  per entry, `("NAME", "short description")`; keep them true to the mechanics. Menu shows them in that order.
 - No screen shake (user request); impact feel comes from hit-stop and slow-mo.
 - Inspect visually: record with `--record`, then `ffmpeg ... -vf "fps=6,tile=3x3"` to look at frame sequences.
 

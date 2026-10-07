@@ -8,20 +8,20 @@ itself differently:
 * **barbarian**   executioner: hunts wounded enemies, cleaves, rages at low HP;
 * **spearman**    anti-charge: braces against an enemy charging *at him* and meets it with
                   the spear first (+100% damage, knockback, the charge is broken);
-* **orc**         frontline brute: war cry charge + stun, buffs nearby allies;
+* **orc**         challenger: picks a fight with the toughest melee enemy, war cry charge;
 * **rogue**       assassin: flanks along the field edge, shadow-steps behind shooters;
 * **archer**      kiter: keeps distance, retreats from melee, volleys clusters;
 * **mage**        artillery: fireballs the densest cluster, frost-novas divers;
 * **paladin**     holy frontliner: healing aura, hunts undead, divine shield once;
 * **cleric**      healer: keeps the most wounded ally alive, cleanses burns/bleeds;
 * **crossbowman** armor breaker: picks the heaviest armor, holds the line (no kiting);
-* **necromancer** summoner: raises the fallen of either side as skeletons;
-* **skeleton**    undead grunt: gets back up unless smashed or purified;
-* **monk**        flanker: flurry of fists, every 4th blow stuns;
-* **hammerer**    crusher: armor-breaking blows, every 3rd one quakes the ground;
+* **necromancer** vulture: walks to fresh corpses and raises them as skeletons;
+* **skeleton**    death grip: never switches targets; gets back up unless smashed/purified;
+* **monk**        interceptor: catches divers on own shooters, otherwise hunts enemy ones;
+* **hammerer**    into the thick of it: goes for packed enemies, every 3rd blow quakes;
 * **shaman**      storm caller: chain lightning, healing rain for the group;
-* **wolf**        pack hunter: fastest unit, howls, bleeds the backline;
-* **ogre**        giant: slow sweeping club that knocks back and stuns small foes.
+* **wolf**        pack hunter: wolves gang up on the same prey, flank to the backline;
+* **ogre**        crush: wades into the biggest crowd, sweeping club knocks back and stuns.
 
 Melee attackers spread over both sides of a target ("slots"), so fights form
 small surrounds instead of single-file queues.
@@ -117,9 +117,17 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
             s += 25.0                               # shoot whoever is coming for me
         if e.key == "knight" and u.key == "archer":
             s -= 30.0                               # arrows bounce off the shield
-    if u.key in ("mage", "shaman"):
+    if u.key in ("mage", "shaman", "hammerer", "ogre"):
+        # artillery / storm caller / "into the thick of it" / crush: go where the enemies are packed
         cluster = sum(1 for o in world.enemies(u) if o is not e and math.hypot(o.x - e.x, o.y - e.y) < 30)
-        s += cluster * 22.0
+        s += cluster * (22.0 if u.ranged else 20.0)
+    if u.key == "orc" and not e.ranged:
+        s += e.hp * 0.06                            # challenge the toughest fighter on the field
+    if u.key == "monk" and not e.ranged and e.target is not None and e.target.ranged \
+            and e.target.team == u.team:
+        s += 80.0                                   # interceptor: catch divers on our shooters
+    if u.key == "wolf" and any(a.key == "wolf" and a.target is e for a in world.allies(u)):
+        s += 60.0                                   # pack hunt: the same prey as the other wolves
     if e.summoned:
         s -= 15.0                                   # minions are less important than their master
     return s + u.bias * 3.0
@@ -128,6 +136,9 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
 def pick_target(world: "World", u: "Unit") -> Optional["Unit"]:
     if u.taunted_by is not None and u.taunted_by.alive:
         return u.taunted_by
+    t = u.target
+    if u.key == "skeleton" and t is not None and t.alive and not t.has("stealth") and t.rising <= 0:
+        return t                                    # death grip: never lets go of its victim
     cands = [e for e in world.enemies(u) if not e.has("stealth")]
     if not cands:
         return None
@@ -530,6 +541,9 @@ def think(world: "World", u: "Unit", dt: float) -> None:
                 _move(u, nx, ny, dt)
                 return
 
+    if u.key == "necromancer" and _scavenge(world, u, dt):
+        return
+
     want_x, want_y = u.x, u.y
     if u.ranged:
         threat = nearest_threat(world, u)
@@ -580,6 +594,27 @@ def think(world: "World", u: "Unit", dt: float) -> None:
         return
     nx, ny = _norm(dx, dy)
     _move(u, nx, ny, dt)
+
+
+def _scavenge(world: "World", u: "Unit", dt: float) -> bool:
+    """Vulture: when a raise is nearly ready, walk toward the nearest fresh corpse
+    that is not in the middle of enemy fighters."""
+    if _threatened(world, u) or u.abil.get("raise", 0) > 2.0:
+        return False
+    if sum(1 for m in world.units if m.summoner is u and m.alive) >= 2:
+        return False
+    foes = [e for e in world.enemies(u) if not e.ranged]
+    bodies = [c for c in world.corpses() if not c.summoned
+              and all(math.hypot(e.x - c.x, e.y - c.y) > 35 for e in foes)]
+    if not bodies:
+        return False
+    c = min(bodies, key=lambda b: math.hypot(b.x - u.x, b.y - u.y))
+    d = math.hypot(c.x - u.x, c.y - u.y)
+    if d <= 120 or d > 320:
+        return False
+    nx, ny = _norm(c.x - u.x, c.y - u.y)
+    _move(u, nx, ny, dt)
+    return True
 
 
 def _threatened(world: "World", u: "Unit") -> bool:

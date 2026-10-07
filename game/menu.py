@@ -21,7 +21,7 @@ from .units import ALL, CLASSIC, ROSTER, SQUAD_MAX, TEAMS
 
 PANEL_W = 116
 GRID_X, GRID_Y = 124, 26
-CARD_W, CARD_H = 38, 37
+CARD_W, CARD_H = 38, 24
 COLS = 6
 SAVE = "squads.json"
 
@@ -205,12 +205,16 @@ class Menu:
         pygame.draw.rect(s, _c(tm.light if hot else "#5a6988"), r, 1)
         pygame.draw.rect(s, (38, 43, 68) if not hot else (58, 68, 102), r.inflate(-2, -2))
         por = self.r.portrait(f"{key}_{tm.key}", flip=self.active == 1)
-        big = pygame.transform.scale(por, (36, 28))
-        s.blit(big, (r.x + 1, r.y + 1), area=pygame.Rect(0, 0, r.w - 2, 27))
+        s.blit(por, (r.centerx - 9, r.y + 1), area=pygame.Rect(0, 0, 18, 13))
         name = ROSTER[key].name
         if len(name) > 8:
             name = name[:7] + "."
-        self.font.draw(s, name, r.centerx, r.bottom - 9, "#ffffff" if hot else "#c0cbdc", anchor="midtop")
+        self.font.draw(s, name, r.centerx, r.bottom - 8, "#ffffff" if hot else "#c0cbdc", anchor="midtop")
+
+    # perk colors: (name, description)
+    COLORS = {"perks": ("#a7f070", "#63c74d"), "flaws": ("#f6757a", "#e43b44"), "behavior": ("#73eff7", "#41a6f6")}
+    WRAP = 53          # characters per line in the info panel
+    LINE = 6           # px between lines
 
     def _draw_info(self, s: pygame.Surface) -> None:
         x, y = GRID_X, GRID_Y + 3 * CARD_H + 1
@@ -220,26 +224,22 @@ class Menu:
         f = self.font
         if key is None:
             f.draw(s, "НАВЕДИ НА БОЙЦА, ЧТОБЫ УЗНАТЬ О НЁМ", x + w // 2, y + h // 2 - 3, "#5a6988", anchor="center")
+            for i, (grp, label) in enumerate((("perks", "ПЕРК"), ("flaws", "НЕДОСТАТОК"), ("behavior", "ПОВЕДЕНИЕ"))):
+                f.draw(s, label, x + w // 2 + (i - 1) * 64, y + h // 2 + 8, self.COLORS[grp][0], anchor="midtop")
             return
         u = ROSTER[key]
-        f.draw(s, u.name, x + 6, y + 5, "#fee761", scale=2)
-        f.draw(s, u.role, x + 6, y + 19, "#8b9bb4")
+        f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2)
+        f.draw(s, u.role, x + 6, y + 18, "#8b9bb4")
         lo, hi = u.damage
         dtype = {"physical": "", "magic": " МАГ", "holy": " СВЯТ"}[u.damage_type]
-        f.draw(s, f"HP {u.hp}   УРОН {lo}-{hi}{dtype}   ДАЛЬН {int(u.attack_range)}", x + 6, y + 28, "#c0cbdc")
+        f.draw(s, f"HP {u.hp}   УРОН {lo}-{hi}{dtype}   ДАЛЬН {int(u.attack_range)}", x + 6, y + 26, "#c0cbdc")
         extra = f"   УКЛОН {int(u.dodge * 100)}%" if u.dodge else ""
         f.draw(s, f"БРОНЯ {int(u.armor * 100)}%   МАГЗАЩ {int(u.resist * 100)}%   СКОР {int(u.speed)}{extra}",
-               x + 6, y + 35, "#c0cbdc")
-        yy = y + 44
-        for line in textwrap.wrap("+ " + u.strong, 42):
-            f.draw(s, line, x + 6, yy, "#63c74d")
-            yy += 7
-        for line in textwrap.wrap("- " + u.weak, 42):
-            f.draw(s, line, x + 6, yy, "#f6757a")
-            yy += 7
-        # animated preview: the unit attacking, then walking
+               x + 6, y + 33, "#c0cbdc")
+        # animated preview (top right): the unit attacking, then walking
         look = f"{key}_{TEAMS[self.active].key}"
         art = self.r.art(look)
+        box = self._preview_box(look)
         cyc = self.time % 3.0
         anim = "attack" if cyc < 1.4 else "walk"
         meta = self.r.metas[look]["animations"][anim]["frames"]
@@ -250,7 +250,52 @@ class Menu:
                 idx = j
                 break
             t -= fr["duration"]
-        img = art.frames[anim][idx]
+        img = art.frames[anim][idx].subsurface(box)
         if self.active == 1:
             img = pygame.transform.flip(img, True, False)
-        s.blit(img, (x + w - img.get_width() - 3, y + h - img.get_height() - 3))
+        px, py = x + w - box.w - 4, y + 3
+        s.blit(img, (px, py))
+        # perks (green), then flaws (red), then behavior (blue); one trait per entry,
+        # text flows around the preview
+        yy = y + 43
+        for grp in ("perks", "flaws", "behavior"):
+            bright, dim = self.COLORS[grp]
+            for name, desc in getattr(u, grp):
+                first = True
+                for line in self._wrap(f"{name} - {desc}", yy, py + box.h + 1, (px - x - 8) // 4):
+                    if first:
+                        head = f.render(name, bright)
+                        s.blit(head, (x + 5, yy - 1))
+                        if line[len(name):]:
+                            s.blit(f.render(line[len(name):], dim), (x + 5 + head.get_width() - 2, yy - 1))
+                        first = False
+                    else:
+                        s.blit(f.render(line, dim), (x + 5, yy - 1))
+                    yy += self.LINE
+            yy += 2
+
+    def _wrap(self, text: str, y0: int, preview_bottom: int, narrow: int) -> List[str]:
+        """Word wrap where lines beside the preview are shorter; continuation lines indented."""
+        words, lines, cur, y = text.split(" "), [], "", y0
+        for wd in words:
+            limit = narrow if y < preview_bottom else self.WRAP
+            cand = (cur + " " + wd) if cur else (("  " + wd) if lines else wd)
+            if len(cand) > limit and cur:
+                lines.append(cur)
+                y += self.LINE
+                cur = "  " + wd
+            else:
+                cur = cand
+        if cur:
+            lines.append(cur)
+        return lines
+
+    def _preview_box(self, look: str) -> pygame.Rect:
+        """Union of the visible pixels of the attack and walk frames (stable crop, no jitter)."""
+        cache = self.__dict__.setdefault("_boxes", {})
+        if look not in cache:
+            art = self.r.art(look)
+            rects = [fr.get_bounding_rect() for a in ("attack", "walk") for fr in art.frames[a]]
+            box = rects[0].unionall(rects[1:])
+            cache[look] = box.clip(pygame.Rect(0, 0, art.w, art.h))
+        return cache[look]
