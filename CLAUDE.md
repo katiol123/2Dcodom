@@ -30,6 +30,16 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   scales by whole numbers (letterboxed in fullscreen).
 - Inspect visually: record with `--record`, then `ffmpeg ... -vf "fps=6,tile=3x3"` to look at frame sequences.
 
+## World map (game/factions.py, worldgen.py, mapview.py)
+- `battle.py` starts on the world map; "БЫСТРЫЙ БОЙ" opens the squad builder, ESC there returns to the map.
+- 8 playable *human* factions (`FACTIONS`) + non-playable goblins (`GOBLINS`: no diplomacy, always war,
+  lairs all over the map). Relations 1..100 with a reason for every pair (`_REL`); keep reasons true to the lore.
+- Recruit pools belong to cities (3-6 units); keys not in `ROSTER` must be in `NEW_UNITS` (planned units).
+- `worldgen.py` is numpy-only (no pygame). Coast/lake/rivers are control points; ground culture = nearest
+  non-goblin city (`Faction.culture`); goblin lairs get swamp pockets. The map PNG is cached by `map_key()`.
+- New city: `City` in `CITIES` + pairs in `ROADS`; tests check land, spacing, connectivity, no sea roads.
+- Docs in docs/CAMPAIGN.md are generated from this data - regenerate the tables when the data changes.
+
 ## How to add graphics
 - New humanoid unit: add a `HumanoidSpec` to `PRESETS` in `pixelforge/units/humanoid.py` (data only).
 - New gear/body part: add shapes to bones in `build_rig` (shapes: `Limb`, `Blob`, `Poly`, `Pixels`, `Custom`).

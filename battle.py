@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """АВТОБИТВА: two squads of up to 7 units fight on their own.
 
-    python battle.py                 # squad builder, then endless battles (new faces every round)
+    python battle.py                 # world map; "БЫСТРЫЙ БОЙ" -> squad builder -> endless battles
     python battle.py --auto          # skip the builder, fight with the last / given squads
     python battle.py --blue knight,mage,wolf --red ogre,necromancer --auto
     python battle.py --record b.mp4  # render one battle to video (needs ffmpeg), no window
     python battle.py --record b.gif  # ...or to an animated GIF
 
+Map: drag with the left mouse button (or arrows/WASD), click cities and factions, ESC quits.
 Battle keys: SPACE pause, R rematch, M / ESC squad builder, 1-4 speed (x0.5, x1, x2, x4), F fullscreen.
 """
 
@@ -59,13 +60,13 @@ def _icon_surface():
     return pygame.image.frombuffer(img.tobytes(), img.size, "RGBA")
 
 
-def _loading(screen, scale, font, name, i, n):
+def _loading(screen, scale, font, name, i, n, title="КУЁМ ПИКСЕЛИ..."):
     import pygame
     from game.render import INK
     from game.sim import W, H
     surf = pygame.Surface((W, H))
     surf.fill(INK)
-    font.draw(surf, "КУЁМ ПИКСЕЛИ...", W // 2, H // 2 - 20, "#fee761", scale=2, anchor="center")
+    font.draw(surf, title, W // 2, H // 2 - 20, "#fee761", scale=2, anchor="center")
     pygame.draw.rect(surf, (90, 105, 136), (W // 2 - 80, H // 2, 160, 6), 1)
     pygame.draw.rect(surf, (44, 232, 245), (W // 2 - 79, H // 2 + 1, int(158 * (i + 1) / n), 4))
     font.draw(surf, name.upper().replace("_", " "), W // 2, H // 2 + 12, "#8b9bb4", anchor="center")
@@ -122,7 +123,7 @@ def main(argv=None) -> int:
         scale = args.scale or max(1, min((info.current_w - 40) // W, (info.current_h - 80) // H))
         screen = pygame.display.set_mode((W * scale, H * scale))
     font = Font()
-    loading = lambda name, i, n: _loading(screen, scale, font, name, i, n)  # noqa: E731
+    loading = lambda name, i, n, **kw: _loading(screen, scale, font, name, i, n, **kw)  # noqa: E731
     factory = SpriteFactory(workers=1 if args.record else None)
     try:
         renderer = Renderer(ensure_unit_sheets(loading), seed=args.seed or 0)
@@ -161,6 +162,8 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         return w
 
     view = (0, 0, scale)
+    worldmap = None
+    on_map = not (args.auto or args.blue or args.red)
     if args.auto:
         world = start(seed)
     while True:
@@ -168,7 +171,7 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         real += dt
         if args.quit_after and real > args.quit_after:
             pygame.quit()
-            where = f"battle t={world.time:.1f}s" if world else "menu"
+            where = f"battle t={world.time:.1f}s" if world else ("map" if on_map else "menu")
             print(f"ok: {where} seed={seed} sfx={'on' if sfx.ok else 'off'}")
             return 0
         mx, my = pygame.mouse.get_pos()
@@ -183,11 +186,19 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                 screen = (pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if fullscreen
                           else pygame.display.set_mode((W * scale, H * scale)))
                 continue
-            if world is None:
-                action = menu.handle(ev, mouse)
+            if on_map:
+                action = worldmap.handle(ev, mouse) if worldmap else None
                 if action == "quit":
                     pygame.quit()
                     return 0
+                if action == "battle":
+                    on_map = False
+                continue
+            if world is None:
+                action = menu.handle(ev, mouse)
+                if action == "back":
+                    on_map = True
+                    continue
                 if action == "start":
                     seed += 1
                     world = start(seed)
@@ -203,7 +214,13 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                     world = None
                 elif ev.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
                     speed = {pygame.K_1: 0.5, pygame.K_2: 1.0, pygame.K_3: 2.0, pygame.K_4: 4.0}[ev.key]
-        if world is None:
+        if on_map:
+            if worldmap is None:
+                from game.mapview import WorldMapScreen
+                worldmap = WorldMapScreen(renderer, lambda: loading("", 0, 1, title="РИСУЕМ КАРТУ МИРА..."))
+            worldmap.update(dt, mouse)
+            worldmap.draw(logical)
+        elif world is None:
             menu.update(dt, mouse)
             menu.draw(logical)
         else:

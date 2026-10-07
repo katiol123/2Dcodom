@@ -2,7 +2,7 @@
 
 Mouse: left click on a card adds it to the active squad (highlighted), right
 click adds it to the other one; click a squad's header to make it active;
-click a unit in a squad to remove it.  Keys: ENTER - fight, ESC - quit.
+click a unit in a squad to remove it.  Keys: ENTER - fight, ESC - world map.
 """
 
 from __future__ import annotations
@@ -88,10 +88,10 @@ class Menu:
 
     # --- input -----------------------------------------------------------------------------
     def handle(self, ev, mouse: Tuple[int, int]) -> Optional[str]:
-        """Returns "start" / "quit" when the menu is done."""
+        """Returns "start" / "back" (to the world map) when the menu is done."""
         if ev.type == pygame.KEYDOWN:
             if ev.key == pygame.K_ESCAPE:
-                return "quit"
+                return "back"
             if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                 return self._start()
             if ev.key == pygame.K_TAB:
@@ -170,7 +170,7 @@ class Menu:
                                 border="#8b9bb4"), b.rect.topleft)
             f.draw(s, b.label, b.rect.centerx, b.rect.centery, "#5a6988" if disabled else "#ffffff",
                    scale=b.scale, anchor="center")
-        f.draw(s, "ЛКМ - В АКТИВНЫЙ ОТРЯД   ПКМ - В ДРУГОЙ   КЛИК ПО БОЙЦУ - УБРАТЬ", W // 2, H - 8,
+        f.draw(s, "ЛКМ - В АКТИВНЫЙ ОТРЯД   ПКМ - В ДРУГОЙ   КЛИК ПО БОЙЦУ - УБРАТЬ   ESC - КАРТА", W // 2, H - 8,
                "#8b9bb4", anchor="midtop")
 
     def _draw_squad(self, s: pygame.Surface, team: int) -> None:

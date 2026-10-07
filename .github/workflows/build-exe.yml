@@ -48,6 +48,18 @@ jobs:
             exit 1
           }
 
+      - name: Smoke test (world map, headless)
+        shell: pwsh
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: |
+          $p = Start-Process -FilePath dist/AutoBattle.exe -ArgumentList "--seed","3","--quit-after","15" -PassThru -Wait
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:LOCALAPPDATA/PixelForgeBattle/crash.log" -ErrorAction SilentlyContinue
+            exit 1
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: AutoBattle-windows
@@ -67,5 +79,6 @@ jobs:
             Windows может показать «Windows защитила ваш компьютер»: нажмите «Подробнее» → «Выполнить в любом случае»
             (exe не подписан цифровой подписью).
 
-            Сначала соберите отряды (до 7 бойцов из 22 классов), затем «В БОЙ!».
+            Игра открывается картой мира: тяните её левой кнопкой мыши, кликайте по городам и фракциям,
+            «ДИПЛОМАТИЯ» — отношения фракций. «БЫСТРЫЙ БОЙ» — сбор отрядов (до 7 бойцов из 22 классов) и бой.
             В бою: ПРОБЕЛ — пауза, R — реванш, M/ESC — к выбору состава, 1–4 — скорость, F — полный экран.
