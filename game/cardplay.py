@@ -35,7 +35,8 @@ def _hostile(camp, f, city) -> bool:
 
 
 def _rivals(camp, f) -> List[str]:
-    return [x for x in camp.alive() if x != f]
+    """Other realms; the horde keeps its word to those who paid it off."""
+    return [x for x in camp.alive() if x != f and not (f == "goblin" and camp.at_peace(f, x))]
 
 
 def options(camp, f: str, key: str, chosen: list) -> list:
@@ -110,9 +111,9 @@ def options(camp, f: str, key: str, chosen: list) -> list:
     if step == "enemy_built":
         return [c for c in camp.owner if camp.owner[c] != f and camp.buildings.get(c)
                 and any(camp.owner[n] == f for n in neighbors(c))]
-    if step == "hand_card":
-        return [c.id for c in camp.realms[f].hand if c.key != "purge" or len([x for x in camp.realms[f].hand
-                                                                            if x.key == "purge"]) > 1]
+    if step == "hand_card":                              # a debt is repaid, never burnt away
+        return [c.id for c in camp.realms[f].hand if c.key != "debt" and (c.key != "purge" or len(
+            [x for x in camp.realms[f].hand if x.key == "purge"]) > 1)]
     if step == "own_officer":
         return [o.key for o in camp.officers_of(f)]
     if step == "own_officer_ready":
@@ -131,6 +132,21 @@ def _far_attackers(camp, f, target) -> List[str]:
             if camp.owner[c] == f:
                 out.extend(o for o in _ready_in(camp, f, c, troops=True) if o not in out)
     return out
+
+
+def completable(camp, f: str, key: str, chosen: list = None, width: int = 12) -> bool:
+    """Can the card's target steps be filled all the way (not only the first one)? A picker must never
+    open onto a dead end (a march with no own city next door, a builder with nothing affordable)."""
+    chosen = list(chosen or [])
+    steps = CARDS[key].targets
+    if len(chosen) >= len(steps):
+        return True
+    opts = options(camp, f, key, chosen)
+    multi = steps[len(chosen)] in MULTI
+    for o in opts[:width]:
+        if completable(camp, f, key, chosen + [(o,) if multi else o], width):
+            return True
+    return False
 
 
 def valid(camp, f: str, key: str, targets: list) -> bool:
@@ -156,7 +172,10 @@ def _gold(camp, f, n, why="cards") -> int:
 
 
 def _prosper(camp, city, d) -> None:
-    camp.prosperity[city] = max(1, min(camp.max_prosperity(city), camp.prosperity[city] + d))
+    """Change prosperity; growth stops at the city's room, but never takes away what is above it (a gold rush)."""
+    p = camp.prosperity[city]
+    cap = max(camp.max_prosperity(city), p) if d > 0 else 10
+    camp.prosperity[city] = max(1, min(cap, p + d))
 
 
 def _best(camp, f, city, stat) -> int:
@@ -407,12 +426,6 @@ def _volunteers(camp, f, t):
     return f"{CITY[t[0]].name}: добровольцы на {p} мощи"
 
 
-@effect("recruiters")
-def _recruiters(camp, f, t):
-    p = camp.recruit(t[0], 140)
-    return f"{CITY[t[0]].name}: новобранцы на {p} мощи"
-
-
 @effect("conscription")
 def _conscription(camp, f, t):
     total = sum(camp.recruit(c, 40 + 15 * camp.prosperity[c]) for c in camp.cities_of(f))
@@ -604,11 +617,12 @@ def _bribe(camp, f, t):
     o = t[1]
     camp.change_relation(f, camp.allegiance[o], -6)
     if camp.loyalty[o] >= 90:                                    # the devoted send the bribe back
+        camp.gold[f] += CARDS["bribe"].gold
         return f"{OFFICER[o].name} с презрением вернул{'а' if OFFICER[o].female else ''} золото"
     camp.change_loyalty(o, -30)
     if camp.loyalty[o] < 20 and not camp.is_leader(o):
         camp.defect(o, f)
-        return f"{OFFICER[o].name} перешёл{'а' if OFFICER[o].female else ''} на нашу сторону"
+        return f"{OFFICER[o].name} {'перешла' if OFFICER[o].female else 'перешёл'} на нашу сторону"
     return f"{OFFICER[o].name}: верность {camp.loyalty[o]}"
 
 
@@ -626,7 +640,7 @@ def _plot(camp, f, t):
     camp.change_relation(f, victim, -15)
     if camp.rng.random() < chance:
         camp.defect(o, f)
-        return f"{OFFICER[o].name} с отрядом перешёл{'а' if OFFICER[o].female else ''} к нам"
+        return f"{OFFICER[o].name} с отрядом {'перешла' if OFFICER[o].female else 'перешёл'} к нам"
     camp.change_loyalty(o, 10)
     return f"заговор против {OFFICER[o].name} раскрыт"
 
@@ -637,7 +651,7 @@ def _counterspy(camp, f, t):
     n = 0
     for pile in (r.draw, r.hand, r.discard):
         before = len(pile)
-        pile[:] = [c for c in pile if c.card.tier != "curse"]
+        pile[:] = [c for c in pile if c.card.tier != "curse" or c.key == "debt"]   # a debt is paid, not burnt
         n += before - len(pile)
     return f"сожжено проклятий: {n}"
 
@@ -647,7 +661,7 @@ def _peers(camp, f, t):
     r = camp.realms[f]
     for o in r.council:
         camp.change_loyalty(o, 15)
-    r.hand[:] = [c for c in r.hand if c.card.tier != "curse"]
+    r.hand[:] = [c for c in r.hand if c.card.tier != "curse" or c.key == "debt"]
     camp.draw_cards(f, 1)
     return "совет присягнул снова"
 
@@ -692,9 +706,7 @@ def _buyout(camp, f, t):
     camp.gold[f] -= price
     camp.earn(old, price, "sales")
     camp.free[city] = []
-    camp.owner[city] = f
-    camp.siege.pop(city, None)
-    camp.defense.pop(city, None)
+    camp.handover(city, f)
     camp.change_relation(f, old, -15)
     camp.check_fall(old, f)
     return f"{CITY[city].name} куплен у {FACTION[old].short} за {price} золота"
@@ -754,8 +766,7 @@ def _harem(camp, f, t):
     if not advisers:
         return "совет пуст"
     o = min(advisers, key=lambda x: camp.loyalty[x])
-    camp.set_council(t[0], [x for x in r.council if x != o], quiet=True)
-    camp.change_loyalty(o, -5)
+    camp.set_council(t[0], [x for x in r.council if x != o], quiet=True)   # the dismissal itself: -20
     return f"{OFFICER[o].name} изгнан из совета {FACTION[t[0]].short}"
 
 
@@ -838,7 +849,7 @@ def _brood(camp, f, t):
 def _tribute(camp, f, t):
     own = set(camp.cities_of(f))
     payers = [x for x in camp.alive() if x not in (f, "goblin") and camp.relation(f, x) < 30
-              and any(camp.owner[n] == x for c in own for n in neighbors(c))]
+              and not camp.at_peace(f, x) and any(camp.owner[n] == x for c in own for n in neighbors(c))]
     g = 0
     for x in payers:
         pay = min(50, camp.gold[x])

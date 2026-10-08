@@ -127,6 +127,32 @@ def succeed(camp, faction: str, dead: str) -> Optional[str]:
     return heir
 
 
+def ensure_ruler(camp, faction: str) -> None:
+    """A living realm always has a living ruler (a realm revived by an event crowns its best claimant);
+    the dead and the departed leave the council."""
+    r = camp.realms.get(faction)
+    if not r or not r.alive:
+        return
+    council = [o for o in r.council if o not in camp.dead and camp.allegiance.get(o) == faction]
+    if council != r.council:
+        r.council = council
+        camp._sync_thresholds(faction)
+    ruler = camp.leader.get(faction)
+    if ruler and ruler not in camp.dead and camp.allegiance.get(ruler) == faction:
+        return
+    heir = heir_of(camp, faction, ruler or "")
+    if heir is None:
+        return
+    camp.leader[faction] = heir
+    camp.loyalty[heir] = 100
+    if heir not in r.council:
+        for k in camp.personal(heir):
+            r.draw.insert(camp.rng.randrange(len(r.draw) + 1), camp._inst(k, heir))
+    r.council = [heir] + [o for o in r.council if o != heir]
+    camp._sync_thresholds(faction)
+    camp.log_event(faction, f"НОВЫЙ ПРАВИТЕЛЬ: {OFFICER[heir].name} поднял{_g(heir, '', 'а')} павшее знамя")
+
+
 def turn(camp, faction: str) -> None:
     """Start of a realm's own turn: old age, and the troubles of an unstable realm."""
     r = camp.realms[faction]

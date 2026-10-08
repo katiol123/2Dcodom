@@ -60,13 +60,31 @@ class HordeTest(unittest.TestCase):
         from game.match import headless_campaign_world
         self._great("totem")
         c = self.c
-        lair = c.cities_of("goblin")[0]
         from game.campaign import Battle
-        b = Battle("goblin", "aldern", lair, [], [])
+        stormers = [o.key for o in c.officers_of("goblin") if c.squads[o.key]][:2]
+        target = c.cities_of("aldern")[0]
+        b = Battle("goblin", "aldern", target, stormers, [o.key for o in c.officers_in(target)])
         c._forces(b)
-        self.assertEqual(b.fury[0], horde.TOTEM_MULT)
+        plain = c.attack_power("goblin", stormers, target) / horde.TOTEM_MULT
+        raw = sum(t.power for _, t in b.att)
+        self.assertAlmostEqual(b.fury[0], max(0.6, min(2.5, plain * horde.TOTEM_MULT / raw)))
+        self.assertGreater(b.fury[0], plain / raw)                   # the totem shows in the real battle
         world = headless_campaign_world(b)
         self.assertEqual(world.fury, b.fury)
+
+    def test_buffs_reach_real_battles(self):
+        from game.campaign import Battle
+        c = self.c
+        attackers = [o.key for o in c.officers_of("aldern") if c.squads[o.key]][:2]
+        target = c.cities_of("north")[0]
+        b = Battle("aldern", "north", target, attackers, [o.key for o in c.officers_in(target)])
+        c._forces(b)
+        before = b.fury[0]
+        for o in attackers:
+            c.buff(o, 1.6, 2)                                         # ЛОЖНОЕ ОТСТУПЛЕНИЕ and the like
+        b2 = Battle("aldern", "north", target, attackers, [o.key for o in c.officers_in(target)], mult=1.15)
+        c._forces(b2)
+        self.assertGreater(b2.fury[0], before * 1.5)
 
     @unittest.mock.patch("game.horde.SNATCH", 0.0)
     def test_pit_ransom_or_sacrifice(self):

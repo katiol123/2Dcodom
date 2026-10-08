@@ -164,6 +164,7 @@ class Campaign:
         self.ravaged: Dict[str, int] = {}                     # city -> own turns it cannot grow
         self.law: Dict[str, int] = {c.key: 6 for c in CITIES if c.faction != "goblin"}   # ПОРЯДОК (order.py)
         self.dens: set = set()                                # cities with a thieves' den
+        self.burnt: set = set()                               # (officer, card) burnt after play: never comes back
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
         self.alliance: Dict[frozenset, List] = {}             # pair -> [turns left, common enemy]
@@ -289,7 +290,10 @@ class Campaign:
         return max(0.0, min(1.0, 0.5 * lead + 0.5 * (sum(st) / len(st) - 6) / 10))
 
     def personal(self, officer: str) -> List[str]:
-        return list(PERSONAL.get(officer, ())) + self.extra.get(officer, [])
+        """The officer's cards - minus those he already burnt (a bill cashed once is gone for good, even if
+        he leaves the council and comes back)."""
+        return [k for k in list(PERSONAL.get(officer, ())) + self.extra.get(officer, [])
+                if (officer, k) not in self.burnt]
 
     def totals(self, council) -> Dict[str, int]:
         return _cards.council_totals(list(council), self.ostats)
@@ -744,6 +748,9 @@ class Campaign:
 
     def _start_turn(self, faction: str) -> None:
         r = self.realms[faction]
+        self.settle_officers(faction)
+        from .succession import ensure_ruler
+        ensure_ruler(self, faction)
         r.ap = max(0, self.ap_max(faction) - r.ap_penalty)
         r.ap_penalty = 0
         frozen = self.frozen.pop(faction, 0)
@@ -905,6 +912,8 @@ class Campaign:
     def run_ai(self, stop_at_player: bool = True, max_turns: int = 1000) -> None:
         """Let the computer realms play until it is the player's turn (or the round limit)."""
         from .campaign_ai import play_turn
+        if stop_at_player and self.player and not self.realms[self.player].alive:
+            max_turns = min(max_turns, 1)                     # the player's realm fell: one round at a time
         steps = 0
         while steps < max_turns * len(self.order):
             f = self.whose_turn()
@@ -930,7 +939,8 @@ class Campaign:
             return False, "НЕ ХВАТАЕТ ОД"
         if card.gold > self.gold[faction]:
             return False, "НЕ ХВАТАЕТ ЗОЛОТА"
-        if card.targets and not self.options(faction, card.key, []):
+        from .cardplay import completable
+        if card.targets and not completable(self, faction, card.key):
             return False, "НЕТ ПОДХОДЯЩЕЙ ЦЕЛИ"
         if card.key == "buy_off":
             from .horde import can_buy_off
@@ -955,8 +965,9 @@ class Campaign:
         self.gold[faction] -= card.gold
         r.hand.remove(inst)
         msg = EFFECTS[card.key](self, faction, targets)
-        if card.exhaust:
-            pass                                              # burnt: gone for good
+        if card.exhaust:                                      # burnt: gone for good
+            if inst.origin in OFFICER:
+                self.burnt.add((inst.origin, card.key))
         else:
             r.discard.append(inst)
         self.stats["played"][card.key] += 1
@@ -1024,8 +1035,6 @@ class Campaign:
         city = b.city
         from .buildings import count
         b.towers = count(self, city, "tower")
-        from .horde import fury
-        b.fury = fury(self, b.attacker, b.defender)
         b.att = [(o, t) for o in b.officers for t in self.squads[o]]
         b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
         b.a = self.attack_power(b.attacker, b.officers, city, b.mult)
@@ -1034,6 +1043,7 @@ class Campaign:
             b.d *= 1.3
         if "goblin" not in (b.attacker, b.defender) and self.relation(b.attacker, b.defender) <= 14:
             b.d *= 1.15                                       # blood feud: they fight to the last
+        b.fury = self._battle_fury(b)
         from .diplomacy import ally_help
         for side, (me, enemy) in enumerate(((b.attacker, b.defender), (b.defender, b.attacker))):
             if enemy == "goblin" and me == "goblin":
@@ -1058,6 +1068,34 @@ class Campaign:
         b.p = self.win_chance(b.a, b.d)
         troops = sum(t.power for _, t in b.deff)
         b.militia = max(0, min(8, int((b.d - troops) / ROSTER["militia"].cost)))   # walls and townsfolk
+
+    def _battle_fury(self, b: "Battle") -> Tuple[float, float]:
+        """Damage multipliers of both sides in a real battle: everything the odds count beyond the bare
+        troops (officers' buffs and spirit, the storm card, grudges, feuds, defence cards and course, the
+        totem). Walls and townsfolk come as militia and towers instead."""
+        raw_a = sum(t.power for _, t in b.att)
+        fa = b.a / raw_a if raw_a else 1.0
+        owner = b.defender
+        own = sum(self.power(o) for o in b.defenders)
+        spirit = (sum(self.power(o) * self.officer_mult(o) for o in b.defenders) + sum(t.power for t in self.free[b.city])) \
+            / max(1, own + sum(t.power for t in self.free[b.city]))
+        fd = spirit * b.def_mult
+        if b.city in self.defense:
+            fd *= self.defense[b.city][0]
+        if b.city in self.siege and self.siege[b.city][0] != owner:
+            fd *= 0.75
+        if owner in self.realms and self.realms[owner].course == "defense":
+            fd *= 1.25
+        if owner == "sylvan" and CITY[b.city].faction == "sylvan":
+            fd *= 1.2
+        from .horde import side_mult
+        fd *= side_mult(self, owner)
+        if (b.defender, b.attacker) in self.grudge:
+            fd *= 1.3
+        if "goblin" not in (b.attacker, b.defender) and self.relation(b.attacker, b.defender) <= 14:
+            fd *= 1.15
+        clamp = lambda v: max(0.6, min(2.5, v))
+        return clamp(fa), clamp(fd)
 
     def _formula(self, b: "Battle") -> None:
         b.att_won = self.rng.random() < b.p
@@ -1198,6 +1236,8 @@ class Campaign:
     def _answer(self, b: "Battle") -> str:
         """The defender may play one answer card from his hand."""
         cards = self.answers(b.defender, "attacked")
+        if not any(self.owner[n] == b.defender for n in neighbors(b.city)):
+            cards = [c for c in cards if c.key != "withdraw"]      # nowhere to withdraw to: no such answer
         if not cards:
             return ""
         if b.defender == self.player and self.answer_hook:
@@ -1260,18 +1300,10 @@ class Campaign:
             growth.on_city_lost(self, old, city)
         growth.on_city_won(self, faction)
         from .buildings import RUIN_CAPTURE, ruin
-        ruin(self, city, RUIN_CAPTURE, "город взят штурмом", all_of_them=True)
-        self.sick.pop(city, None)
-        if old == "goblin":
-            from .horde import on_city_lost
-            on_city_lost(self, city)
-        self.owner[city] = faction
-        from .order import taken
-        taken(self, city)
-        self.losses.append((self.turn, old, faction, city))
+        ruin(self, city, 1.0 if faction == "goblin" else RUIN_CAPTURE,     # goblins keep nothing people built
+             "город взят штурмом", all_of_them=True)
+        self.handover(city, faction)
         self.prosperity[city] = max(1, self.prosperity[city] - 1)
-        self.siege.pop(city, None)
-        self.defense.pop(city, None)
         self.stats["captured"][faction] += 1
         for o in defenders:                                      # retreat, or fall into captivity
             back = [n for n in neighbors(city) if self.owner[n] == old]
@@ -1322,10 +1354,40 @@ class Campaign:
                     self.officer_city[o] = city
         self.check_fall(old, faction)
 
+    def handover(self, city: str, faction: str) -> None:
+        """The city changes hands (storm, event, purchase): what belonged to the old owner's rule goes."""
+        old = self.owner[city]
+        if old == faction:
+            return
+        if old == "goblin":
+            from .horde import on_city_lost
+            on_city_lost(self, city)
+        self.owner[city] = faction
+        from .order import taken
+        taken(self, city)
+        if faction == "goblin":
+            self.law.pop(city, None)                         # lairs know no order
+        for d in (self.sick, self.siege, self.defense, self.muster, self.taxed, self.ravaged):
+            d.pop(city, None)
+        self.losses.append((self.turn, old, faction, city))
+
+    def settle_officers(self, faction: str) -> None:
+        """No officer is left standing in a city his realm does not hold (events, falls, revolts)."""
+        for o in self.officers_of(faction):
+            city = self.officer_city.get(o.key)
+            if city is None or self.owner.get(city) != faction:
+                dest = self.nearest_city(city or FACTION[faction].capital, faction) if self.cities_of(faction) else None
+                if dest:
+                    self.officer_city[o.key] = dest
+
     def check_fall(self, old: str, faction: str) -> None:
         """A realm without cities falls; its officers go over to the conqueror."""
         if not self.cities_of(old) and old in self.realms and self.realms[old].alive:
             self.realms[old].alive = False
+            for d in (self.truce, self.alliance, self.trade):     # treaties die with the realm
+                for k in [k for k in d if old in k]:
+                    del d[k]
+            self.paid.pop(old, None)
             ruler = self.leader.get(old)
             for o in [x.key for x in self.officers_of(old)]:
                 self.squads[o] = []

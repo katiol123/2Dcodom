@@ -208,8 +208,8 @@ def turn(camp, faction: str) -> None:
     if truces >= 7 and r.council:
         diplomat = max(r.council, key=lambda o: camp.stat(o, "ДИПЛОМАТИЯ"))
         award(camp, diplomat, "peacemaker")
-    rich = [c for c in camp.cities_of(faction) if camp.prosperity[c] >= 10]
-    if len(rich) >= 4:                                         # four cities in their golden age
+    rich = [c for c in camp.cities_of(faction) if camp.prosperity[c] >= camp.max_prosperity(c)]
+    if len(rich) >= 4:                                         # four cities grown as far as they can
         here = [o.key for c in rich for o in camp.officers_in(c)]
         if here:
             award(camp, max(here, key=lambda o: camp.stat(o, "УПРАВЛЕНИЕ")), "golden_governor")
@@ -226,7 +226,7 @@ def desert(camp, o: str) -> Optional[str]:
         near = [f for f in camp.alive() if f not in (old, "goblin")]
     if not near:
         return None
-    new = max(set(near), key=lambda f: camp.relation(old, f) + camp.rng.random())
+    new = max(sorted(set(near)), key=lambda f: camp.relation(old, f) + camp.rng.random())  # sorted: same seed, same world
     camp.defect(o, new)
     camp.loyalty[o] = 55
     camp.stats["deserted_officers"][old] += 1

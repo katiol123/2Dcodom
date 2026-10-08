@@ -95,13 +95,12 @@ def _goblin_horde(camp):
         old = camp.owner[city]
         garrison = camp.officers_in(city)
         camp.free[city] = []
-        camp.owner[city] = "goblin"
+        camp.handover(city, "goblin")
+        camp.buildings.pop(city, None)                         # the horde keeps nothing people built
         for o in garrison:                                     # the garrison's officers flee
             home = camp.nearest_city(city, old)
             if home:
                 camp.officer_city[o.key] = home
-        camp.losses.append((camp.turn, old, "goblin", city))
-        camp.siege.pop(city, None)
         taken.append(city)
         camp.check_fall(old, "goblin")
     for city in camp.cities_of("goblin"):
@@ -111,13 +110,18 @@ def _goblin_horde(camp):
     for o, f in list(camp.allegiance.items()):
         from .officers import OFFICER
         if OFFICER[o].faction == "goblin" and f != "goblin" and camp.loyalty.get(o, 60) < 70 \
-                and camp.cities_of("goblin"):
+                and camp.cities_of("goblin") and o not in camp.dead and not camp.is_leader(o):
             camp.defect(o, "goblin")
             camp.officer_city[o] = camp.rng.choice(camp.cities_of("goblin"))
             back += 1
+    from .succession import ensure_ruler
+    ensure_ruler(camp, "goblin")
     worst = camp.losses[-1][1] if taken else None
-    return ((f"гоблины {'восстали из пепла и ' if revived else ''}отбили {len(taken)} логова, "
-             f"во всех логовах новые орды" + (f", к ним вернулись {back} вождей" if back else "")), worst)
+    from .text import plural
+    return ((f"гоблины {'восстали из пепла и ' if revived else ''}отбили {len(taken)} "
+             f"{plural(len(taken), 'логово', 'логова', 'логов')}, во всех логовах новые орды"
+             + (f", к ним {plural(back, 'вернулся', 'вернулись', 'вернулись')} {back} "
+                f"{plural(back, 'вождь', 'вождя', 'вождей')}" if back else "")), worst)
 
 
 def _frost(camp):
@@ -160,16 +164,18 @@ def _revolt(camp):
         to = home if home in camp.realms and (camp.realms[home].alive or home != "goblin") else None
         if to is None or to == "goblin":
             continue
-        for o in camp.officers_in(city):
-            dest = camp.nearest_city(city, f)
-            if dest and dest != city:
-                camp.officer_city[o.key] = dest
+        garrison = camp.officers_in(city)
         camp.free[city] = []
         revived = not camp.realms[to].alive
         camp.realms[to].alive = True
-        camp.owner[city] = to
-        camp.losses.append((camp.turn, f, to, city))
+        camp.handover(city, to)
+        for o in garrison:                                    # the lords flee to their realm's nearest city
+            dest = camp.nearest_city(city, f)
+            if dest:
+                camp.officer_city[o.key] = dest
         camp.recruit(city, 140)
+        from .succession import ensure_ruler
+        ensure_ruler(camp, to)
         done.append(f"{CITY[city].name} -> {FACTION[to].short}" + (" (держава возродилась)" if revived else ""))
     if not done:                                              # no foreign lands: the peasants burn and run
         for city in sorted(camp.cities_of(f), key=lambda c: camp.prosperity[c])[:3]:

@@ -271,7 +271,8 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         return _best_city(camp, f, k, s)
     if k == "fair":
         return _best_city(camp, f, k, lambda c: camp.prosperity[c] * 10 + (PV
-                                                                            if camp.prosperity[c] < 10 else 0))
+                                                                            if camp.prosperity[c] < camp.max_prosperity(c)
+                                                                            else 0))
     if k == "caravan":
         best = (-1.0, [])
         for a in options(camp, f, k, []):
@@ -292,8 +293,10 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         cost = 80 if k == "build" else 0
         if k == "build" and gold < 80 + camp.upkeep(f):
             return -1, []
-        return _best_city(camp, f, k, lambda c: min(n, 10 - camp.prosperity[c]) * PV - cost
-                          + (10 if c in frontier(camp, f) else 20))
+        def room(c):                         # a city at its room gains nothing: no card wasted on it
+            r = min(n, camp.max_prosperity(c) - camp.prosperity[c])
+            return r * PV - cost + (10 if c in frontier(camp, f) else 20) if r > 0 else -1
+        return _best_city(camp, f, k, room)
     if k == "loan":
         return (90 if gold < camp.upkeep(f) * 1.5 else -1), []
     if k == "debt":
@@ -309,7 +312,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     if k == "tribute":
         own = set(camp.cities_of(f))
         payers = [x for x in camp.alive() if x not in (f, "goblin") and camp.relation(f, x) < 30
-                  and any(camp.owner[n] == x for c in own for n in neighbors(c))]
+                  and not camp.at_peace(f, x) and any(camp.owner[n] == x for c in own for n in neighbors(c))]
         return sum(min(50, camp.gold[x]) for x in payers), []
     if k in ("buy_off", "goblin_tongue"):
         from .horde import BUY_OFF_SILVER, buy_off_price, threatened
@@ -366,7 +369,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
                    and (camp.at_peace(f, x) or camp.relation(f, x) >= 40)]
         return 45 * len(friends) + 20, []
     # --- recruiting
-    budgets = {"levy": 90, "guard": 90, "militia_call": 130, "recruiters": 140, "raise_dead": 220,
+    budgets = {"levy": 90, "guard": 90, "militia_call": 130, "raise_dead": 220,
                "mercenary_company": 350, "forge_golem": 270, "troll_wakes": 400}
     if k in budgets:
         if k == "mercenary_company" and gold < 150 + camp.upkeep(f):
@@ -504,7 +507,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         curses = sum(1 for c in camp.realms[f].hand if c.card.tier == "curse")
         return 70 + 40 * curses, []
     if k == "counterspy":
-        return sum(55 for c in camp.realms[f].all_cards() if c.card.tier == "curse"), []
+        return sum(55 for c in camp.realms[f].all_cards() if c.card.tier == "curse" and c.key != "debt"), []
     if k == "mobilize":
         return (90 if _hand_has_more(camp, f, inst) else -1), []
     if k == "genie_lamp":
@@ -774,6 +777,35 @@ def fill_council(camp, f: str) -> None:
             camp.stats["reshuffles"][f] += 1
 
 
+# hostile acts: the computer does not spend them on realms it is at peace with (allies least of all)
+HOSTILE = {"arson", "agitators", "letters", "dirty_tricks", "plague_cauldron", "mushroom_haze", "all_seeing",
+           "secret_auction", "harem_intrigue", "winter_storm", "sabotage", "bribe", "plot", "sappers",
+           "thieves_guild", "thievery", "intimidate", "denounce"}
+
+
+def _victim(camp, targets) -> Optional[str]:
+    from .officers import OFFICER as _O
+    for t in targets[:2]:
+        if isinstance(t, str):
+            if t in camp.realms:
+                return t
+            if t in CITY:
+                return camp.owner[t]
+            if t in _O:
+                return camp.allegiance.get(t)
+    return None
+
+
+def peace_mult(camp, f: str, key: str, targets) -> float:
+    if key not in HOSTILE:
+        return 1.0
+    v = _victim(camp, targets)
+    if v is None or v == f or not camp.at_peace(f, v):
+        return 1.0
+    from .diplomacy import status
+    return 0.05 if status(camp, f, v) == "alliance" else 0.1
+
+
 def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float, object, list]]:
     from . import reign
     r = camp.realms[f]
@@ -784,7 +816,7 @@ def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float,
         v, targets = VALUE(camp, f, inst)
         if v is None or v <= 0:
             continue
-        v *= reign.card_mult(camp, f, inst.card)
+        v *= reign.card_mult(camp, f, inst.card) * peace_mult(camp, f, inst.key, targets)
         cost = camp.card_cost(f, inst)
         net = v - cost * ap_price
         if net <= 0:

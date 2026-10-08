@@ -265,12 +265,7 @@ def _great_card(key: str):
     return SimpleNamespace(name=g.name, text=f"{g.manner}. {g.text}", color=g.color, header="ОРДА УСИЛИЛАСЬ")
 
 
-def plural(n: int, one: str, few: str, many: str) -> str:
-    """Russian plural: 1 ЛОГОВО, 2 ЛОГОВА, 5 ЛОГОВ."""
-    n = abs(n) % 100
-    if 11 <= n <= 14:
-        return many
-    return one if n % 10 == 1 else few if 2 <= n % 10 <= 4 else many
+from .text import plural  # noqa: E402  (re-exported for the screens)
 
 
 def load_map(progress=None) -> pygame.Surface:

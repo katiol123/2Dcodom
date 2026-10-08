@@ -211,6 +211,10 @@ class CardTable:
     def player(self) -> Optional[str]:
         return self.camp.player
 
+    def watching(self) -> bool:
+        """A spectator - or a player whose realm has fallen: the world goes on, round by round."""
+        return self.player is None or not self.camp.realms[self.player].alive
+
     def my_turn(self) -> bool:
         return self.player is not None and self.camp.whose_turn() == self.player and \
             self.camp.realms[self.player].alive
@@ -282,7 +286,7 @@ class CardTable:
                 self.ms._city_panel_rect().collidepoint(mx, my)
                 or any(rect.collidepoint(mx, my) for rect, _ in self.ms._city_buttons())):
             return False                                # the city panel lies on top of the hand
-        if self.player is None:
+        if self.watching():
             return ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self.spectator_click(mx, my)
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 3):
             if self.end_rect().collidepoint(mx, my):
@@ -648,7 +652,7 @@ class CardTable:
         self._auto(dt)
 
     def _auto(self, dt: float) -> None:
-        if self.player is None and self.auto and not self.busy():
+        if self.watching() and self.auto and not self.busy():
             self.auto_t += dt
             if self.auto_t > 1.2:
                 self.auto_t = 0
@@ -685,6 +689,7 @@ class CardTable:
             self.font.draw(s, "ВАША ДЕРЖАВА ПАЛА", pr.centerx, pr.y + 5, "#e43b44", scale=2, anchor="midtop")
             self.font.draw(s, "МИР ЖИВЁТ ДАЛЬШЕ - СЛЕДИТЕ ЗА ХРОНИКОЙ", pr.centerx, pr.y + 24, "#c0cbdc",
                            anchor="midtop")
+            self._spectator_bar(s)
             return
         r = self.camp.realms[self.player]
         self._piles(s)
