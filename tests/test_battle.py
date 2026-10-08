@@ -117,17 +117,36 @@ class BattleTest(unittest.TestCase):
         self.assertFalse(ai._try_abilities(w, spear))
         barb.x = spear.x + 30
         barb.target = spear
-        self.assertTrue(ai._try_abilities(w, spear))
-        self.assertTrue(spear.action["counter"])
+        barb.status["charge"] = 1.0
         x0, hp0 = barb.x, barb.hp
-        ai._melee(w, spear, barb, counter=True)
+        self.assertTrue(ai._try_abilities(w, spear))   # the braced spear strikes at once
         self.assertFalse(barb.has("charge"))
         self.assertGreater(barb.x - x0, 15)        # knocked back
+        self.assertTrue(barb.has("stun"))          # thrown off its feet
+        self.assertIs(barb.target, spear)          # and turned on the spearman
         lo = ROSTER["spearman"].damage[0] * ai.COUNTER_BONUS * (1 - ROSTER["barbarian"].armor)
         self.assertGreaterEqual(hp0 - barb.hp, round(lo) - 1)
         x0 = barb.x
         ai._melee(w, spear, barb)                  # an ordinary thrust: no knockback
         self.assertAlmostEqual(barb.x, x0)
+
+    def test_spears_shield_the_mage_from_wolves(self):
+        """Two spearmen and a mage against two wolves rushing past at the mage: the spears must
+        meet the rush (no misses) and the mage must have a real chance to live."""
+        alive = misses = 0
+        for seed in range(20):
+            w = headless_world([["spearman", "spearman", "mage"], ["wolf", "wolf"]], seed)
+            seen = set()
+            mage = next(u for u in w.units if u.key == "mage")
+            while w.winner is None and w.time < 120:
+                w.step(1 / 60)
+                for t in w.texts:
+                    if id(t) not in seen:
+                        seen.add(id(t))
+                        misses += t.text == "МИМО"
+            alive += mage.alive
+        self.assertGreaterEqual(alive, 5)          # at least a quarter of the fights
+        self.assertLess(misses, 20)
 
     def test_rush_is_not_spammed_after_a_counter(self):
         for enemy in ("barbarian", "orc", "wolf"):

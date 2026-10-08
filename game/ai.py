@@ -397,8 +397,10 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
         # brace: meet an enemy rushing at me with the spear before it reaches me
         for e in world.enemies(u):
             if e.has("charge") and in_melee_range(u, e, slack=10):   # any rush that comes within reach
-                world.start_action(u, "strike", e, cooldown=0.45)   # a quick thrust
-                u.action["counter"] = True
+                # the braced spear meets the rush at once - a rusher would be past before a swing lands
+                world.start_action(u, "strike", e, cooldown=0.45)
+                u.action["fired"] = True
+                _melee(world, u, e, counter=True)
                 u.cd = u.cooldown()
                 return True
     if u.key in CHARGERS and u.abil.get("leap", 0) <= 0 and u.target is not None:
@@ -548,7 +550,7 @@ def charging_at(e: "Unit", u: "Unit") -> bool:
 
 def _melee(world: "World", u: "Unit", t: "Unit", counter: bool = False) -> None:
     rng = world.rng
-    if not in_melee_range(u, t, slack=6):
+    if not in_melee_range(u, t, slack=12 if counter else 6):   # a braced spear covers its whole reach
         world.text(u, "МИМО", "#8b9bb4")
         return
     lo, hi = u.type.damage
@@ -606,6 +608,11 @@ def _melee(world: "World", u: "Unit", t: "Unit", counter: bool = False) -> None:
             t.x = min(FIELD[2], max(FIELD[0], t.x + u.facing * 20))
             t.vx = t.vy = 0.0
             t.action = None
+            _stun(world, t, 0.6, quiet=True)                 # thrown off its feet
+            if not t.ranged and t.taunted_by is None:        # and it turns on the one who stabbed it
+                t.target = u
+                t.taunted_by = u
+                t.status["taunt"] = 1.5
         world.vfx.append(Vfx("dust", t.x, t.y - 6, flip=u.facing > 0))
         world.burst(t.x, t.y, 16, "#c0cbdc", n=8, speed=50, up=40, life=0.4)
     if u.key == "monk" and combo and t.alive:
