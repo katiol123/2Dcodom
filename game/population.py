@@ -45,7 +45,7 @@ def outbreak(camp, faction: str, city: Optional[str] = None) -> str:
     block = 1.0 if city in camp.immune else sickness_block(camp, city)
     if block and camp.rng.random() < block:
         camp.stats["outbreaks_stopped"][faction] += 1
-        msg = f"БОЛЕЗНЬ в {CITY[city].name} остановлена лазаретом"
+        msg = f"БОЛЕЗНЬ в городе {CITY[city].name} остановлена лазаретом"
     else:
         camp.sick[city] = SICK_TURNS
         msg = f"БОЛЕЗНЬ В ГОРОДЕ {CITY[city].name}: офицеры там в опасности {SICK_TURNS} х."
@@ -78,7 +78,7 @@ def turn(camp, faction: str) -> None:
         for o in [x.key for x in camp.officers_in(city)]:
             if camp.rng.random() < SICK_DEATH * _temple_care(camp, city):
                 camp.stats["sick_deaths"][faction] += 1
-                die(camp, o, _g(o, "умер", "умерла") + f" от болезни в {CITY[city].name}")
+                die(camp, o, _g(o, "умер", "умерла") + f" от болезни в городе {CITY[city].name}")
         camp.sick[city] -= 1
         if camp.sick[city] <= 0:
             del camp.sick[city]

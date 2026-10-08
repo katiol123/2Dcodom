@@ -890,8 +890,8 @@ class CardTable:
         where = f" - {CITY[chosen[0]].name}" if chosen and isinstance(chosen[0], str) and chosen[0] in CITY else ""
         font.draw(s, f"{card.name}{where}: {PROMPTS.get(p['step'], '')}", r.x + 6, r.y + 6, "#fee761")
         ruler = self.camp.leader.get(self.player)
-        if p["step"] in ("attackers", "attackers_far", "attackers_port") and ruler in p["options"]:
-            font.draw(s, "ПРАВИТЕЛЬ РИСКУЕТ ЖИЗНЬЮ В ШТУРМЕ", r.right - 6, r.y + 6, "#f6757a", anchor="topright")
+        if p["step"] in ("attackers", "attackers_far", "attackers_port") and ruler in p["picked"]:
+            font.draw(s, "ПРАВИТЕЛЬ РИСКУЕТ ЖИЗНЬЮ В ШТУРМЕ", r.right - 6, r.y + 15, "#f6757a", anchor="topright")
         s.blit(self.art.full(card.key, "", self.player), (r.x - CARD_W - 6, r.y))
         camp = self.camp
         for i, opt in enumerate(p["options"][p["scroll"]:p["scroll"] + self.ROWS]):
@@ -973,10 +973,13 @@ class CardTable:
 
     def _chron_lines(self) -> List[Tuple[int, str, str, bool]]:
         out = []
+        import re
         mine = set(self.camp.cities_of(self.player)) if self.player else set()
+        names = [CITY[c].name for c in mine] + ([FACTION[self.player].short] if self.player else [])
+        # whole words only: СЕВЕР must not match СЕВЕРНЫЙ БРОД
+        pat = re.compile(r"(?<![А-ЯЁA-Z])(" + "|".join(re.escape(n) for n in names) + r")(?![А-ЯЁA-Z])") if names else None
         for i, (turn, f, text) in enumerate(self.camp.log):
-            hurt = self.player is not None and f != self.player and \
-                (any(CITY[c].name in text for c in mine) or FACTION[self.player].short in text)
+            hurt = pat is not None and f != self.player and bool(pat.search(text.upper()))
             out.append((turn, f, text, i >= self.chron_from, hurt))
         return out
 
@@ -1426,4 +1429,4 @@ class CardTable:
         if hover:
             mx, my = mouse
             img = self.art.full(hover, "ОСНОВА", self.player)
-            s.blit(img, (min(mx + 8, W - CARD_W - 2), max(2, min(H - CARD_H - 2, my - CARD_H // 2))))
+            s.blit(img, (min(mx + 8, W - CARD_W - 2), max(r.y + 40, min(H - CARD_H - 2, my - CARD_H // 2))))

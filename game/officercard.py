@@ -79,7 +79,14 @@ class OfficerCard:
         hot = click and rect.collidepoint(self._mouse)
         edge = "#fee761" if hot else frame or f.color
         pygame.draw.rect(s, _c(edge), rect.inflate(2, 2), 1)
-        if not HIRES.blit(s, rect, f"face:{key}", lambda w, h, k=key: face(k, w, h)):
+        if key in self.camp.dead:                       # the fallen: a faded, grey portrait
+            def paint(w, h, k=key):
+                img = face(k, w, h).convert("L").convert("RGB")
+                return img.point(lambda v: int(v * 0.75 + 20))
+            name = f"face:{key}:dead"
+        else:
+            paint, name = (lambda w, h, k=key: face(k, w, h)), f"face:{key}"
+        if not HIRES.blit(s, rect, name, paint):
             pygame.draw.rect(s, _c(f.dark), rect)                       # still painting: a silhouette
             pygame.draw.ellipse(s, _c(f.color), (rect.centerx - rect.w // 4, rect.y + rect.h // 5,
                                                  rect.w // 2, rect.h // 2))
@@ -185,10 +192,8 @@ class OfficerCard:
                    ("ВЫДАЮЩИЙСЯ", "ДОСТОЙНЫЙ", "ЗАУРЯДНЫЙ"))[k]
         font.draw(s, verdict, pr.centerx, pr.bottom + 14, trim, anchor="midtop")
         loy = self.camp.loyalty.get(o.key, 100)
-        if dead:
-            pass
-        elif self.camp.is_leader(o.key):
-            font.draw(s, "ПРАВИТЕЛЬ ДЕРЖАВЫ", pr.centerx, pr.bottom + 23, "#8b9bb4", anchor="midtop")
+        if dead or self.camp.is_leader(o.key):
+            pass                                       # the rank line already says it
         else:
             font.draw(s, f"ВЕРНОСТЬ {loy}", pr.centerx, pr.bottom + 23, "#63c74d" if loy >= 60 else "#feae34"
                       if loy >= 35 else "#e43b44", anchor="midtop")
@@ -244,8 +249,11 @@ class OfficerCard:
             font.draw(s, f"ПРАВЛЕНИЕ: {name}", x, y, "#feae34")
             y += 9
             for tname, tdesc in traits:
-                for j, line in enumerate(self.wrap(f"{tname} - {tdesc}", 148)):
-                    font.draw(s, line, x + (0 if j == 0 else 4), y, "#fee761" if j == 0 else "#c0cbdc")
+                first, *rest = self.wrap(f"{tname} - {tdesc}", 148)
+                font.draw(s, first, x, y, "#fee761")
+                y += 7
+                for line in self.wrap(" ".join(rest), 144) if rest else []:
+                    font.draw(s, line, x + 4, y, "#c0cbdc")
                     y += 7
             y += 2
         else:
@@ -291,9 +299,18 @@ class OfficerCard:
             self.art = CardArt(self.r)
         from .succession import leader_cards
         mine = leader_cards(self.camp, serves.key, o.key) if self.camp.is_leader(o.key) else \
-            list(PERSONAL.get(o.key, ())) + self.camp.extra.get(o.key, [])
+            self.camp.personal(o.key)
         x1, y1 = r.x + 278, r.y + 168
-        font.draw(s, "КАРТЫ В КОЛОДУ СОВЕТА:", x1, y1, "#fee761")
+        if dead:                                       # when and how he fell, instead of cards nobody will play
+            when = next(((t, text) for t, f, text in reversed(self.camp.log) if o.name in text and any(
+                w in text for w in ("умер", "погиб", "пал", "казнен", "скончал", "СМЕРТЬ"))), None)
+            font.draw(s, "ПАМЯТЬ:", x1, y1, "#e43b44")
+            if when:
+                for i, line in enumerate(self.wrap(f"ход {when[0]}: {when[1]}", r.right - x1 - 8)[:4]):
+                    font.draw(s, line, x1, y1 + 9 + i * 7, "#c0cbdc")
+            mine = []
+        else:
+            font.draw(s, "КАРТЫ В КОЛОДУ СОВЕТА:", x1, y1, "#fee761")
         y1 += 9
         hover = None
         for k in mine:

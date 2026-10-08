@@ -283,7 +283,7 @@ def propose(camp, frm: str, to: str, kind: str, bonus: int = 0, turns: Optional[
         msg = f"{FACTION[to].short} ОТВЕРГЛИ {name}" + (f" ({top})" if top and to != camp.player else "")
         camp.log_event(frm, msg)
         if to != frm:
-            camp.log_event(to, f"Отвергли {name} от {FACTION[frm].short}")
+            camp.log_event(to, f"Отвергли {name} от державы {FACTION[frm].short}")
         return False, msg
     p = _pair(frm, to)
     if kind == "truce":
@@ -302,7 +302,7 @@ def propose(camp, frm: str, to: str, kind: str, bonus: int = 0, turns: Optional[
         msg = f"{name} С {FACTION[to].short}: +{g} ЗОЛОТА ЗА ХОД"
     camp.change_relation(frm, to, 4)
     camp.log_event(frm, msg)
-    camp.log_event(to, f"{name} с {FACTION[frm].short} заключён")
+    camp.log_event(to, f"{name} с державой {FACTION[frm].short} заключён")
     return True, msg
 
 

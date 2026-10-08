@@ -9,6 +9,8 @@ from typing import List, Optional, Tuple
 
 import pygame
 
+from pixelforge.text import text_width
+
 from . import diplomacy as dip
 from .factions import ALL_FACTIONS, FACTION, relation as lore
 from .render import _c
@@ -178,7 +180,7 @@ class DiploWindow:
             st = {"war": "ВОЙНА", "truce": "МИР", "alliance": "СОЮЗ"}[dip.status(camp, a, b)]
             font.draw(s, f"{FACTION[a].short} - {FACTION[b].short}: {v} {name}, {st}", r.x + 8, y, col)
             yy = y + 8
-            for line in wrap(lore(a, b)[1], x0 + len(ALL_FACTIONS) * cw - r.x - 8)[:3]:
+            for line in wrap("ИСТОРИЯ: " + lore(a, b)[1], x0 + len(ALL_FACTIONS) * cw - r.x - 8)[:3]:
                 font.draw(s, line, r.x + 8, yy, "#c0cbdc")
                 yy += 7
             for line in wrap(dip.TIER_EFFECTS[key], x0 + len(ALL_FACTIONS) * cw - r.x - 8)[:3]:
@@ -186,13 +188,17 @@ class DiploWindow:
                 yy += 7
         else:
             x = r.x + 8
+            limit = self._panel_x() - 10                       # never across the divider: wrap the legend
             for top, key, name, col in dip.TIERS:
                 lo = {"feud": 1, "hostile": 15, "neutral": 35, "friend": 65, "brother": 85}[key]
-                x = font.draw(s, f"{lo}+ {name}", x, y, col).right + 6
-            font.draw(s, "БЕЛЫЙ УГОЛОК - МИР, ЗЕЛЁНЫЙ - СОЮЗ, ! - ГЕГЕМОН (ЕГО БОЯТСЯ ВСЕ)", r.x + 8, y + 9,
-                      "#5a6988")
-            font.draw(s, "НАВЕДИ НА КЛЕТКУ - ПРИЧИНА И ЧТО ДАЮТ ОТНОШЕНИЯ; КЛИК - ВЫБРАТЬ ДЕРЖАВУ", r.x + 8, y + 17,
-                      "#5a6988")
+                item = f"{lo}+ {name}"
+                if x + text_width(item) > limit:
+                    x, y = r.x + 8, y + 8
+                x = font.draw(s, item, x, y, col).right + 6
+            for line in wrap("БЕЛЫЙ УГОЛОК - МИР, ЗЕЛЁНЫЙ - СОЮЗ, ! - ГЕГЕМОН (ЕГО БОЯТСЯ ВСЕ). НАВЕДИ НА КЛЕТКУ - "
+                             "ПРИЧИНА И ЧТО ДАЮТ ОТНОШЕНИЯ; КЛИК - ВЫБРАТЬ ДЕРЖАВУ", limit - r.x - 8):
+                y += 8
+                font.draw(s, line, r.x + 8, y, "#5a6988")
         self._panel(s)
 
     def _panel(self, s: pygame.Surface) -> None:
@@ -221,7 +227,7 @@ class DiploWindow:
         ruler = camp.leader.get(other)
         if ruler and reign.shown(camp, ruler):          # how their ruler governs, with the traits on hover
             name, traits = reign.describe(ruler)
-            label = f"ПРАВИТЕЛЬ: {name}"
+            label = f"ПРАВЛЕНИЕ: {name}"
             rect = font.draw(s, label, r.right - 8, r.y + 17, "#feae34", anchor="topright")
             if rect.collidepoint(self.ms._mouse):
                 tip = pygame.Rect(rect.right - 200, rect.bottom + 2, 200, 4 + 16 * len(traits))
@@ -246,9 +252,11 @@ class DiploWindow:
         if pair in camp.trade:
             stxt += f", ТОРГОВЛЯ +{camp.trade[pair][1]}"
         font.draw(s, f"ОТНОШЕНИЯ {v}: {name}", x, r.y + 36, col)
-        font.draw(s, stxt, x, r.y + 44, "#ffffff")
-        y = r.y + 53
-        for line in wrap(dip.TIER_EFFECTS[key], w)[:4]:
+        lines = wrap(stxt, w)[:2]
+        for i, line in enumerate(lines):
+            font.draw(s, line, x, r.y + 44 + i * 7, "#ffffff")
+        y = r.y + 46 + 7 * len(lines)
+        for line in wrap(dip.TIER_EFFECTS[key], w)[:4 - (len(lines) - 1)]:
             font.draw(s, line, x, y, "#8b9bb4")
             y += 7
         if camp.betrayals[p]:
@@ -263,7 +271,7 @@ class DiploWindow:
             base = ("#a22633" if k == "war" else "#3e8948") if ok else "#3a4466"
             s.blit(self.ms.r.panel(rect.w, rect.h, base="#5a6988" if hot and ok else base,
                                    border="#c0cbdc" if ok else "#5a6988"), rect.topleft)
-            font.draw(s, label, rect.centerx, rect.centery, "#ffffff" if ok else "#8b9bb4", anchor="center")
+            font.draw(s, label, rect.centerx, rect.centery, "#ffffff" if ok else "#5a6988", anchor="center")
         # how they would weigh the hovered proposal
         y = r.y + 136
         k = self.hover_action

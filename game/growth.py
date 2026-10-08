@@ -230,5 +230,5 @@ def desert(camp, o: str) -> Optional[str]:
     camp.defect(o, new)
     camp.loyalty[o] = 55
     camp.stats["deserted_officers"][old] += 1
-    camp.log_event(old, f"ИЗМЕНА: {OFFICER[o].name} {_g(o, 'ушёл', 'ушла')} к {FACTION[new].short}")
+    camp.log_event(old, f"ИЗМЕНА: {OFFICER[o].name} {_g(o, 'ушёл', 'ушла')} к державе {FACTION[new].short}")
     return new

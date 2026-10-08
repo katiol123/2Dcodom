@@ -1325,7 +1325,7 @@ class Campaign:
             if fate == "execute":
                 from .succession import die
                 self.change_relation(faction, old, -10)
-                die(self, o, "казнен" + ("а" if OFFICER[o].female else "") + f" по приказу {FACTION[faction].short}")
+                die(self, o, "казнен" + ("а" if OFFICER[o].female else "") + f" по приказу державы {FACTION[faction].short}")
                 continue
             if fate == "release":
                 self.squads[o] = []

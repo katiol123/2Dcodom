@@ -663,13 +663,14 @@ class Renderer:
             s.blit(self.panel(pw, ph, base="#181425", border=tm.color), (px, py))
             self.font.draw(s, "ПОБЕДА", W // 2, py + 8, "#fee761", scale=3, anchor="midtop")
             self.font.draw(s, tm.name, W // 2, py + 30, tm.light, scale=2, anchor="midtop")
-            m = world.mvp()
+            winners = world.roster(world.winner)          # the best fighter of the winning side
+            m = max(winners, key=lambda u: (u.dealt, u.kills)) if winners else None
             if m is not None:
                 self.font.draw(s, f"ЛУЧШИЙ БОЕЦ: {m.type.name}  УРОН {int(m.dealt)}  УБИЙСТВ {m.kills}",
-                               W // 2, py + 48, world.teams[m.team].light, anchor="midtop")
+                               W // 2, py + 48, tm.light, anchor="midtop")
             surv = world.alive_count(world.winner)
-            self.font.draw(s, f"ВЫЖИЛО {surv} ИЗ 7   ВРЕМЯ {int(world.end_time)} С", W // 2, py + 57, "#8b9bb4",
-                           anchor="midtop")
+            self.font.draw(s, f"ВЫЖИЛО {surv} ИЗ {len(winners)}   ВРЕМЯ {int(world.end_time)} С", W // 2, py + 57,
+                           "#8b9bb4", anchor="midtop")
         if paused:
             self.font.draw(s, "ПАУЗА", W // 2, H // 2, "#ffffff", scale=3, anchor="center")
         if speed != 1.0:

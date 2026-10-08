@@ -867,6 +867,12 @@ class WorldMapScreen:
             s.blit(self.crown, (x - 1, r.y + 3))
             x += 6
         self.font.draw(s, c.name, x, r.y + 1, "#fee761" if hot else "#ffffff")
+        law = self.camp.law.get(c.key)
+        if c.key in self.camp.dens or (law is not None and law < 4 and self.camp.owner[c.key] != "goblin"):
+            den = c.key in self.camp.dens                  # crime at a glance: a red pip (a den), amber (low order)
+            pygame.draw.rect(s, INK, (r.right - 4, r.y - 4, 7, 7))
+            pygame.draw.rect(s, _c("#e43b44" if den else "#feae34"), (r.right - 3, r.y - 3, 5, 5))
+            s.set_at((r.right - 1, r.y - 2), _c("#ffffff"))
 
     def _bars(self, s: pygame.Surface) -> None:
         f = self.font
@@ -901,12 +907,12 @@ class WorldMapScreen:
             tags.append((f"{e.name.split()[-1]} {left}Х.", e.color))   # short: СТУЖА, ЗАСУХА...
         limit = self.buttons[0].rect.x - 4 if self.buttons else W
         for i, (text, col) in enumerate(tags):
-            more = f"+{len(tags) - i}"
-            if x + text_width(text) > limit - (text_width(more) + 4 if i < len(tags) - 1 else 0):
-                if x + text_width(more) <= limit:
-                    f.draw(s, more, x, 4, "#c0cbdc")
+            rest = len(tags) - i - 1
+            room = limit - (text_width(f"+{rest}") + 2 if rest else 0)
+            if x + text_width(text) > room:                       # no room: say how many are hidden
+                f.draw(s, f"+{len(tags) - i}", min(x, limit - text_width(f"+{len(tags) - i}")), 4, "#fee761")
                 break
-            x = f.draw(s, text, x, 4, col).right + 6
+            x = f.draw(s, text, x, 4, col).right + 4
         for b in self.buttons:
             active = b.action == "diplomacy" and self.diplomacy
             s.blit(self.r.panel(b.rect.w, b.rect.h, base="#5a6988" if active else b.color, border="#8b9bb4"),
@@ -921,10 +927,8 @@ class WorldMapScreen:
             if hot:
                 pygame.draw.rect(s, _c(fac.color), (x, y + 2, cw - 3, BOTTOM - 4), 1)
             s.blit(self.shields[fac.key], (x + 2, y + 3))
-            name = fac.short
-            while text_width(name) > cw - 22 and len(name) > 3:   # never run into the next shield
-                name = name[:-1]
-            f.draw(s, name if name == fac.short else name + ".", x + 19, y + 4, fac.light)
+            name = fac.short if text_width(fac.short) <= cw - 22 else fac.short[:5] + "."   # ВЕЛЬД., ДУРГХ.
+            f.draw(s, name, x + 19, y + 4, fac.light)
             n = len(self.camp.cities_of(fac.key))
             label = (f"{n} ГОР." if fac.playable else f"{n} {plural(n, 'ЛОГОВО', 'ЛОГОВА', 'ЛОГОВ')}") if n \
                 else "РАЗГРОМ"
@@ -953,10 +957,9 @@ class WorldMapScreen:
         c = CITY[self.selected]
         w = 166
         roads = wrap("ДОРОГИ: " + ", ".join(CITY[n].name for n in neighbors(c.key)), w - 10)
-        status = sum(len(wrap(t, w - 10)) for t, _ in self._city_status(c))
-        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 21 + 17 + 9 \
-            + 8 + 8 * status
-        return pygame.Rect(W - w - 4, TOP + 3, w, h)
+        status = sum(1 if isinstance(t, tuple) else len(wrap(t, w - 10)) for t, _ in self._city_status(c))
+        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 1 + 8 + 8 * status + 9 + 22 + 8 + 17 + 8 + 1 + 7 * len(roads) + 4
+        return pygame.Rect(W - w - 4, TOP + 3, w, min(h, H - BOTTOM - TOP - 6))   # never over the bottom bar
 
     def _city_status(self, c: City) -> List[Tuple[str, str]]:
         """The city's state, one line (wrapped) per topic: tax and order, defence and troubles, buildings."""
@@ -964,10 +967,12 @@ class WorldMapScreen:
         owner = camp.owner[c.key]
         out = []
         tax = f"ПОДАТЬ {camp.income_of(c.key, owner)}"
-        if c.key in camp.law and owner != "goblin":
+        if c.key in camp.law and owner != "goblin":           # tax and order share a line, in their own colours
             law = camp.law[c.key]
-            tax += f"   ПОРЯДОК {law}/10" + ("   ВОРОВСКОЙ ПРИТОН" if c.key in camp.dens else "")
-            out.append((tax, "#fee761" if law >= 4 else "#f6757a"))
+            out.append(((tax, "#fee761"), (f"ПОРЯДОК {law}/10",
+                                             "#a7f070" if law >= 6 else "#feae34" if law >= 4 else "#f6757a")))
+            if c.key in camp.dens:
+                out.append(("ВОРОВСКОЙ ПРИТОН: ПОДАТЬ -30%", "#e43b44"))
         else:
             out.append((tax, "#fee761"))
         notes = [f"ЗАЩИТА {int(camp.defense_power(c.key))}"]
@@ -1019,6 +1024,11 @@ class WorldMapScreen:
             pygame.draw.rect(s, _c("#feae34") if i < pros else _c("#3a4466"), (r.x + 63 + i * 6, y + 1, 3, 4))
         y += 8
         for text, col in self._city_status(c):
+            if isinstance(text, tuple):                       # two coloured parts on one line
+                font.draw(s, col[0], r.x + 5 + text_width(text[0]) + 12, y, col[1])
+                font.draw(s, text[0], r.x + 5, y, text[1])
+                y += 8
+                continue
             for line in wrap(text, r.w - 10):
                 font.draw(s, line, r.x + 5, y, col)
                 y += 8
@@ -1044,25 +1054,30 @@ class WorldMapScreen:
         font.draw(s, f"ОТКРЫТ ЕЩЁ {left} Х." if left else "ЗАКРЫТ (КАРТА СБОР ВОЙСК)", r.right - 5, y,
                   "#a7f070" if left else "#5a6988", anchor="topright")
         y += 8
-        team = TEAMS[0]
-        for key in c.pool:
-            box = pygame.Rect(r.x + 5, y, 20, 15)
-            pygame.draw.rect(s, (38, 43, 68), box)
-            pygame.draw.rect(s, (90, 105, 136), box, 1)
+        team = TEAMS[0]                                 # the pool: one row of portraits, details of the hovered one
+        from .units import ROSTER
+        shown = c.pool[0]
+        for i, key in enumerate(c.pool):
+            box = pygame.Rect(r.x + 5 + i * 23, y, 20, 15)
+            hot = box.collidepoint(self._mouse)
+            if hot:
+                shown = key
+            pygame.draw.rect(s, (58, 68, 102) if hot else (38, 43, 68), box)
+            pygame.draw.rect(s, _c("#fee761") if hot else (90, 105, 136), box, 1)
             if unit_exists(key):
                 por = self.r.portrait(f"{key}_{team.key}")
                 s.blit(por, (box.x + 1, box.y + 1), area=pygame.Rect(0, 0, 18, 13))
-                from .units import ROSTER
-                font.draw(s, unit_name(key), box.right + 4, y + 1, "#ffffff")
-                font.draw(s, f"{unit_role(key)}  {ROSTER[key].cost} ЗОЛ.", box.right + 4, y + 8, "#8b9bb4")
             else:
                 font.draw(s, "?", box.centerx, box.centery, "#5a6988", anchor="center")
-                font.draw(s, unit_name(key), box.right + 4, y + 1, "#c0cbdc")
-                font.draw(s, unit_role(key) + " - НОВЫЙ", box.right + 4, y + 8, "#41a6f6")
-            y += 17
-        y += 1
+        y += 17
+        info = (f"{unit_name(shown)} - {unit_role(shown)}, {ROSTER[shown].cost} ЗОЛ." if unit_exists(shown)
+                else f"{unit_name(shown)} - {unit_role(shown)} (НОВЫЙ)")
+        font.draw(s, info, r.x + 5, y, "#c0cbdc")
+        y += 9
         names = ", ".join(CITY[n].name for n in neighbors(c.key))
         for line in wrap("ДОРОГИ: " + names, r.w - 10):
+            if y + 7 > r.bottom - 2:
+                break
             font.draw(s, line, r.x + 5, y, "#8b9bb4")
             y += 7
 
@@ -1122,13 +1137,17 @@ class WorldMapScreen:
             y += 1
         # every officer serving the faction: click a face for the card
         offs = self.camp.officers_of(f.key)
-        per = 12
+        top = y + 10                                       # below the features
+        per, px, py, fw, fh = 12, 20, 23, 18, 21
         rows = (len(offs) + per - 1) // per
-        y = r.bottom - 6 - rows * 23
+        if rows * py > r.bottom - 6 - top:                 # a big court: smaller faces, more per row
+            per, px, py, fw, fh = 16, 15, 18, 14, 17
+            rows = (len(offs) + per - 1) // per
+        y = max(top, r.bottom - 6 - rows * py)
         font.draw(s, f"ОФИЦЕРЫ: {len(offs)}", r.x + 6, y - 9, "#fee761")
         hot = None
         for i, o in enumerate(offs):
-            rect = pygame.Rect(r.x + 7 + (i % per) * 20, y + (i // per) * 23, 18, 21)
+            rect = pygame.Rect(r.x + 7 + (i % per) * px, y + (i // per) * py, fw, fh)
             self.cards.face(s, rect, o.key)
             if rect.collidepoint(self._mouse):
                 hot = o
@@ -1444,6 +1463,7 @@ class WorldMapScreen:
             self._build_window(s, city)
             return
         if kind == "army":
+            self._stat_tip = None
             self._army_left(s, f)
         else:
             self._hire_left(s, c, f)
@@ -1468,7 +1488,9 @@ class WorldMapScreen:
             font.draw(s, "НИКОГО - НАЙМИТЕ ВОИНОВ", x + (r.right - x) // 2, r.y + 60, "#3a4466", anchor="midtop")
         # hint / toast
         text, col, until = self.toast
-        if self.time < until:
+        if getattr(self, "_stat_tip", None):
+            font.draw(s, self._stat_tip, r.centerx, r.bottom - 10, "#41a6f6", anchor="midtop")
+        elif self.time < until:
             font.draw(s, text, r.centerx, r.bottom - 10, col, anchor="midtop")
         else:
             hint = ("КЛИК ПО СВОБОДНОМУ ВОИНУ - В ОТРЯД ОФИЦЕРА, ПО СЛОТУ - ВЕРНУТЬ В ГОРОД   < > - ОФИЦЕР"
@@ -1517,8 +1539,7 @@ class WorldMapScreen:
             pygame.draw.rect(s, (38, 43, 68), (x, y + 7, 92, 2))
             pygame.draw.rect(s, _c("#41a6f6"), (x, y + 7, int(92 * v / 20), 2))
             if hot:
-                font.draw(s, STAT_HELP[st], r.centerx, r.bottom - 10, "#41a6f6", anchor="midtop")
-                self.toast = ("", "#ffffff", 0.0)
+                self._stat_tip = STAT_HELP[st]           # shown in the footer instead of the hint
         squad = self.camp.squads[o.key]
         for k in range(SQUAD_SLOTS):
             key = squad[k].key if k < len(squad) else None

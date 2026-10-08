@@ -412,6 +412,9 @@ class World:
                     return
                 if not number and t.text == text and t.t < 1.5:
                     return                                    # the same shout again: once is enough
+            if not number and any(t.text == text and t.t < 1.0 and abs(t.x - x) < 30 and abs(t.y - y) < 20
+                                  for t in self.texts):
+                return                                        # two neighbours shouting the same word: one shout
         # stack instead of overlapping: fresh texts near the same spot go up and aside
         fresh = sum(1 for t in self.texts if t.t < 0.45 and abs(t.x - x) < 18 and abs(t.y - y) < 26)
         dx = (0, -9, 9)[fresh % 3] if fresh else 0

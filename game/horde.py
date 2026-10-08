@@ -106,7 +106,7 @@ def build(camp, kind: str, city: str) -> bool:
     g = GREAT[kind]
     text = (f"Орда {'снова ' if again else ''}возвела в логове {CITY[city].name} {g.name} ({g.manner}). "
             f"{g.text}")
-    camp.log_event(GOBLIN, f"ВЕЛИКАЯ ПОСТРОЙКА ОРДЫ: {g.name} в {CITY[city].name}")
+    camp.log_event(GOBLIN, f"ВЕЛИКАЯ ПОСТРОЙКА ОРДЫ: {g.name} в городе {CITY[city].name}")
     camp.world_events.append((camp.turn, f"great:{kind}", text))   # the player sees it as a big card
     return True
 
@@ -118,7 +118,7 @@ def on_city_lost(camp, city: str) -> None:
         del camp.great[GOBLIN]
         camp.pit.clear()
         camp.stats["great_lost"][g[0]] += 1
-        camp.log_event(GOBLIN, f"{GREAT[g[0]].name} в {CITY[city].name} сожжён")
+        camp.log_event(GOBLIN, f"{GREAT[g[0]].name} в городе {CITY[city].name} сожжён")
 
 
 # --- effects ----------------------------------------------------------------------------------------

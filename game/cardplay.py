@@ -327,7 +327,7 @@ def _denounce(camp, f, t):
     if any(c.card.tier == "curse" for c in camp.realms[rival].hand):
         camp.gold[rival] = max(0, camp.gold[rival] - 20)
         return f"{FACTION[rival].short}: найдено проклятие, -20 золота"
-    return f"рука {FACTION[rival].short} раскрыта"
+    return f"рука державы {FACTION[rival].short} раскрыта"
 
 
 @effect("parade")
@@ -547,7 +547,7 @@ def _patrol(camp, f, t):
 def _scouts(camp, f, t):
     _reveal(camp, f, t[0])
     camp.draw_cards(f, 2)
-    return f"рука {FACTION[t[0]].short} раскрыта"
+    return f"рука державы {FACTION[t[0]].short} раскрыта"
 
 
 @effect("moon_rite")
@@ -560,7 +560,7 @@ def _moon(camp, f, t):
 def _whisper(camp, f, t):
     _reveal(camp, f, t[0])
     camp.draw_cards(f, 1)
-    return f"рука {FACTION[t[0]].short} раскрыта"
+    return f"рука державы {FACTION[t[0]].short} раскрыта"
 
 
 @effect("sabotage")
@@ -709,7 +709,7 @@ def _buyout(camp, f, t):
     camp.handover(city, f)
     camp.change_relation(f, old, -15)
     camp.check_fall(old, f)
-    return f"{CITY[city].name} куплен у {FACTION[old].short} за {price} золота"
+    return f"{CITY[city].name} куплен у державы {FACTION[old].short} за {price} золота"
 
 
 @effect("mobilize")
@@ -900,7 +900,7 @@ def _thievery(camp, f, t):
     camp.gold[t[0]] -= g
     _gold(camp, f, g, "theft")
     camp.change_relation(f, t[0], -6)
-    return f"украдено {g} золота у {FACTION[t[0]].short}"
+    return f"украдено {g} золота у державы {FACTION[t[0]].short}"
 
 
 @effect("ancient_map")
@@ -1006,7 +1006,7 @@ def _peacemaker(camp, f, t):
         return f"{FACTION[t[0]].short} не желают мира"
     camp.truce[frozenset((f, t[0]))] = 10
     camp.change_relation(f, t[0], 10)
-    return f"мир с {FACTION[t[0]].short} на 10 ходов"
+    return f"мир с державой {FACTION[t[0]].short} на 10 ходов"
 
 
 @effect("giant_slayer")
@@ -1033,7 +1033,7 @@ def _goblin_tongue(camp, f, t):
     from .horde import buy_off
     out = buy_off(camp, f, turns=4, free=True)
     got = camp.recruit(t[0], 100, ("goblin", "goblin_bomber"))
-    return f"{out}; гоблины на {got} мощи пришли в {CITY[t[0]].name}"
+    return f"{out}; гоблины на {got} мощи пришли в городе {CITY[t[0]].name}"
 
 
 def _scare(camp, f, x, amount) -> str:
@@ -1122,7 +1122,7 @@ def _vice(camp, f: str, inst) -> None:
         if others and f != "goblin":
             x = camp.rng.choice(others)
             camp.change_relation(f, x, -10)
-            camp.log_event(f, f"ГРУБОСТЬ: {who} оскорбил посла, отношения с {FACTION[x].short} -10")
+            camp.log_event(f, f"ГРУБОСТЬ: {who} оскорбил посла, отношения с державой {FACTION[x].short} -10")
     elif key == "envy":
         others = [o for o in r.council if o != inst.origin and not camp.is_leader(o)]
         if others:
@@ -1155,7 +1155,7 @@ def _vice(camp, f: str, inst) -> None:
         city = camp.officer_city.get(inst.origin)
         if city and camp.owner[city] == f:
             _prosper(camp, city, -1)
-            camp.log_event(f, f"ЖЕСТОКОСТЬ: {who} лютует в {CITY[city].name}, процветание -1")
+            camp.log_event(f, f"ЖЕСТОКОСТЬ: {who} лютует в городе {CITY[city].name}, процветание -1")
     elif key == "pride":
         if inst.origin in OFFICER:
             camp.change_loyalty(inst.origin, -8)
@@ -1182,7 +1182,7 @@ def on_draw(camp, f: str, inst) -> None:
         if cities:
             c = camp.rng.choice(cities)
             _prosper(camp, c, -2)
-            camp.log_event(f, f"ЧУМА в {CITY[c].name}: процветание -2")
+            camp.log_event(f, f"ЧУМА в городе {CITY[c].name}: процветание -2")
         if camp.rng.random() < 0.35 and sum(1 for c in r.all_cards() if c.key == "plague") < 3:
             r.discard.append(camp._inst("plague", "curse"))       # it spreads
     elif key == "desertion":
