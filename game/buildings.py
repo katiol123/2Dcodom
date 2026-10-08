@@ -17,6 +17,9 @@ The buildings and where they act:
 * ХРАМ      - officers standing here gain loyalty every turn and catch sickness half as often;
 * АКАДЕМИЯ  - officers standing here learn twice as fast in garrison; young talents prefer to
   come of age here and come more often.
+
+РИСТАЛИЩЕ is built only by its card (rare, cards.py): the realm's cavalry (``MOUNT_OF``) is hired
+there on any turn, without a muster, 15% cheaper; the city's defence x1.1.
 """
 
 from __future__ import annotations
@@ -47,7 +50,11 @@ BUILDINGS = {b.key: b for b in (
     Building("academy", "АКАДЕМИЯ", 200, "Офицеры в городе учатся в гарнизоне вдвое быстрее; молодые таланты "
                                          "появляются здесь и вдвое чаще."),
 )}
-ORDER = tuple(BUILDINGS)
+BUILDINGS["tiltyard"] = Building("tiltyard", "РИСТАЛИЩЕ", 140, "Конница державы нанимается здесь в любой ход, "
+                                  "без СБОРА ВОЙСК, на 15% дешевле; оборона города x1.1.")
+ORDER = tuple(k for k in BUILDINGS if k != "tiltyard")   # what СТРОЙКА and the master builder can put up
+MOUNT_OF = {"aldern": "lancer", "league": "uhlan", "khanate": "horse_archer", "sultanate": "mamluk"}
+TILTYARD_PRICE, TILTYARD_DEFENSE = 0.85, 1.1
 TOWER_DEFENSE = 110
 RUIN_RAID, RUIN_FAILED_STORM, RUIN_CAPTURE = 0.5, 0.2, 0.4
 
@@ -126,15 +133,22 @@ def sickness_block(camp, city: str) -> float:
 
 
 def defense_mult(camp, city: str) -> float:
-    return 1.25 if count(camp, city, "walls") else 1.0
+    return (1.25 if count(camp, city, "walls") else 1.0) * (TILTYARD_DEFENSE if count(camp, city, "tiltyard") else 1.0)
+
+
+def tiltyard_mount(camp, city: str):
+    """The cavalry a tiltyard in the city offers its owner (None: no tiltyard, or a realm without horse)."""
+    return MOUNT_OF.get(camp.owner.get(city)) if count(camp, city, "tiltyard") else None
 
 
 def defense_bonus(camp, city: str) -> float:
     return TOWER_DEFENSE if count(camp, city, "tower") else 0.0
 
 
-def hire_price(camp, city: str, cost: int) -> int:
-    return int(round(cost * 0.8)) if count(camp, city, "barracks") else cost
+def hire_price(camp, city: str, cost: int, key: str = "") -> int:
+    if key and key == tiltyard_mount(camp, city):
+        cost = cost * TILTYARD_PRICE
+    return int(round(cost * 0.8)) if count(camp, city, "barracks") else int(round(cost))
 
 
 # --- the computer builds ---------------------------------------------------------------------------

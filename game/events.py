@@ -53,14 +53,18 @@ def _around(city: str, steps: int) -> Dict[str, int]:
     return dist
 
 
-def _cull(camp, city: str, frac: float) -> int:
-    """Remove a share of the troops in a city (garrison and the squads standing there)."""
+def _cull(camp, city: str, frac: float, spare_undead: bool = False) -> int:
+    """Remove a share of the troops in a city (garrison and the squads standing there); a plague
+    spares the undead (``spare_undead``)."""
+    from .units import ROSTER
     lost = 0
     lists = [camp.free[city]] + [camp.squads[o.key] for o in camp.officers_in(city)]
     for lst in lists:
-        n = min(len(lst), int(len(lst) * frac + camp.rng.random()))
-        camp.rng.shuffle(lst)
-        del lst[:n]
+        living = [t for t in lst if not (spare_undead and ROSTER[t.key].undead)]
+        n = min(len(living), int(len(living) * frac + camp.rng.random()))
+        camp.rng.shuffle(living)
+        dead = {id(t) for t in living[:n]}
+        lst[:] = [t for t in lst if id(t) not in dead]
         lost += n
     return lost
 
@@ -76,12 +80,11 @@ def _plague(camp):
     for city, d in reach.items():
         camp.prosperity[city] = max(1, camp.prosperity[city] - (4 if d == 0 else 3 if d == 1 else 2))
         owner = camp.owner[city]
-        if owner != "ashen":                                   # the dead fear no plague
-            _cull(camp, city, 0.6 if d == 0 else 0.4 if d == 1 else 0.25)
+        _cull(camp, city, 0.6 if d == 0 else 0.4 if d == 1 else 0.25, spare_undead=True)   # the dead fear no plague
         hit[owner] = hit.get(owner, 0) + 1
     worst = max(hit, key=hit.get)
     return (f"мор вспыхнул в городе {CITY[origin].name} и прошёл по {len(reach)} городам: процветание упало, "
-            f"гарнизоны поредели (нежить Пепла не болеет)", worst)
+            f"гарнизоны поредели (нежить не болеет)", worst)
 
 
 def _goblin_horde(camp):
@@ -232,7 +235,7 @@ def _drought(camp):
 
 EVENTS: List[Event] = [
     Event("plague", "ЧУМА НА МАТЕРИКЕ", "Мор идёт от богатейшего города на 2 дороги вокруг: процветание "
-          "-4/-3/-2, гарнизоны теряют до 60% воинов (нежить Пепла не болеет); в каждую колоду ложатся ещё 2 "
+          "-4/-3/-2, гарнизоны теряют до 60% воинов (на нежить мор не действует); в каждую колоду ложатся ещё 2 "
           "БОЛЕЗНИ В ГОРОДЕ на 10 ходов.", _plague, color="#7a9e48"),
     Event("goblin_horde", "НАШЕСТВИЕ ГОБЛИНОВ", "Гоблины отбивают до 3 слабейших своих логов, во всех "
           "логовах новые орды; гоблинские вожди на службе людей могут вернуться к своим.", _goblin_horde,

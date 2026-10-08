@@ -1205,8 +1205,9 @@ class WorldMapScreen:
         y += 8
         team = TEAMS[0]                                 # the pool: one row of portraits, details of the hovered one
         from .units import ROSTER
-        shown = c.pool[0]
-        for i, key in enumerate(c.pool):
+        pool = self.camp.hire_pool(c.key)
+        shown = pool[0]
+        for i, key in enumerate(pool):
             box = pygame.Rect(r.x + 5 + i * 23, y, 20, 15)
             hot = box.collidepoint(self._mouse)
             if hot:
@@ -1418,7 +1419,9 @@ class WorldMapScreen:
         return pygame.Rect(self.WIN.x + 238, self.WIN.y + 30 + i * 21, self.WIN.w - 244, 19)
 
     def _hire_rect(self, i: int) -> pygame.Rect:
-        return pygame.Rect(self.WIN.x + 6, self.WIN.y + 30 + i * 30, 220, 28)
+        n = len(self.camp.hire_pool(self.window[1])) if self.window else 6
+        step = min(30, (self.WIN.h - 34) // max(1, n))       # a tiltyard's cavalry may add a seventh row
+        return pygame.Rect(self.WIN.x + 6, self.WIN.y + 30 + i * step, 220, min(28, step - 2))
 
     def _hire_button(self, i: int) -> pygame.Rect:
         r = self._hire_rect(i)
@@ -1544,7 +1547,7 @@ class WorldMapScreen:
                         self._say(why)
                     return None
         else:
-            for i, key in enumerate(CITY[city].pool):
+            for i, key in enumerate(self.camp.hire_pool(city)):
                 if self._hire_button(i).collidepoint(mx, my):
                     ok, why = self.camp.can_hire(city, key)
                     if ok:
@@ -1578,7 +1581,7 @@ class WorldMapScreen:
             if self._free_rect(i).collidepoint(mx, my):
                 self.win_hover = ("free", i)
         if kind == "hire":
-            for i in range(len(CITY[city].pool)):
+            for i in range(len(self.camp.hire_pool(city))):
                 if self._hire_rect(i).collidepoint(mx, my):
                     self.win_hover = ("hire", i)
 
@@ -1703,7 +1706,7 @@ class WorldMapScreen:
         left = self.camp.muster.get(c.key, 0)
         font.draw(s, f"СБОР ВОЙСК: НАЙМ ОТКРЫТ ЕЩЁ {left} Х." if left else "НАЙМ ЗАКРЫТ: СЫГРАЙТЕ СБОР ВОЙСК",
                   self.WIN.x + 116, self.WIN.y + 18, "#a7f070" if left else "#f6757a", anchor="midtop")
-        for i, key in enumerate(c.pool):
+        for i, key in enumerate(self.camp.hire_pool(c.key)):
             u = ROSTER[key]
             r = self._hire_rect(i)
             hot = self.win_hover == ("hire", i)

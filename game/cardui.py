@@ -25,7 +25,7 @@ from .sim import H, W
 
 CARD_W, CARD_H = 88, 128
 TIER_COLOR = {"basic": "#8b9bb4", "junk": "#5a6988", "moderate": "#41a6f6", "strong": "#feae34",
-              "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44", "vice": "#b86f50",
+              "rare": "#b55088", "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44", "vice": "#b86f50",
               "feat": "#ffd36b", "fate": "#7a9e48"}
 KIND_COLOR = {"economy": ("#c9a24a", "#4a3a14"), "military": ("#e43b44", "#4a1418"),
               "intrigue": ("#b07ad8", "#2e1a40"), "diplomacy": ("#5fb7d9", "#14304a"),
@@ -175,7 +175,7 @@ def origin_label(origin: str) -> str:
     if origin in OFFICER:
         return OFFICER[origin].name
     return {"base": "ДЕРЖАВА", "faction": "ПРАВИТЕЛЬ", "threshold": "СОВЕТ", "curse": "ПРОКЛЯТИЕ",
-            "stolen": "ДОБЫЧА", "legacy": "НАСЛЕДИЕ"}.get(origin, "")
+            "stolen": "ДОБЫЧА", "legacy": "НАСЛЕДИЕ", "passive": "ДЕРЖАВА"}.get(origin, "")
 
 
 # --- the card table on the map ---------------------------------------------------------------------
@@ -1095,7 +1095,7 @@ class CardTable:
         r = self.camp.realms[self.player]
         from collections import Counter
         cnt = Counter((c.key, c.origin) for c in r.all_cards())
-        rows = sorted(cnt.items(), key=lambda kv: (["feat", "faction", "unique", "strong", "moderate", "basic",
+        rows = sorted(cnt.items(), key=lambda kv: (["feat", "faction", "unique", "rare", "strong", "moderate", "basic",
                                                      "junk", "vice", "fate", "curse"].index(CARDS[kv[0][0]].tier),
                                                     CARDS[kv[0][0]].name))
         return [(k, n, o) for (k, o), n in rows]
@@ -1342,8 +1342,8 @@ class CardTable:
                 o = OFFICER[key]
                 font.draw(s, o.name, row.x + 17, row.y + 1, "#ffffff", )
                 labels = self.camp.personal(key)
-                best = max(labels, key=lambda k: ["junk", "basic", "moderate", "strong", "unique"].index(
-                    CARDS[k].tier) if CARDS[k].tier in ("junk", "basic", "moderate", "strong", "unique") else 0) \
+                best = max(labels, key=lambda k: ["junk", "basic", "moderate", "strong", "rare", "unique"].index(
+                    CARDS[k].tier) if CARDS[k].tier in ("junk", "basic", "moderate", "strong", "rare", "unique") else 0) \
                     if labels else None
                 if any(CARDS[k].tier == "vice" for k in labels):
                     font.draw(s, "ПОРОК", row.right - 3, row.y + 1, "#b86f50", anchor="topright")

@@ -27,8 +27,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .officers import OFFICER, OFFICERS, STATS, Officer
 
-TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse", "vice", "feat", "fate")
-TIER_NAMES = {"basic": "ОСНОВА", "junk": "ПУСТЯК", "moderate": "ДЕЛЬНАЯ", "strong": "СИЛЬНАЯ",
+TIERS = ("basic", "junk", "moderate", "strong", "rare", "unique", "faction", "curse", "vice", "feat", "fate")
+TIER_NAMES = {"basic": "ОСНОВА", "junk": "ПУСТЯК", "moderate": "ДЕЛЬНАЯ", "strong": "СИЛЬНАЯ", "rare": "РЕДКАЯ",
               "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ", "vice": "ПОРОК",
               "feat": "ПОДВИГ", "fate": "НАПАСТЬ"}
 KIND_NAMES = {"economy": "ХОЗЯЙСТВО", "military": "ВОЙНА", "intrigue": "ИНТРИГА", "diplomacy": "ДИПЛОМАТИЯ",
@@ -223,9 +223,12 @@ _CARDS: List[Card] = [
     # --- unique personal cards: one copy in the whole world --------------------------------------
     _c("charter", "ГРАМОТА О ВОЛЬНОСТЯХ", 1, "unique", "economy", "Свой город: процветание +3. Сгорает.",
        ("own_city",), exhaust=True),
+    _c("tiltyard", "РИСТАЛИЩЕ", 1, "rare", "recruit", "За 140 золота построить в своём городе ристалище: "
+       "конница державы нанимается там в любой ход, без СБОРА ВОЙСК, на 15% дешевле; оборона города x1.1.",
+       ("tiltyard_city",)),
     _c("griffon_order", "ОРДЕН ГРИФОНА", 1, "unique", "military", "Свой офицер: +40% силы на 3 хода, и он "
        "снова готов.", ("own_officer",)),
-    _c("peers_court", "СУД ПЭРОВ", 1, "unique", "council", "Совет: верность +15. Сжечь проклятия в руке, "
+    _c("peers_court", "СУД ПЭРОВ", 1, "faction", "council", "Совет: верность +15. Сжечь проклятия в руке, "
        "вытянуть 1 карту."),
     _c("forest_wrath", "ГНЕВ ЛЕСА", 2, "unique", "military", "Соседний вражеский город: все войска там "
        "теряют 30%.", ("enemy_adj_any",)),
@@ -430,6 +433,9 @@ FEATS: Dict[str, str] = {
     "war_legend": "дорасти до 10 уровня",
 }
 
+# the realm's own cards in every deck, whoever rules and sits in the council (the faction's passive)
+PASSIVE_CARDS: Dict[str, Tuple[str, ...]] = {"aldern": ("peers_court",)}
+
 # the faction's unique cards; each goes to one officer (``_holders`` picks who)
 UNIQUES: Dict[str, Tuple[str, ...]] = {
     "aldern": ("charter", "griffon_order", "peers_court"),
@@ -555,6 +561,11 @@ VICE_TRAIT: Dict[str, str] = {
 
 PERSONAL: Dict[str, Tuple[str, ...]] = _personal()
 UNIQUE_HOLDER: Dict[str, str] = _holders()
+# СУД ПЭРОВ became Aldern's passive (PASSIVE_CARDS): its old holder brings the РИСТАЛИЩЕ instead
+for _o, _cards in list(PERSONAL.items()):
+    if "peers_court" in _cards:
+        PERSONAL[_o] = tuple("tiltyard" if k == "peers_court" else k for k in _cards)
+UNIQUE_HOLDER = {("tiltyard" if k == "peers_court" else k): o for k, o in UNIQUE_HOLDER.items()}
 
 
 # the new trades go to a few officers each, the best at them in some realms
@@ -567,7 +578,8 @@ _TRADES.update({"head_hunters": ("РАЗВЕДКА", ("aldern", "league", "highl
                 "goblin_tongue": ("ДИПЛОМАТИЯ", ("sultanate", "ashen", "north")),
                 "shiny_pile": ("УПРАВЛЕНИЕ", ("goblin", "goblin")),
                 "city_watch": ("РАЗВЕДКА", ("aldern", "highland", "north", "sultanate")),
-                "thieves_guild": ("ИНТРИГА", ("league", "ashen", "khanate", "sylvan"))})
+                "thieves_guild": ("ИНТРИГА", ("league", "ashen", "khanate", "sylvan")),
+                "tiltyard": ("УПРАВЛЕНИЕ", ("aldern", "khanate", "sultanate", "league"))})
 
 
 def _give_trades() -> None:
@@ -650,7 +662,8 @@ def muster_turns(council: List[str], stats: Stats = None) -> int:
 
 def deck_for(faction: str, council: List[str], course: str = "balance") -> List[str]:
     """Card keys of the realm's deck (curses come on top of this during play)."""
-    cards = list(course_base(faction, course)) + [FACTION_CARD[faction], "sickness"]
+    cards = list(course_base(faction, course)) + [FACTION_CARD[faction], "sickness"] + \
+        list(PASSIVE_CARDS.get(faction, ()))
     for o in council:
         cards.extend(PERSONAL.get(o, ()))
     cards.extend(threshold_cards(council, faction=faction))

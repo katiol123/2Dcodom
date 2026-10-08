@@ -478,7 +478,8 @@ class Campaign:
     def can_hire(self, city: str, key: str) -> Tuple[bool, str]:
         faction = self.owner[city]
         from .horde import pen_hire
-        pen = pen_hire(self, city, key)
+        from .buildings import tiltyard_mount
+        pen = pen_hire(self, city, key) or key == tiltyard_mount(self, city)    # open on any turn
         if key not in CITY[city].pool and not pen:
             return False, "ЭТИХ ВОИНОВ ЗДЕСЬ НЕ НАНЯТЬ"
         if self.muster.get(city, 0) <= 0 and not pen:
@@ -490,7 +491,13 @@ class Campaign:
     def hire_price(self, city: str, key: str) -> int:
         from .buildings import hire_price
         from .horde import hire_mult
-        return hire_price(self, city, int(round(ROSTER[key].cost * hire_mult(self, city, key))))
+        return hire_price(self, city, int(round(ROSTER[key].cost * hire_mult(self, city, key))), key)
+
+    def hire_pool(self, city: str) -> List[str]:
+        """Who can be hired in the city: its pool and the cavalry of a tiltyard."""
+        from .buildings import tiltyard_mount
+        mount = tiltyard_mount(self, city)
+        return list(CITY[city].pool) + ([mount] if mount and mount not in CITY[city].pool else [])
 
     def hire(self, city: str, key: str) -> Optional[Troop]:
         ok, _ = self.can_hire(city, key)
@@ -637,6 +644,7 @@ class Campaign:
             r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
         r.draw.extend(self._inst(k, "legacy") for k in r.legacy)
         r.draw.append(self._inst("sickness", "fate"))
+        r.draw.extend(self._inst(k, "passive") for k in _cards.PASSIVE_CARDS.get(faction, ()))
         for o in r.council:
             r.draw.extend(self._inst(k, o) for k in self.personal(o))
         r.draw.extend(self._inst(k, "threshold") for k in self.thresholds(r.council, faction))

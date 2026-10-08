@@ -20,7 +20,7 @@ from .factions import CITY, FACTION, neighbors
 from .units import ROSTER
 
 AP_PRICE = 35                   # what one action point is worth, in gold
-TIER_HINT = {"faction": 150, "unique": 130, "strong": 140, "moderate": 80, "basic": 60, "junk": 20, "curse": -60,
+TIER_HINT = {"faction": 150, "unique": 130, "strong": 140, "rare": 120, "moderate": 80, "basic": 60, "junk": 20, "curse": -60,
              "vice": -50, "feat": 170, "fate": -40}
 POWER_VALUE = 0.7               # gold-equivalent of one point of troop power
 PROSPERITY_VALUE = 45           # gold-equivalent of +1 prosperity in an own city
@@ -592,6 +592,13 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         from .buildings import count
         city = max(cities, key=lambda c: (count(camp, c, "academy"), c == FACTION[f].capital if f in FACTION else 0))
         return 60 + max(0, 14 - n) * 25, [city]
+    if k == "tiltyard":
+        from .buildings import BUILDINGS, MOUNT_OF
+        cities = options(camp, f, "tiltyard", [])
+        if not cities or camp.gold[f] - BUILDINGS["tiltyard"].cost < camp.upkeep(f) * 2 or f not in MOUNT_OF:
+            return -1, []
+        best = max(cities, key=lambda c: (threat(camp, f, c), len(camp.officers_in(c))))
+        return 120 + 30 * len(camp.officers_in(best)), [best]
     if k == "master_builder":
         from .buildings import BUILDINGS, ORDER, _ai_value, can_build
         best = (-1.0, [])
@@ -707,10 +714,13 @@ def manage(camp, f: str) -> None:
     from . import reign
     from .horde import pen_hire, saving
     reserve = reign.reserve(camp, f, reserve) + saving(camp, f)          # the horde hoards for its great building
+    from .buildings import tiltyard_mount
     pen = [c for c in camp.cities_of(f) if pen_hire(camp, c, "wolf_rider")]
-    front = [c for c in camp.cities_of(f) if camp.muster.get(c, 0) > 0 or c in pen]   # recruiting is open only there
+    yard = {c: tiltyard_mount(camp, c) for c in camp.cities_of(f) if tiltyard_mount(camp, c)}
+    front = [c for c in camp.cities_of(f) if camp.muster.get(c, 0) > 0 or c in pen or c in yard]   # open only there
     for c in sorted(front, key=lambda c: -threat(camp, f, c)):
-        pool = (camp._pool(c) if camp.muster.get(c, 0) > 0 else []) + (["wolf_rider"] if c in pen else [])
+        pool = (camp._pool(c) if camp.muster.get(c, 0) > 0 else []) + (["wolf_rider"] if c in pen else []) + \
+            ([yard[c]] if c in yard and (camp.muster.get(c, 0) <= 0 or yard[c] not in camp._pool(c)) else [])
         for o in camp.officers_in(c):
             while camp.gold[f] > reserve:
                 room = camp.leadership(o.key) - camp.power(o.key)
@@ -727,7 +737,7 @@ def manage(camp, f: str) -> None:
                 margin -= camp.troop_upkeep(f, k)
 
 
-COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0, "vice": -60, "feat": 170, "fate": 0}
+COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "rare": 110, "unique": 150, "faction": 0, "vice": -60, "feat": 170, "fate": 0}
 
 
 def council_score(camp, members: Sequence[str], taste: Optional[Dict[str, float]] = None) -> float:

@@ -100,6 +100,9 @@ def options(camp, f: str, key: str, chosen: list) -> list:
     if step == "rival_neighbor":
         return [x for x in _rivals(camp, f)
                 if any(camp.owner[n] == x for c in own for n in neighbors(c))]
+    if step == "tiltyard_city":                          # a free slot and the gold for the work
+        from .buildings import BUILDINGS, can_build
+        return [c for c in own if can_build(camp, f, c, "tiltyard", BUILDINGS["tiltyard"].cost)[0]]
     if step == "building":                               # what a master builder can put up (half price)
         from .buildings import BUILDINGS, ORDER, can_build
         return [k for k in ORDER if can_build(camp, f, chosen[0], k, BUILDINGS[k].cost // 2)[0]]
@@ -946,6 +949,14 @@ def _master_builder(camp, f, t):
     city, key = t
     camp.realms[f].ap += 1                                   # the card's own point pays for the work
     ok, msg = build(camp, f, city, key, BUILDINGS[key].cost // 2)
+    return msg
+
+
+@effect("tiltyard")
+def _tiltyard(camp, f, t):
+    from .buildings import build
+    camp.realms[f].ap += 1                                   # the card's own point pays for the work
+    ok, msg = build(camp, f, t[0], "tiltyard")
     return msg
 
 
