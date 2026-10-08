@@ -9,6 +9,7 @@ realm did. In spectator mode it only advances the rounds.
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import pygame
@@ -192,6 +193,11 @@ class CardTable:
         self.auto = False
         self.auto_t = 0.0
         self.hand_hover: Optional[int] = None
+        self.seen_ids: set = set()                      # hand cards already dealt (animations)
+        self.dealing: Dict[int, float] = {}             # card id -> time its flight from the deck starts
+        self.sounded: set = set()
+        self.launch = None                              # (inst, rect, image) of the card being played
+        self.last_req = None
 
     # --- state -----------------------------------------------------------------------------
     @property
@@ -238,6 +244,14 @@ class CardTable:
     def end_rect(self) -> pygame.Rect:
         mini = self.ms._mini_rect()
         return pygame.Rect(mini.x - 2, mini.y - 22, mini.w + 4, 17)
+
+    def deck_rect(self) -> pygame.Rect:
+        e = self.end_rect()
+        return pygame.Rect(e.x - 54, e.y - 2, 22, 32)
+
+    def discard_rect(self) -> pygame.Rect:
+        e = self.end_rect()
+        return pygame.Rect(e.x - 28, e.y - 2, 22, 32)
 
     # --- input ------------------------------------------------------------------------------
     def handle(self, ev, mouse: Tuple[int, int]) -> bool:
@@ -320,6 +334,11 @@ class CardTable:
             inst = self.play["inst"]
             chosen = list(self.play["chosen"])
             self.play = None
+            hand = self.hand()
+            rects = self.hand_rects()
+            rect = rects[hand.index(inst)] if inst in hand else self.deck_rect()
+            self.launch = (inst, pygame.Rect(rect), self.art.full(inst.key, origin_label(inst.origin), self.player))
+            self.attacks_before = len(self.camp.attacks)
             self.ms.run(lambda: self.camp.play(self.player, inst, chosen), ("play", inst.card.name))
             return
         opts = self._options()
@@ -382,10 +401,38 @@ class CardTable:
             return
         if kind == "play":
             ok, msg = value
-            self.ms._say(f"{name}: {msg}" if ok and msg else (name if ok else msg), "#a7f070" if ok else "#e43b44")
+            if self.launch and ok:
+                from .fx import PlayShow
+                inst, rect, img = self.launch
+                hi, _ = KIND_COLOR[inst.card.kind]
+                self.ms.fx.add(PlayShow(self.ms, img, rect, inst.card.kind, hi,
+                                        inst.origin if inst.origin in OFFICER else None, msg, ok,
+                                        self.discard_rect))
+                self.storm_flashes(getattr(self, "attacks_before", len(self.camp.attacks)), delay=1.1)
+            else:
+                self.ms._say(f"{name}: {msg}" if ok and msg else (name if ok else msg), "#a7f070" if ok else "#e43b44")
+                from .audio import ui
+                ui("refuse")
+            self.launch = None
         elif kind == "end":
             self.chronicle_open = True
             self.chron_scroll = 0
+            self.storm_flashes(self.arrows_from, delay=0.2, gap=0.25)
+
+    def storm_flashes(self, since: int, delay: float = 0.0, gap: float = 0.0) -> None:
+        """Rings and sparks over the cities stormed since ``since`` (taken: the stormer's colour,
+        held: red), with war drums."""
+        from .fx import Ring, Sparks
+        storms = self.camp.attacks[since:]
+        for j, (_, by, _, city, won) in enumerate(storms[-12:]):
+            c = CITY[city]
+            x, y = self.ms._to_screen(c.x, c.y - 8)
+            col = FACTION[by].light if won else "#e43b44"
+            d = delay + j * gap
+            self.ms.fx.add(Ring(x, y, col, 3, 24, 0.5, delay=d))
+            self.ms.fx.add(Sparks(x, y, col, 14, 50, delay=d))
+        if storms:
+            self.ms.fx.add(Ring(-50, -50, "#000000", 1, 2, 0.1, delay=delay)).cues = [(0.0, "drums")]
 
     # --- requests from a running action: watch a battle? answer a storm? ------------------------
     def _req_rect(self) -> pygame.Rect:
@@ -414,11 +461,19 @@ class CardTable:
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             for rect, value in self._req_buttons(req):
                 if rect.collidepoint(mx, my):
+                    if req["kind"] == "diplo":
+                        from .audio import ui
+                        ui("harp" if value else "refuse")
                     self.ms.runner.reply(value)
                     return
 
     def draw_request(self, s: pygame.Surface) -> None:
         req = self.ms.runner.request
+        if req is not self.last_req:
+            self.last_req = req
+            if req:
+                from .audio import ui
+                ui({"answer": "drums", "diplo": "horn", "ask": "drums"}.get(req["kind"], ""))
         if not req or req["kind"] == "battle":
             return
         if req["kind"] == "diplo":
@@ -497,7 +552,69 @@ class CardTable:
             s.blit(self.ms.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
             font.draw(s, "ПРИНЯТЬ" if value else "ОТКАЗАТЬ", rect.centerx, rect.centery, "#ffffff", anchor="center")
 
+    def _deal_check(self) -> None:
+        """New cards in the hand fly in from the deck, one after another."""
+        hand = self.hand()
+        ids = {c.id for c in hand}
+        self.seen_ids &= ids
+        self.sounded &= ids
+        new = [c for c in hand if c.id not in self.seen_ids]
+        now = self.ms.time
+        start = max([now] + [t + 0.09 for t in self.dealing.values()])
+        for j, c in enumerate(new):
+            self.seen_ids.add(c.id)
+            self.dealing[c.id] = start + 0.09 * j
+        for cid, t in list(self.dealing.items()):
+            if cid not in ids or now - t > self.DEAL:
+                del self.dealing[cid]
+
+    DEAL = 0.4
+
+    def back(self) -> pygame.Surface:
+        """The back of the realm's cards: its shield on a patterned field."""
+        key = ("back", self.player)
+        if key not in self.art.cache:
+            f = FACTION[self.player] if self.player else None
+            img = self.ms.r.panel(CARD_W, CARD_H, base="#1c1830", border="#c9a24a").copy()
+            col = _c(f.color if f else "#5a6988")
+            light = _c(f.light if f else "#8b9bb4")
+            inner = pygame.Rect(5, 5, CARD_W - 10, CARD_H - 10)
+            pygame.draw.rect(img, col, inner, 1)
+            for y in range(inner.y + 4, inner.bottom - 2, 8):          # a lattice of small diamonds
+                for x in range(inner.x + 4 + (y // 8 % 2) * 4, inner.right - 2, 8):
+                    pygame.draw.polygon(img, col, [(x, y - 2), (x + 2, y), (x, y + 2), (x - 2, y)])
+            pygame.draw.circle(img, INK, (CARD_W // 2, CARD_H // 2), 17)
+            pygame.draw.circle(img, light, (CARD_W // 2, CARD_H // 2), 16, 1)
+            if self.player:
+                sh = pygame.transform.scale(self.ms.shields[self.player],
+                                            (self.ms.shields[self.player].get_width() * 2,
+                                             self.ms.shields[self.player].get_height() * 2))
+                img.blit(sh, sh.get_rect(center=(CARD_W // 2, CARD_H // 2)))
+            self.art.cache[key] = img
+        return self.art.cache[key]
+
+    def _piles(self, s: pygame.Surface) -> None:
+        """The draw pile and the discard pile next to the end-turn button."""
+        r = self.camp.realms[self.player]
+        d = self.deck_rect()
+        small = pygame.transform.scale(self.back(), d.size)
+        for k in range(min(3, len(r.draw)) - 1, -1, -1):
+            s.blit(small, (d.x - k, d.y - k))
+        if not r.draw:
+            pygame.draw.rect(s, (38, 43, 68), d, 1)
+        self.font.draw(s, str(len(r.draw)), d.centerx, d.bottom + 1, "#c0cbdc", anchor="midtop")
+        x = self.discard_rect()
+        if r.discard:
+            top = r.discard[-1]
+            s.blit(pygame.transform.scale(self.art.full(top.key, origin_label(top.origin), self.player), x.size),
+                   x.topleft)
+        else:
+            pygame.draw.rect(s, (38, 43, 68), x, 1)
+        self.font.draw(s, str(len(r.discard)), x.centerx, x.bottom + 1, "#8b9bb4", anchor="midtop")
+
     def update(self, dt: float, mouse) -> None:
+        if self.player and self.camp.realms[self.player].alive:
+            self._deal_check()
         mx, my = mouse
         prev = self.hand_hover
         self.hand_hover = None
@@ -551,16 +668,22 @@ class CardTable:
             self.font.draw(s, "ВАША ДЕРЖАВА ПАЛА", W // 2, H // 2, "#e43b44", scale=2, anchor="center")
             return
         r = self.camp.realms[self.player]
+        self._piles(s)
         rects = self.hand_rects()
         order = list(range(len(rects)))
         if self.hand_hover is not None:
             order.remove(self.hand_hover)
             order.append(self.hand_hover)
         playing = self.play["inst"] if self.play else None
+        flying = []
         for i in order:
             inst = r.hand[i]
             rect = rects[i]
             img = self.art.full(inst.key, origin_label(inst.origin), self.player)
+            t0 = self.dealing.get(inst.id)
+            if t0 is not None:
+                flying.append((t0, inst, rect, img))
+                continue
             from .mapview import BOTTOM
             if i != self.hand_hover:                     # resting cards peek out above the bottom bar
                 rect = pygame.Rect(rect.x, rect.y, rect.w, max(0, H - BOTTOM - rect.y))
@@ -588,6 +711,32 @@ class CardTable:
                 if not ok and self.my_turn():
                     why = self.camp.can_play(self.player, inst)[1]
                     self.font.draw(s, why, rect.centerx, rect.y + 60, "#f6757a", anchor="center")
+        if self.hand_hover is not None and self.hand_hover != getattr(self, "_hover_was", None):
+            from .audio import ui as _ui
+            _ui("flip")
+        self._hover_was = self.hand_hover
+        # cards still flying in from the deck (face down, turning over on the way)
+        from .fx import ease_out
+        from .audio import ui
+        now = self.ms.time
+        back = self.back()
+        deck = self.deck_rect()
+        for t0, inst, rect, img in sorted(flying, key=lambda f: f[0]):
+            k = (now - t0) / self.DEAL
+            if k < 0:
+                continue
+            if inst.id not in self.sounded:
+                self.sounded.add(inst.id)
+                ui("deal")
+            e = ease_out(min(1.0, k))
+            x = deck.x + (rect.x - deck.x) * e
+            y = deck.y + (rect.y - deck.y) * e - math.sin(min(1.0, k) * math.pi) * 18
+            w = deck.w + (rect.w - deck.w) * e
+            h = deck.h + (rect.h - deck.h) * e
+            turn = abs(1 - 2 * min(1.0, k * 1.25))
+            face = back if k * 1.25 < 0.5 else img
+            ww = max(1, int(w * turn))
+            s.blit(pygame.transform.scale(face, (ww, max(1, int(h)))), (int(x + (w - ww) / 2), int(y)))
         # end turn and the reserve
         er = self.end_rect()
         hot = er.collidepoint(self.ms._mouse)
@@ -941,9 +1090,27 @@ class CardTable:
         if not ok:
             self.ms._say(why)
             return
+        before = list(self._council())
         self.camp.set_council(self.player, members)
         self.council_seat = None
         self.ms._say("СОВЕТ ОБНОВЛЁН: КОЛОДА ПЕРЕСОБРАНА", "#a7f070")
+        from .fx import Ring, Sparks
+        from .audio import ui
+        after = self._council()
+        for i in range(COUNCIL_SEATS):
+            old = before[i] if i < len(before) else None
+            new = after[i] if i < len(after) else None
+            if old == new:
+                continue
+            r = self._seat_rect(i)
+            face = (r.x + 12, r.y + 14)
+            if new:                                       # the seal comes down on the new adviser
+                self.ms.fx.add(Ring(*face, "#fee761", 4, 26, 0.4)).layer = 2
+                self.ms.fx.add(Sparks(*face, "#fee761", 16, 60)).layer = 2
+                ui("seal")
+            else:
+                self.ms.fx.add(Sparks(r.centerx, r.centery, "#e43b44", 22, 80)).layer = 2
+                ui("tear")
 
     def _council_draw(self, s: pygame.Surface) -> None:
         from .mapview import wrap
@@ -1132,6 +1299,8 @@ class CardTable:
                     self.ms._say(why)
                     return
                 self.camp.change_course(self.player, key)
+                from .audio import ui
+                ui("horn")
                 self.ms._say(f"НОВЫЙ КУРС: {COURSES[key].name}. КАРТЫ ОСНОВЫ ЗАМЕНЕНЫ", "#a7f070")
                 self.course_open = False
                 return

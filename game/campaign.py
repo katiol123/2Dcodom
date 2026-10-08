@@ -353,7 +353,7 @@ class Campaign:
         best = max((self.stat(o.key, "УПРАВЛЕНИЕ") for o in self.officers_in(city) if self.allegiance[o.key] == faction),
                    default=0)
         g = self.prosperity[city] * TAX + 2 * best
-        return g // 2 if "drought" in self.active else g
+        return g * 2 // 5 if "drought" in self.active else g
 
     def army(self, faction: str) -> int:
         return sum(self.power(o.key) for o in self.officers_of(faction)) + \

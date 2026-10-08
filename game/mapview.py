@@ -319,6 +319,15 @@ class WorldMapScreen:
         from .diploui import DiploWindow
         self.diplo = DiploWindow(self)
         self.events_seen = len(self.camp.world_events)
+        from .fx import FX
+        self.fx = FX()                                     # interface animations (and their sounds)
+        p = self.camp.player
+        self.gold_shown = float(self.camp.gold[p]) if p else 0.0
+        self.gold_last = self.camp.gold[p] if p else 0
+        self.was_my_turn = False
+        self.seen_levels = self.camp.stats["levels"][p] if p else 0
+        self.seen_feats = sum(1 for o in self.camp.feats.values() if self.camp.allegiance.get(o) == p)
+        self.event_t = 0.0
         self.event_show: Optional[Tuple[int, str, str]] = None     # a world event shown as a big card
         self.hover_rel: Optional[Tuple[str, str]] = None
         self.keys: Dict[int, bool] = {}
@@ -478,6 +487,8 @@ class WorldMapScreen:
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             for b in self.buttons:
                 if b.rect.collidepoint(mx, my):
+                    from .audio import ui
+                    ui("click")
                     if b.action == "diplomacy":
                         self.diplomacy = not self.diplomacy
                         self.faction_panel = None
@@ -557,9 +568,14 @@ class WorldMapScreen:
             self.table.finished(what, done)
         if self.runner.busy():
             return
+        self.fx.update(dt)
         if self.event_show is None and self.events_seen < len(self.camp.world_events):
             self.event_show = self.camp.world_events[self.events_seen]
             self.events_seen += 1
+            self.event_t = self.time
+            from .audio import ui
+            ui("gong")
+        self._watch_changes()
         self.table.update(dt, mouse)
         if self.window is not None:
             self._window_update(mouse)
@@ -609,6 +625,7 @@ class WorldMapScreen:
         self._attack_arrows(s)
         self._cities(s)
         self._city_badges(s)
+        self.fx.draw(s, 1)
         self.table.draw_targets(s)
         self._bars(s)
         self._minimap_draw(s)
@@ -637,6 +654,7 @@ class WorldMapScreen:
             s.blit(self.dim, (0, 0))
             self.diplo.draw(s)
         self.table.draw_windows(s)
+        self.fx.draw(s, 2)
         self.cards.draw(s)
         if self.event_show is not None:
             self._event_card(s)
@@ -691,10 +709,25 @@ class WorldMapScreen:
     def _event_card(self, s: pygame.Surface) -> None:
         """A world event: a big card in the middle of the screen."""
         from .events import EVENT
+        from .fx import ease_back
         turn, key, text = self.event_show
         e = EVENT[key]
         s.blit(self.dim, (0, 0))
-        r = pygame.Rect(W // 2 - 110, TOP + 18, 220, 190)
+        k = min(1.0, (self.time - self.event_t) / 0.45)
+        final = pygame.Rect(W // 2 - 110, TOP + 18, 220, 190)
+        if k < 1:                                          # the card arrives: grows with a little overshoot
+            card = pygame.Surface(final.size)
+            self._event_face(card, card.get_rect(), e, turn, text)
+            sc = 0.2 + 0.8 * ease_back(k)
+            w, h = max(1, round(final.w * sc)), max(1, round(final.h * sc))
+            s.blit(pygame.transform.scale(card, (w, h)), (final.centerx - w // 2, final.centery - h // 2))
+            return
+        self._event_face(s, final, e, turn, text)
+        glint = int(((self.time - self.event_t) * 120) % (final.w + 60)) - 30
+        if 0 <= glint < final.w - 4:
+            pygame.draw.line(s, _c("#ffffff"), (final.x + glint, final.y + 2), (final.x + glint + 5, final.y + 2))
+
+    def _event_face(self, s: pygame.Surface, r: pygame.Rect, e, turn: int, text: str) -> None:
         s.blit(self.r.panel(r.w, r.h, base="#1c1830", border=e.color), r.topleft)
         pygame.draw.rect(s, _c(e.color), r.inflate(-4, -4), 1)
         self.font.draw(s, "СОБЫТИЕ МИРА", r.centerx, r.y + 7, "#8b9bb4", anchor="midtop")
@@ -738,6 +771,8 @@ class WorldMapScreen:
                     (ex - ux * 3 - px * 4, ey - uy * 3 - py * 4)]
             pygame.draw.polygon(s, INK, [(x, y + 1) for x, y in head])
             pygame.draw.polygon(s, col if won else dark, head)
+            k = (self.time * 0.7 + len(city) * 0.13) % 1.0        # a spark running along the arrow
+            pygame.draw.rect(s, _c("#ffffff"), (round(sx + (ex - sx) * k) - 1, round(sy + (ey - sy) * k) - 1, 2, 2))
             if not won:
                 cx, cy = ex + ux * 6, ey + uy * 6
                 for k in (-1, 1):
@@ -829,8 +864,9 @@ class WorldMapScreen:
             s.blit(self.shields[p], (3, -1))
             f.draw(s, fac.short, 20, 4, fac.light)
             x = 20 + text_width(fac.short) + 8
-            f.draw(s, f"ЗОЛОТО {self.camp.gold[p]}", x, 4, "#fee761")
-            x += text_width(f"ЗОЛОТО {self.camp.gold[p]}") + 8
+            shown = round(self.gold_shown)
+            f.draw(s, f"ЗОЛОТО {shown}", x, 4, "#fee761")
+            x += text_width(f"ЗОЛОТО {shown}") + 8
             r = self.camp.realms[p]
             f.draw(s, "ОД", x, 4, "#41a6f6")
             x += 13
@@ -1082,6 +1118,36 @@ class WorldMapScreen:
 
     def _win_close_rect(self) -> pygame.Rect:
         return pygame.Rect(self.WIN.right - 16, self.WIN.y + 3, 12, 11)
+
+    def _watch_changes(self) -> None:
+        """Turn the campaign's changes into animations: gold, the player's turn, levels and feats."""
+        from .fx import Banner, FloatText, Sparks
+        from .audio import ui
+        p = self.camp.player
+        if not p:
+            return
+        gold = self.camp.gold[p]
+        diff = gold - self.gold_last
+        if diff:
+            self.gold_last = gold
+            self.fx.add(FloatText(self.font, f"{diff:+d}", 62, 14, "#fee761" if diff > 0 else "#f6757a",
+                                  rise=-10, cue="coins" if diff > 0 else ""))
+        self.gold_shown += (gold - self.gold_shown) * 0.25 if abs(gold - self.gold_shown) > 1 else gold - self.gold_shown
+        mine = self.table.my_turn()
+        if mine and not self.was_my_turn and self.event_show is None:
+            self.fx.add(Banner(self.font, "ВАШ ХОД", f"ХОД {self.camp.turn} - {FACTION[p].name}", FACTION[p].light,
+                               H // 2 - 40, W))
+        self.was_my_turn = mine
+        lv = self.camp.stats["levels"][p]
+        if lv > self.seen_levels:
+            self.seen_levels = lv
+            self.fx.add(FloatText(self.font, "ОФИЦЕР ПОЛУЧИЛ УРОВЕНЬ!", W // 2, TOP + 30, "#41a6f6", cue="levelup"))
+        feats = sum(1 for o in self.camp.feats.values() if self.camp.allegiance.get(o) == p)
+        if feats > self.seen_feats:
+            self.seen_feats = feats
+            ui("fanfare")
+            self.fx.add(Banner(self.font, "ПОДВИГ!", "ОФИЦЕР ПОЛУЧИЛ КАРТУ ПОДВИГА", "#ffd36b", H // 2 - 70, W, cue=""))
+            self.fx.add(Sparks(W // 2, H // 2 - 60, "#ffd36b", 40, 140))
 
     def _say(self, text: str, color: str = "#e43b44") -> None:
         self.toast = (text, color, self.time + 2.0)

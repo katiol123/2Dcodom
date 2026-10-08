@@ -72,10 +72,10 @@ def _plague(camp):
     reach = _around(origin, 2)
     hit: Dict[str, int] = {}
     for city, d in reach.items():
-        camp.prosperity[city] = max(1, camp.prosperity[city] - (3 if d == 0 else 2 if d == 1 else 1))
+        camp.prosperity[city] = max(1, camp.prosperity[city] - (4 if d == 0 else 3 if d == 1 else 2))
         owner = camp.owner[city]
         if owner != "ashen":                                   # the dead fear no plague
-            _cull(camp, city, 0.45 if d == 0 else 0.3 if d == 1 else 0.15)
+            _cull(camp, city, 0.6 if d == 0 else 0.4 if d == 1 else 0.25)
         hit[owner] = hit.get(owner, 0) + 1
     worst = max(hit, key=hit.get)
     return (f"мор вспыхнул в {CITY[origin].name} и прошёл по {len(reach)} городам: процветание упало, "
@@ -139,10 +139,12 @@ def _gold_rush(camp):
     f = camp.rng.choice(weak)
     city = max(camp.cities_of(f), key=lambda c: camp.rng.random())
     camp.prosperity[city] = 10
-    camp.earn(f, 400, "event")
+    camp.earn(f, 600, "event")
+    camp.recruit(city, 220)                                   # the miners take up arms
     for n in {camp.owner[x] for x in neighbors(city)} - {f, "goblin"}:
-        camp.change_relation(f, n, -10)                       # the neighbours grow envious
-    return f"жила в {CITY[city].name}: процветание 10, казна {FACTION[f].short} +400; соседи завидуют", f
+        camp.change_relation(f, n, -6)                        # the neighbours grow envious
+    return (f"жила в {CITY[city].name}: процветание 10, казна {FACTION[f].short} +600, рудокопы взялись "
+            f"за оружие; соседи завидуют"), f
 
 
 def _revolt(camp):
@@ -150,7 +152,7 @@ def _revolt(camp):
     conquered = [c for c in camp.cities_of(f) if CITY[c].faction != f]
     conquered.sort(key=camp.defense_power)
     done = []
-    for city in conquered[:2]:
+    for city in conquered[:3]:
         home = CITY[city].faction
         to = home if home in camp.realms and (camp.realms[home].alive or home != "goblin") else None
         if to is None or to == "goblin":
@@ -189,18 +191,22 @@ def _prophet(camp):
     f = _by_standing(camp)[0]
     others = [x for x in _humans(camp) if x != f]
     for x in others:
-        camp.change_relation(f, x, -20)
+        camp.change_relation(f, x, -25)
+        if camp.at_peace(f, x):                               # the prophet releases them from their oaths
+            camp.truce.pop(frozenset((f, x)), None)
+            camp.alliance.pop(frozenset((f, x)), None)
     for i, a in enumerate(others):
         for b in others[i + 1:]:
             camp.change_relation(a, b, 10)
-    return f"пророк зовёт все державы против {FACTION[f].short}: отношения с ними -20, между прочими +10", f
+    return (f"пророк зовёт все державы против {FACTION[f].short}: клятвы им расторгнуты, отношения с ними -25, "
+            f"между прочими +10"), f
 
 
 def _free_companies(camp):
     order = list(reversed(_by_standing(camp)))
     got = []
     for i, f in enumerate(order):
-        budget = 360 if i < 3 else 160 if i < 5 else 0
+        budget = 520 if i < 3 else 220 if i < 5 else 0
         if not budget or not camp.cities_of(f):
             continue
         city = FACTION[f].capital if camp.owner.get(FACTION[f].capital) == f else camp.cities_of(f)[0]
@@ -211,13 +217,13 @@ def _free_companies(camp):
 
 
 def _drought(camp):
-    camp.active["drought"] = 3
-    return "на 3 хода подати приносят вдвое меньше золота", None
+    camp.active["drought"] = 4
+    return "на 4 хода подати приносят лишь 40% золота", None
 
 
 EVENTS: List[Event] = [
     Event("plague", "ЧУМА НА МАТЕРИКЕ", "Мор идёт от богатейшего города на 2 дороги вокруг: процветание "
-          "-3/-2/-1, гарнизоны теряют до 45% воинов. Нежить Пепла не болеет.", _plague, color="#7a9e48"),
+          "-4/-3/-2, гарнизоны теряют до 60% воинов. Нежить Пепла не болеет.", _plague, color="#7a9e48"),
     Event("goblin_horde", "НАШЕСТВИЕ ГОБЛИНОВ", "Гоблины отбивают до 3 слабейших своих логов, во всех "
           "логовах новые орды; гоблинские вожди на службе людей могут вернуться к своим.", _goblin_horde,
           can=lambda camp: camp.turn >= 10 and len(camp.cities_of("goblin")) <= 4, color="#63c74d"),
@@ -226,17 +232,17 @@ EVENTS: List[Event] = [
     Event("fair", "ЯРМАРКА В ЛИГЕ", "Лига +350 золота, каждый гость (мир с Лигой или отношения 50+) "
           "+150 золота и отношения +8.", _fair, can=lambda camp: "league" in _humans(camp), color="#feae34"),
     Event("gold_rush", "ЗОЛОТАЯ ЖИЛА", "В городе одной из трёх слабейших держав нашли золото: процветание "
-          "10 и +400 в казну; соседи завидуют (отношения -10).", _gold_rush, color="#fee761"),
-    Event("revolt", "КРЕСТЬЯНСКАЯ ВОЙНА", "У сильнейшей державы 2 покорённых города возвращаются прежним "
+          "10, +600 в казну и ополчение рудокопов; соседи завидуют (отношения -6).", _gold_rush, color="#fee761"),
+    Event("revolt", "КРЕСТЬЯНСКАЯ ВОЙНА", "У сильнейшей державы 3 покорённых города возвращаются прежним "
           "хозяевам (павшие державы возрождаются). Нет покорённых - три города разорены.", _revolt,
           color="#e43b44"),
     Event("omen", "ХВОСТАТАЯ ЗВЕЗДА", "Дурное знамение: верность всех офицеров -6, у двух сильнейших "
           "держав -15 и по 2 СМУТЫ в колоду.", _omen, color="#b07ad8"),
-    Event("prophet", "ВОЗЗВАНИЕ ПРОРОКА", "Все против сильнейшей державы: её отношения со всеми -20, "
-          "между прочими +10. Рождается коалиция.", _prophet, color="#ffffff"),
+    Event("prophet", "ВОЗЗВАНИЕ ПРОРОКА", "Все против сильнейшей державы: её договоры расторгнуты, отношения "
+          "со всеми -25, между прочими +10. Рождается коалиция.", _prophet, color="#ffffff"),
     Event("free_companies", "ВОЛЬНЫЕ РОТЫ", "Наёмники идут к слабым: три слабейшие державы получают "
-          "отряды на 360 мощи в столице, следующие две - на 160.", _free_companies, color="#c28a2e"),
-    Event("drought", "ВЕЛИКАЯ ЗАСУХА", "3 хода подати приносят вдвое меньше золота. Большие армии "
+          "отряды на 520 мощи в столице, следующие две - на 220.", _free_companies, color="#c28a2e"),
+    Event("drought", "ВЕЛИКАЯ ЗАСУХА", "4 хода подати приносят лишь 40% золота. Большие армии "
           "начнут разбегаться.", _drought, color="#d08a4a"),
 ]
 EVENT = {e.key: e for e in EVENTS}

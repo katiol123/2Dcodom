@@ -150,6 +150,8 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
     import pygame
     from game.sim import H, W
     sfx = Sfx(enabled=not args.mute)
+    import game.audio as _audio
+    _audio.SFX = sfx                                  # the map's interface sounds and its tune
     clock = pygame.time.Clock()
     speed, paused, fullscreen = 1.0, False, False
     acc = 0.0
@@ -187,6 +189,7 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                      else "map" if on_map else "menu")
             print(f"ok: {where} seed={seed} sfx={'on' if sfx.ok else 'off'}")
             return 0
+        _audio.music(picking or on_map)                  # the tune plays on the map, not in battle
         mx, my = pygame.mouse.get_pos()
         mouse = ((mx - view[0]) // view[2], (my - view[1]) // view[2])
         for ev in pygame.event.get():

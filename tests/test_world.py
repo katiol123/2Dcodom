@@ -148,9 +148,9 @@ class EventsTest(unittest.TestCase):
         self.assertGreater(c.upkeep("aldern"), up)
         self.assertEqual(c.upkeep("north"), Campaign(None, seed=3).upkeep("north"))   # used to the cold
         c.active = {"drought": 2}
-        self.assertEqual(c.income_of(city, "aldern"), inc // 2)
-        events.round_tick(c)
-        events.round_tick(c)
+        self.assertEqual(c.income_of(city, "aldern"), inc * 2 // 5)
+        for _ in range(4):
+            events.round_tick(c)
         self.assertNotIn("drought", c.active)                        # it passes
 
     def test_events_are_rare(self):
