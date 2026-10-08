@@ -20,10 +20,10 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .cards import (AP, AP_BONUS, CARDS, COURSES, COUNCIL_SEATS, FACTION_CARD, PERSONAL, hand_size, reserve,
-                    strife, threshold_cards)
+from . import cards as _cards
+from .cards import AP, AP_BONUS, CARDS, COURSES, COUNCIL_SEATS, FACTION_CARD, PERSONAL
 from .factions import ALL_FACTIONS, CITIES, CITY, FACTION, PROSPERITY, City, neighbors, relation
-from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, Officer
+from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, STATS, Officer
 from .units import ROSTER
 
 START_GOLD = {"league": 700, "sultanate": 650, "goblin": 250}
@@ -124,6 +124,18 @@ class Campaign:
         self.taxed: Dict[str, int] = {}                       # city -> turn it was last taxed
         self.untaxed: Dict[str, int] = {c.key: 0 for c in CITIES}
         self.loyalty: Dict[str, int] = {}
+        # officers change during the campaign (growth.py): stats, leadership, experience, feats
+        self.ostats: Dict[str, List[int]] = {o.key: list(o.stats) for o in OFFICER.values()}
+        self.olead: Dict[str, int] = {o.key: o.leadership for o in OFFICER.values()}
+        self.xp: Dict[str, float] = {o: 0.0 for o in OFFICER}
+        self.level: Dict[str, int] = {o: 1 for o in OFFICER}
+        self.idle: Dict[str, int] = {}                        # own turns without experience
+        self.last_used: Dict[str, int] = {}                   # turn an adviser's card was last played
+        self.streak: Dict[str, int] = {}                      # battles won in a row
+        self.lairs: Dict[str, int] = {}                       # goblin lairs taken
+        self.feats: Dict[str, str] = {}                       # feat card -> officer who earned it
+        self.extra: Dict[str, List[str]] = {}                 # officer -> cards earned in play
+        self.muster: Dict[str, int] = {}                      # city -> own turns its recruiting stays open
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
         self.trade: Dict[frozenset, Tuple[int, int]] = {}     # pair -> (turns left, gold each)
@@ -136,7 +148,9 @@ class Campaign:
         self.log: List[Tuple[int, str, str]] = []
         self.stats: Dict[str, Counter] = {"played": Counter(), "drawn": Counter(), "gold": Counter(),
                                           "captured": Counter(), "battles": Counter(), "earned": Counter(),
-                                          "paid": Counter(), "courses": Counter()}
+                                          "paid": Counter(), "courses": Counter(), "levels": Counter(),
+                                          "declines": Counter(), "feats": Counter(),
+                                          "deserted_officers": Counter(), "reshuffles": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
@@ -158,8 +172,9 @@ class Campaign:
             self.realms[f.key].council = choose_council(self, f.key)
             for o in self.realms[f.key].council:
                 self.loyalty[o] = min(100, self.loyalty[o] + 8)
+                self.last_used[o] = self.turn
             self._build_deck(f.key)
-            self._draw(f.key, hand_size(self.realms[f.key].council))
+            self._draw(f.key, self.hand_size(self.realms[f.key].council))
         self._start_turn(self.order[0])
 
     # --- setup ------------------------------------------------------------------------------
@@ -197,11 +212,72 @@ class Campaign:
     def _new(self, key: str) -> Troop:
         return Troop(next(self._ids), key)
 
+    # --- officers as they are now ----------------------------------------------------------
+    def stat(self, officer: str, name: str) -> int:
+        return self.ostats[officer][STATS.index(name)]
+
+    def leadership(self, officer: str) -> int:
+        return self.olead[officer]
+
+    def presence(self, officer: str) -> float:
+        lead = (self.olead[officer] - 200) / 600
+        st = self.ostats[officer]
+        return max(0.0, min(1.0, 0.5 * lead + 0.5 * (sum(st) / len(st) - 6) / 10))
+
+    def personal(self, officer: str) -> List[str]:
+        return list(PERSONAL[officer]) + self.extra.get(officer, [])
+
+    def totals(self, council) -> Dict[str, int]:
+        return _cards.council_totals(list(council), self.ostats)
+
+    def thresholds(self, council) -> List[str]:
+        return _cards.threshold_cards(list(council), self.ostats)
+
+    def competence(self, council) -> int:
+        return _cards.competence(list(council), self.ostats)
+
+    def hand_size(self, council) -> int:
+        return _cards.hand_size(list(council), self.ostats)
+
+    def reserve(self, council) -> int:
+        return _cards.reserve(list(council), self.ostats)
+
+    def strife(self, council) -> bool:
+        return _cards.strife(list(council), self.ostats)
+
+    def intercepts(self, council) -> bool:
+        return _cards.intercepts(list(council), self.ostats)
+
+    def course_cooldown(self, council) -> int:
+        return _cards.course_cooldown(list(council), self.ostats)
+
+    def muster_turns(self, council) -> int:
+        return _cards.muster_turns(list(council), self.ostats)
+
+    def card_cost(self, faction: str, inst) -> int:
+        """A devoted adviser (loyalty 100) makes his own cards cost 1 action point less."""
+        o = inst.origin
+        cost = inst.card.cost
+        if o in OFFICER and self.devoted(o) and o in self.realms[faction].council:
+            cost = max(0, cost - 1)
+        return cost
+
+    def devoted(self, officer: str) -> bool:
+        return self.loyalty.get(officer, 0) >= 100 and not (OFFICER[officer].rank == 0
+                                                          and OFFICER[officer].faction == self.allegiance[officer])
+
+    def refresh_council_of(self, officer: str) -> None:
+        """An adviser's stats changed: the council's threshold cards follow."""
+        f = self.allegiance.get(officer)
+        r = self.realms.get(f) if hasattr(self, "realms") else None
+        if r and officer in r.council:
+            self._sync_thresholds(f)
+
     # --- queries ----------------------------------------------------------------------------
     def officers_in(self, city: str) -> List[Officer]:
         return sorted((OFFICER[k] for k, c in self.officer_city.items()
                        if c == city and self.allegiance[k] == self.owner[city]),
-                      key=lambda o: (o.rank, -o.leadership))
+                      key=lambda o: (o.rank, -self.olead[o.key]))
 
     def power(self, officer: str) -> int:
         return sum(t.power for t in self.squads[officer])
@@ -223,7 +299,7 @@ class Campaign:
     def officers_of(self, faction: str) -> List[Officer]:
         """Everyone serving the faction now (defectors included), leader first."""
         return sorted((OFFICER[k] for k, f in self.allegiance.items() if f == faction),
-                      key=lambda o: (o.faction != faction, o.rank, -o.leadership))
+                      key=lambda o: (o.faction != faction, o.rank, -self.olead[o.key]))
 
     def cities_of(self, faction: str) -> List[str]:
         return [c for c, f in self.owner.items() if f == faction]
@@ -258,7 +334,7 @@ class Campaign:
 
     def income_of(self, city: str, faction: str) -> int:
         """What a tax card brings in this city now."""
-        best = max((o.stat("УПРАВЛЕНИЕ") for o in self.officers_in(city) if self.allegiance[o.key] == faction),
+        best = max((self.stat(o.key, "УПРАВЛЕНИЕ") for o in self.officers_in(city) if self.allegiance[o.key] == faction),
                    default=0)
         return self.prosperity[city] * TAX + 2 * best
 
@@ -286,6 +362,8 @@ class Campaign:
         faction = self.owner[city]
         if key not in CITY[city].pool:
             return False, "ЭТИХ ВОИНОВ ЗДЕСЬ НЕ НАНЯТЬ"
+        if self.muster.get(city, 0) <= 0:
+            return False, "НАЙМ ЗАКРЫТ: НУЖНА КАРТА СБОР ВОЙСК"
         if ROSTER[key].cost > self.gold[faction]:
             return False, "НЕ ХВАТАЕТ ЗОЛОТА"
         return True, ""
@@ -327,7 +405,7 @@ class Campaign:
             return False, "ОТРЯД НЕ В ЭТОМ ГОРОДЕ"
         if len(self.squads[officer]) >= SQUAD_SLOTS:
             return False, "ВСЕ 7 МЕСТ ЗАНЯТЫ"
-        if self.power(officer) + troop.power > OFFICER[officer].leadership:
+        if self.power(officer) + troop.power > self.olead[officer]:
             return False, "НЕ ХВАТАЕТ ЛИДЕРСТВА"
         return True, ""
 
@@ -396,6 +474,10 @@ class Campaign:
 
     def officer_mult(self, officer: str) -> float:
         m = 1.0
+        if self.loyalty.get(officer, 60) < 30:
+            m *= 0.9                                      # fights half-heartedly
+        elif self.devoted(officer):
+            m *= 1.15                                     # would die for his lord
         for mult, _ in self.buffs.get(officer, []):
             m *= mult
         return m
@@ -428,8 +510,8 @@ class Campaign:
         r.draw = [self._inst(k, "base") for k in COURSES[r.course].base]
         r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
         for o in r.council:
-            r.draw.extend(self._inst(k, o) for k in PERSONAL[o])
-        r.draw.extend(self._inst(k, "threshold") for k in threshold_cards(r.council))
+            r.draw.extend(self._inst(k, o) for k in self.personal(o))
+        r.draw.extend(self._inst(k, "threshold") for k in self.thresholds(r.council))
         self.rng.shuffle(r.draw)
 
     def council_options(self, faction: str) -> List[Officer]:
@@ -459,20 +541,11 @@ class Campaign:
         for pile in piles:
             pile[:] = [c for c in pile if c.origin not in gone]
         for o in new:
-            for k in PERSONAL[o]:
+            for k in self.personal(o):
                 r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, o))
+            self.last_used[o] = self.turn
         r.council = members
-        want = Counter(threshold_cards(members))
-        have = Counter(c.key for pile in piles for c in pile if c.origin == "threshold")
-        for k in have:
-            extra = have[k] - want.get(k, 0)
-            for pile in piles:
-                while extra > 0 and any(c.key == k and c.origin == "threshold" for c in pile):
-                    pile.remove(next(c for c in pile if c.key == k and c.origin == "threshold"))
-                    extra -= 1
-        for k in want:
-            for _ in range(want[k] - have.get(k, 0)):
-                r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "threshold"))
+        self._sync_thresholds(faction)
         for o in gone:
             if self.allegiance.get(o) == faction:
                 self.change_loyalty(o, -20)
@@ -495,7 +568,6 @@ class Campaign:
     def change_course(self, faction: str, course: str) -> bool:
         """The cards of state are swapped for the new course's (wherever they are, the hand too);
         then the course is locked for ``course_cooldown`` turns."""
-        from .cards import course_cooldown
         if not self.can_change_course(faction, course)[0]:
             return False
         r = self.realms[faction]
@@ -504,14 +576,29 @@ class Campaign:
         for k in COURSES[course].base:
             r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "base"))
         r.course = course
-        r.course_cd = course_cooldown(r.council)
+        r.course_cd = self.course_cooldown(r.council)
         r.storms = 0
         self.log_event(faction, f"Новый курс державы: {COURSES[course].name}")
         return True
 
+    def _sync_thresholds(self, faction: str) -> None:
+        """Threshold cards follow the council's current totals (wherever the cards are)."""
+        r = self.realms[faction]
+        piles = (r.draw, r.hand, r.discard)
+        want = Counter(self.thresholds(r.council))
+        have = Counter(c.key for pile in piles for c in pile if c.origin == "threshold")
+        for k in have:
+            extra = have[k] - want.get(k, 0)
+            for pile in piles:
+                while extra > 0 and any(c.key == k and c.origin == "threshold" for c in pile):
+                    pile.remove(next(c for c in pile if c.key == k and c.origin == "threshold"))
+                    extra -= 1
+        for k in want:
+            for _ in range(want[k] - have.get(k, 0)):
+                r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "threshold"))
+
     def add_curse(self, faction: str, key: str, n: int = 1, source: str = "") -> int:
         """Slip curses into a realm's draw pile; a watchful council catches some. Returns how many got in."""
-        from .cards import intercepts
         r = self.realms[faction]
         got = 0
         if source and source != faction and key not in ("debt", "fatigue", "strife", "war_fatigue"):
@@ -523,7 +610,7 @@ class Campaign:
                 self.log_event(faction, f"ПЕРЕХВАТ ГОНЦА: {CARDS[key].name} не дошла")
                 return 0
         for _ in range(n):
-            catch = max(0.35 if intercepts(r.council) else 0.0, 0.5 if r.course == "intrigue" else 0.0)
+            catch = max(0.35 if self.intercepts(r.council) else 0.0, 0.5 if r.course == "intrigue" else 0.0)
             if key not in ("debt", "fatigue", "strife", "war_fatigue") and self.rng.random() < catch:
                 self.log_event(faction, f"Разведка перехватила {CARDS[key].name}")
                 continue
@@ -598,10 +685,16 @@ class Campaign:
         self.stats["courses"][f"{faction}:{r.course}"] += 1
         if r.course_cd > 0:
             r.course_cd -= 1
+        for city in [c for c in self.muster if self.owner[c] == faction]:
+            self.muster[city] -= 1
+            if self.muster[city] <= 0:
+                del self.muster[city]
+        from . import growth
+        growth.turn(self, faction)
         if r.course == "intrigue":                            # paranoia: nobody trusts anybody
             for o in self.officers_of(faction):
                 self.change_loyalty(o.key, -1)
-        if strife(r.council) and self.turn % 3 == 0:
+        if self.strife(r.council) and self.turn % 3 == 0:
             self.add_curse(faction, "strife")
             self.log_event(faction, "Совет погряз в распрях")
 
@@ -650,7 +743,7 @@ class Campaign:
             self._desert(f)
             self.gold[f] = 0
         # hand: keep what the council allows, draw the rest
-        keep_n = reserve(r.council)
+        keep_n = self.reserve(r.council)
         if f == self.player:
             kept = [c for c in r.hand if c.id in r.keep][:keep_n]
         else:
@@ -661,7 +754,7 @@ class Campaign:
                 r.hand.remove(c)
                 r.discard.append(c)
         r.keep = []
-        self._draw(f, max(0, hand_size(r.council) - len(r.hand)))
+        self._draw(f, max(0, self.hand_size(r.council) - len(r.hand)))
         self._next()
 
     def _desert(self, f: str) -> None:
@@ -677,6 +770,8 @@ class Campaign:
             (self.squads[o] if o else self.free[c]).remove(t)
             lost += ROSTER[t.key].upkeep * 3
         self.log_event(f, "Казна пуста: часть войск разбежалась")
+        from . import growth
+        growth.on_unpaid(self, f)
 
     def _next(self) -> None:
         n = len(self.order)
@@ -712,7 +807,7 @@ class Campaign:
             return False, "ЭТУ КАРТУ НЕЛЬЗЯ СЫГРАТЬ"
         if card.reaction:
             return False, "ЭТО ОТВЕТ: СРАБОТАЕТ В ЧУЖОЙ ХОД"
-        if card.cost > r.ap:
+        if self.card_cost(faction, inst) > r.ap:
             return False, "НЕ ХВАТАЕТ ОД"
         if card.gold > self.gold[faction]:
             return False, "НЕ ХВАТАЕТ ЗОЛОТА"
@@ -734,7 +829,7 @@ class Campaign:
         if not valid(self, faction, card.key, targets):
             return False, "НЕВЕРНАЯ ЦЕЛЬ"
         r = self.realms[faction]
-        r.ap -= card.cost
+        r.ap -= self.card_cost(faction, inst)
         self.gold[faction] -= card.gold
         r.hand.remove(inst)
         msg = EFFECTS[card.key](self, faction, targets)
@@ -743,6 +838,8 @@ class Campaign:
         else:
             r.discard.append(inst)
         self.stats["played"][card.key] += 1
+        from . import growth
+        growth.on_card_used(self, faction, inst)
         self.log_event(faction, f"{card.name}: {msg}" if msg else card.name)
         return True, msg
 
@@ -825,7 +922,7 @@ class Campaign:
         """Chance that a fallen warrior lives: the winners' wounded are nursed back (better under an
         officer with good ЛОГИСТИКА); the losers' wounded may slip away to a neighbouring own city
         (also ЛОГИСТИКА, and harder the more crushing the defeat)."""
-        log = OFFICER[officer].stat("ЛОГИСТИКА") if officer else 8
+        log = self.stat(officer, "ЛОГИСТИКА") if officer else 8
         if won:
             return min(0.6, 0.2 + 0.015 * log)
         return min(0.5, (0.1 + 0.015 * log) * (0.5 + 0.5 * ratio))
@@ -864,11 +961,11 @@ class Campaign:
                 self._remove(o, city, t)
                 dead += 1
         tail = f"; павших {dead}, раненых {wounded}" + (f", бежали {fled}" if fled else "") + answer
+        from . import growth
         if not won:
             for o in b.officers:
                 self.change_loyalty(o, -5)
-            for o, t in escapees:                             # (defenders won: nobody had to run)
-                self.free[city].append(t)
+            growth.on_battle(self, b)
             return f"штурм {name} отбит ({int(b.a)} против {int(b.d)}){tail}"
         for t in list(self.free[city]):                       # the rest of the garrison runs if it can
             self.free[city].remove(t)
@@ -883,6 +980,7 @@ class Campaign:
         self.move(b.officers, city)
         for o in b.officers:
             self.change_loyalty(o, 3)
+        growth.on_battle(self, b)
         return f"{name} взят ({int(b.a)} против {int(b.d)}){tail}"
 
     def _remove(self, officer: Optional[str], city: str, t: Troop) -> None:
@@ -955,6 +1053,10 @@ class Campaign:
 
     def _take(self, faction: str, city: str, defenders: Sequence[str]) -> None:
         old = self.owner[city]
+        from . import growth
+        if old in self.realms:
+            growth.on_city_lost(self, old, city)
+        growth.on_city_won(self, faction)
         self.owner[city] = faction
         self.prosperity[city] = max(1, self.prosperity[city] - 1)
         self.siege.pop(city, None)

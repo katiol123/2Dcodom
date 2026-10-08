@@ -18,6 +18,7 @@ from typing import Dict
 from .campaign import Campaign
 from .cards import CARDS, TIER_NAMES
 from .factions import ALL_FACTIONS
+from .officers import OFFICER
 
 
 def one_game(args) -> Dict:
@@ -34,17 +35,31 @@ def one_game(args) -> Dict:
         c.log = []
     curve = defaultdict(list)
     deserted = Counter()
+    first_council = {o for f in c.order for o in c.realms[f].council}
+    ever_council = set(first_council)
     while c.turn <= rounds:
         c.run_ai(stop_at_player=False, max_turns=1)
         for f in c.order:
             curve[f].append(len(c.cities_of(f)))
+            ever_council.update(c.realms[f].council)
     for t, f, text in c.log:
         if text.startswith("Казна пуста"):
             deserted[f] += 1
     battles = sum(1 for t, f, text in c.log if text.startswith(("ШТУРМ", "МОЛНИЕНОСНЫЙ", "ДРАККАРЫ")))
     wins = sum(1 for t, f, text in c.log if text.startswith(("ШТУРМ", "МОЛНИЕНОСНЫЙ", "ДРАККАРЫ"))
                and "взят" in text)
+    # how officers changed, by their starting calibre (quintiles of presence among non-leaders)
+    from .faces import presence
+    offs = sorted((o for o in OFFICER.values() if o.rank), key=presence)
+    growth = []
+    for i, o in enumerate(offs):
+        q = i * 5 // len(offs)
+        delta = sum(c.ostats[o.key]) - sum(o.stats)
+        growth.append((q, delta, c.level[o.key], c.olead[o.key] - o.leadership,
+                       o.key in ever_council and o.key not in first_council))
     return {
+        "growth": growth, "levels": c.stats["levels"], "declines": c.stats["declines"],
+        "feats": c.stats["feats"], "turncoats": c.stats["deserted_officers"], "reshuffles": c.stats["reshuffles"],
         "cities": {f: len(c.cities_of(f)) for f in c.order},
         "alive": {f: c.realms[f].alive for f in c.order},
         "army": {f: c.army(f) for f in c.order},
@@ -87,6 +102,28 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> s
         f"{fac.short} " + "/".join(f"{k[:3]} {courses[f'{fac.key}:{k}'] / max(1, sum(v for kk, v in courses.items() if kk.startswith(fac.key + ':'))):.0%}"
                                   for k in ("balance", "war", "economy", "defense", "intrigue")
                                   if courses[f"{fac.key}:{k}"]) for fac in ALL_FACTIONS)]
+    n = len(results)
+    out += ["", "ОФИЦЕРЫ ЗА КАМПАНИЮ: уровней " + ", ".join(
+        f"{fac.short} {sum(r['levels'][fac.key] for r in results) / n:.0f}" for fac in ALL_FACTIONS),
+        "  падений навыка " + ", ".join(f"{fac.short} {sum(r['declines'][fac.key] for r in results) / n:.1f}"
+                                        for fac in ALL_FACTIONS),
+        "  измен (ушли сами) " + ", ".join(f"{fac.short} {sum(r['turncoats'][fac.key] for r in results) / n:.2f}"
+                                          for fac in ALL_FACTIONS),
+        "  перестановок совета " + ", ".join(f"{fac.short} {sum(r['reshuffles'][fac.key] for r in results) / n:.1f}"
+                                            for fac in ALL_FACTIONS)]
+    out.append(f"{'КАЛИБР (квинтиль)':18s} {'НАВЫКИ +-':>9s} {'УРОВЕНЬ':>7s} {'ЛИДЕРСТВО':>9s} {'УПАЛИ':>6s} "
+               f"{'ВЫРОСЛИ 5+':>10s} {'ВОШЛИ В СОВЕТ':>13s}")
+    for q, label in enumerate(("слабейшие", "слабые", "средние", "сильные", "сильнейшие")):
+        rows = [g for r in results for g in r["growth"] if g[0] == q]
+        k = max(1, len(rows))
+        out.append(f"{label:18s} {sum(g[1] for g in rows) / k:+9.2f} {sum(g[2] for g in rows) / k:7.2f} "
+                   f"{sum(g[3] for g in rows) / k:+9.1f} {sum(g[1] < 0 for g in rows) / k:6.1%} "
+                   f"{sum(g[1] >= 5 for g in rows) / k:10.1%} {sum(g[4] for g in rows) / k:13.1%}")
+    feats = Counter()
+    for r in results:
+        feats.update(r["feats"])
+    out.append("ПОДВИГИ (доля кампаний): " + ", ".join(f"{CARDS[k].name} {feats[k] / n:.0%}" for k in
+                                                       [k for k, c in CARDS.items() if c.tier == "feat"]))
     played, drawn, income = Counter(), Counter(), Counter()
     for r in results:
         played.update(r["played"])

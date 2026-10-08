@@ -4,8 +4,9 @@ Everything a realm does on the world map is a card played for action points (О�
 collecting taxes, marching, storming cities, hiring for free, diplomacy, intrigue.
 
 A realm's deck (see ``deck_for``) is made of
-* the five cards of state, set by the realm's **course** (``COURSES``): balance = three taxes, a march
-  and an assault; war = three assaults; economy = taxes and a fair; and so on. The course can be
+* the six cards of state, set by the realm's **course** (``COURSES``): balance = three taxes, a march,
+  an assault and a muster (СБОР ВОЙСК: hiring in a city is open only while a muster lasts, longer
+  with a council strong in ВЕРБОВКА); war = three assaults; economy = taxes and a fair; and so on. The course can be
   changed during the campaign, then it is locked for a while (``course_cooldown``: the better the
   council governs, the sooner it may change course again); every course but balance has a price;
 * ONE faction card (it belongs to the leader, who always sits in the council);
@@ -22,13 +23,14 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .officers import OFFICER, OFFICERS, STATS, Officer
 
-TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse", "vice")
+TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse", "vice", "feat")
 TIER_NAMES = {"basic": "ОСНОВА", "junk": "ПУСТЯК", "moderate": "ДЕЛЬНАЯ", "strong": "СИЛЬНАЯ",
-              "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ", "vice": "ПОРОК"}
+              "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ", "vice": "ПОРОК",
+              "feat": "ПОДВИГ"}
 KIND_NAMES = {"economy": "ХОЗЯЙСТВО", "military": "ВОЙНА", "intrigue": "ИНТРИГА", "diplomacy": "ДИПЛОМАТИЯ",
               "council": "СОВЕТ", "recruit": "НАБОР", "curse": "БЕДА", "vice": "ПОРОК"}
 
@@ -72,6 +74,9 @@ _CARDS: List[Card] = [
        ("enemy_adj", "attackers")),
     _c("levy", "НАБОР", 1, "basic", "recruit",
        "Бесплатные новобранцы в своём городе на 60 мощи + 10 за вербовку лучшего офицера там.", ("own_city",)),
+
+    _c("muster", "СБОР ВОЙСК", 1, "basic", "recruit", "Открыть найм в своём городе на этот ход. Вербовка "
+       "совета 62+: ещё на 1 ход, 80+: ещё на 2.", ("own_city",)),
 
     # --- junk: a little use in a special case, or too dear -------------------------------------
     _c("feast", "ПИР", 1, "junk", "council", "Офицеры в своём городе: верность +12.", ("own_city_officers",)),
@@ -246,6 +251,24 @@ _CARDS: List[Card] = [
     _c("ancient_map", "ДРЕВНЯЯ КАРТА", 1, "unique", "military", "Свой офицер переходит в любой свой город "
        "и остаётся готов.", ("own_officer_ready", "dest_any_one")),
 
+    # --- feats: one of each per campaign, earned by an officer's deed (``FEATS``) -----------------
+    _c("ford_hero", "ГЕРОЙ БРОДА", 1, "feat", "military", "Подвиг: удержал город вопреки силе врага. "
+       "Свой офицер: +35% силы на 3 хода, верность 100.", ("own_officer",)),
+    _c("goblin_bane", "ГРОЗА ГОБЛИНОВ", 1, "feat", "recruit", "Подвиг: взял 2 логова. Трофеи: +150 "
+       "золота и новобранцы на 120 мощи в своём городе.", ("own_city",)),
+    _c("golden_governor", "ЗОЛОТОЙ НАМЕСТНИК", 1, "feat", "economy", "Подвиг: 4 города державы расцвели до 10. "
+       "+50 золота за каждый свой город с процветанием 7+."),
+    _c("wall_first", "ПЕРВЫЙ НА СТЕНЕ", 2, "feat", "military", "Подвиг: взял чужую столицу вопреки силе. Штурм соседнего "
+       "города с +25% силы.", ("enemy_adj", "attackers")),
+    _c("unbroken", "НЕСОКРУШИМЫЙ", 0, "feat", "military", "Подвиг: 8 побед подряд. Свой офицер снова "
+       "готов, его отряд +20% силы на 2 хода.", ("own_officer",)),
+    _c("peacemaker", "МИРОТВОРЕЦ", 1, "feat", "diplomacy", "Подвиг: мир с пятью державами сразу. Мир "
+       "на 10 ходов с державой при отношениях 20+.", ("rival_diplo",)),
+    _c("giant_slayer", "ПОБЕДИТЕЛЬ ГИГАНТОВ", 2, "feat", "military", "Подвиг: победил втрое сильнейшего "
+       "врага. Все ваши отряды +20% силы на 3 хода."),
+    _c("war_legend", "ЛЕГЕНДА ВОЙНЫ", 2, "feat", "military", "Подвиг: дорос до 10 уровня. Штурм из городов "
+       "в 3 дорогах от цели, +40% силы.", ("enemy_reach", "attackers_far")),
+
     # --- vices: a councillor's flaws come into the deck with him ---------------------------------
     _c("sloth", "ЛЕНЬ", 0, "vice", "vice", "Порок советника: мёртвая карта. Ничего не делает, только "
        "занимает место в руке.", unplayable=True),
@@ -296,33 +319,33 @@ BASE_SET: Tuple[str, ...] = ("tax", "tax", "tax", "march", "assault")
 class Course:
     key: str
     name: str
-    base: Tuple[str, ...]       # the five cards of state on this course
+    base: Tuple[str, ...]       # the six cards of state on this course
     plus: str
     minus: str
 
 
 COURSES: Dict[str, Course] = {c.key: c for c in (
-    Course("balance", "РАВНОВЕСИЕ", BASE_SET, "Всего понемногу.", "Без штрафа."),
-    Course("war", "ВОЙНА", ("assault", "assault", "assault", "march", "tax"),
+    Course("balance", "РАВНОВЕСИЕ", BASE_SET + ("muster",), "Всего понемногу.", "Без штрафа."),
+    Course("war", "ВОЙНА", ("assault", "assault", "assault", "march", "tax", "muster"),
            "Штурм приходит в руку почти каждый ход.",
            "ВОЕННАЯ УСТАЛОСТЬ: каждый штурм кладёт в колоду мёртвую карту. Свои города сами не растут."),
-    Course("economy", "ХОЗЯЙСТВО", ("tax", "tax", "tax", "fair", "golden_age"),
+    Course("economy", "ХОЗЯЙСТВО", ("tax", "tax", "tax", "fair", "golden_age", "muster"),
            "Поборы не снижают процветание, города растут каждые 3 хода, Золотой век в основе.",
            "ЛАКОМАЯ ДОБЫЧА: соседи охотнее нападают на богатую державу. Ни штурма, ни похода в основе."),
-    Course("defense", "ОБОРОНА", ("tax", "tax", "fortify", "sortie", "march"),
+    Course("defense", "ОБОРОНА", ("tax", "tax", "fortify", "sortie", "march", "muster"),
            "Оборона всех своих городов x1.25, укрепления и вылазка в основе.",
            "Штурма в основе нет: расширяться можно лишь картами советников."),
-    Course("intrigue", "ТАЙНАЯ ПОЛИТИКА", ("tax", "tax", "letters", "bribe", "assault"),
+    Course("intrigue", "ТАЙНАЯ ПОЛИТИКА", ("tax", "tax", "letters", "bribe", "assault", "muster"),
            "Половина чужих проклятий перехвачена, заговоры удаются чаще.",
            "ПАРАНОЙЯ: верность всех своих офицеров падает на 1 каждый ход."),
 )}
 COURSE_BASE_CD, COURSE_MIN_CD = 10, 3
 
 
-def course_cooldown(council: List[str]) -> int:
+def course_cooldown(council: List[str], stats: Stats = None) -> int:
     """Turns before the course may change again: 10, one less for every 6 points of the council's
     УПРАВЛЕНИЕ above 40, never under 3."""
-    gov = council_totals(council)["УПРАВЛЕНИЕ"]
+    gov = council_totals(council, stats)["УПРАВЛЕНИЕ"]
     return max(COURSE_MIN_CD, COURSE_BASE_CD - max(0, gov - 40) // 6)
 
 FACTION_CARD: Dict[str, str] = {
@@ -339,6 +362,18 @@ THRESHOLD_CARDS: Dict[str, Tuple[str, str]] = {
     "РАЗВЕДКА": ("scouts", "all_seeing"),
     "ДИПЛОМАТИЯ": ("truce", "grand_embassy"),
     "ИНТРИГА": ("letters", "plot"),
+}
+
+# deeds that earn a feat card (one of each per campaign); checked in campaign.py
+FEATS: Dict[str, str] = {
+    "ford_hero": "удержать город, когда шанс устоять был не выше 15%",
+    "goblin_bane": "участвовать во взятии 2 гоблинских логов",
+    "golden_governor": "быть лучшим управленцем в городах державы, когда 4 из них расцвели до 10",
+    "wall_first": "взять штурмом столицу державы, когда шанс был меньше половины",
+    "unbroken": "выиграть 8 боёв подряд",
+    "peacemaker": "сидеть в совете, когда у державы мир с пятью державами сразу (лучший дипломат совета)",
+    "giant_slayer": "победить, когда сила врага была втрое больше",
+    "war_legend": "дорасти до 10 уровня",
 }
 
 # the faction's unique cards; each goes to one officer (``_holders`` picks who)
@@ -472,13 +507,17 @@ def personal(officer: str) -> Tuple[str, ...]:
     return PERSONAL[officer]
 
 
-def council_totals(council: List[str]) -> Dict[str, int]:
-    return {st: sum(OFFICER[o].stats[i] for o in council) for i, st in enumerate(STATS)}
+Stats = Optional[Dict[str, Sequence[int]]]      # officer -> current stats (a campaign changes them)
 
 
-def threshold_cards(council: List[str]) -> List[str]:
+def council_totals(council: List[str], stats: Stats = None) -> Dict[str, int]:
+    get = (lambda o: stats[o]) if stats is not None else (lambda o: OFFICER[o].stats)
+    return {st: sum(get(o)[i] for o in council) for i, st in enumerate(STATS)}
+
+
+def threshold_cards(council: List[str], stats: Stats = None) -> List[str]:
     out = []
-    totals = council_totals(council)
+    totals = council_totals(council, stats)
     for st in STATS:
         mid, top = THRESHOLD_CARDS[st]
         if totals[st] >= THRESHOLDS[0]:
@@ -488,30 +527,37 @@ def threshold_cards(council: List[str]) -> List[str]:
     return out
 
 
-def competence(council: List[str]) -> int:
+def competence(council: List[str], stats: Stats = None) -> int:
     """How many thresholds the council clears (0..12)."""
-    return len(threshold_cards(council))
+    return len(threshold_cards(council, stats))
 
 
-def hand_size(council: List[str]) -> int:
-    return HAND + (1 if competence(council) >= 6 else 0)
+def hand_size(council: List[str], stats: Stats = None) -> int:
+    return HAND + (1 if competence(council, stats) >= 6 else 0)
 
 
-def reserve(council: List[str]) -> int:
+def reserve(council: List[str], stats: Stats = None) -> int:
     """Cards the realm may keep in hand from one turn to the next."""
-    c = competence(council)
+    c = competence(council, stats)
     return 2 if c >= 8 else 1 if c >= 3 else 0
 
 
-def intercepts(council: List[str]) -> bool:
+def intercepts(council: List[str], stats: Stats = None) -> bool:
     """A council with a good eye for spies (first РАЗВЕДКА threshold) catches a third of the
     curses rivals slip into its deck."""
-    return council_totals(council)["РАЗВЕДКА"] >= THRESHOLDS[0]
+    return council_totals(council, stats)["РАЗВЕДКА"] >= THRESHOLDS[0]
 
 
-def strife(council: List[str]) -> bool:
+def strife(council: List[str], stats: Stats = None) -> bool:
     """A weak council quarrels: every third turn a dead card lands in its own deck."""
-    return competence(council) <= 1
+    return competence(council, stats) <= 1
+
+
+def muster_turns(council: List[str], stats: Stats = None) -> int:
+    """How long СБОР ВОЙСК keeps a city's recruiting open: this turn, +1 with the council's
+    ВЕРБОВКА at the first threshold, +2 at the second."""
+    v = council_totals(council, stats)["ВЕРБОВКА"]
+    return 1 + (v >= THRESHOLDS[0]) + (v >= THRESHOLDS[1])
 
 
 def deck_for(faction: str, council: List[str], course: str = "balance") -> List[str]:

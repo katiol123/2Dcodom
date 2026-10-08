@@ -54,6 +54,13 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   `_CARDS` + `@effect` + AI value + put it in a pool/unique list; then `python -m game.cardsim 64 40` and check
   per-realm cities/income and the card's play rate; regenerate docs/CARDS.md tables.
 - City prosperity (`PROSPERITY` in factions.py, 1..10) sets tax income; AI realms must stay pygame-free.
+- Hiring is open only in cities with an active СБОР ВОЙСК (`camp.muster`, turns from council ВЕРБОВКА).
+- Officers change during a campaign (`growth.py`): XP/levels (weak officers learn faster, by *starting*
+  presence), wounds/complacency, feats (one of each per campaign, `cards.FEATS`), loyalty events and
+  defections. Use `camp.ostats/olead/stat()/leadership()/presence()/personal()` and the council wrappers
+  (`camp.totals/thresholds/hand_size/...`), never the static `Officer.stats` in game logic or UI.
+  `cardsim` reports growth by starting calibre and feat rates; aim: the weakest fifth climbs (~5 levels,
+  some reach the council), the strongest rarely lose a stat (~15%), defections < 1 per realm.
 - Storms: `Campaign.attack` -> defender's answer card (`_answer`) -> `battle_hook` (real battle) or `_formula` ->
   `_settle` (fallen roll `fate_odds`: wounded/escaped/dead). The map runs card plays and turns in a worker thread
   (`campaign_runner.Runner`); a storm involving the player (or an AI storm he chose to watch) asks the screen to

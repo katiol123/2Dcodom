@@ -15,14 +15,14 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .cardplay import MAX_GROUP, options
-from .cards import CARDS, COUNCIL_SEATS, PERSONAL, council_totals, threshold_cards
+from .cards import CARDS, COUNCIL_SEATS
 from .factions import CITY, FACTION, neighbors
 from .officers import OFFICER
 from .units import ROSTER
 
 AP_PRICE = 35                   # what one action point is worth, in gold
 TIER_HINT = {"faction": 150, "unique": 130, "strong": 140, "moderate": 80, "basic": 60, "junk": 20, "curse": -60,
-             "vice": -50}
+             "vice": -50, "feat": 170}
 POWER_VALUE = 0.7               # gold-equivalent of one point of troop power
 PROSPERITY_VALUE = 45           # gold-equivalent of +1 prosperity in an own city
 
@@ -73,7 +73,7 @@ def _recruit_city(camp, f: str, cities: Sequence[str]) -> Tuple[float, Optional[
     best, pick = -1.0, None
     front = set(frontier(camp, f))
     for c in cities:
-        room = sum(max(0, o.leadership - camp.power(o.key)) for o in camp.officers_in(c))
+        room = sum(max(0, camp.leadership(o.key) - camp.power(o.key)) for o in camp.officers_in(c))
         score = min(room, 300) / 300 + (0.6 if c in front else 0) + threat(camp, f, c) / 2000
         if score > best:
             best, pick = score, c
@@ -411,7 +411,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         return _enemy_officer(camp, f, k, lambda o: (camp.power(o) * POWER_VALUE + 120 - 100)
                               if camp.loyalty[o] - 30 < 20 and OFFICER[o].rank > 0 else -1)
     if k == "plot":
-        intrigue = council_totals(camp.realms[f].council)["ИНТРИГА"]
+        intrigue = camp.totals(camp.realms[f].council)["ИНТРИГА"]
 
         def s(o):
             if OFFICER[o].rank == 0 and OFFICER[o].faction == camp.allegiance[o]:
@@ -424,6 +424,34 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         return _best_rival(camp, f, k, lambda r: (_rival_threat(camp, f, r) * 0.1 + 60)
                            if camp.relation(f, r) < 30 and (f, r) not in camp.grudge else -1)
     # --- diplomacy
+    if k == "muster":
+        up = camp.upkeep(f)
+        spare = camp.gold[f] - (80 + 2 * up)
+        if spare < 60 or camp.expected_income(f) < up * 1.1:
+            return -1, []
+        score, city = _recruit_city(camp, f, [c for c in options(camp, f, k, []) if camp.muster.get(c, 0) <= 0])
+        if city is None:
+            return -1, []
+        room = sum(max(0, camp.leadership(o.key) - camp.power(o.key)) for o in camp.officers_in(city))
+        return min(spare, room, 400) * 0.45 * camp.muster_turns(camp.realms[f].council) ** 0.5, [city]
+    if k in ("ford_hero", "unbroken"):
+        front = set(frontier(camp, f))
+        return _best_officer(camp, f, k, lambda o: (camp.power(o) * 0.35 * 0.4 + 30)
+                             if camp.officer_city[o] in front and camp.squads[o] else -1)
+    if k == "goblin_bane":
+        score, city = _recruit_city(camp, f, options(camp, f, k, []))
+        return (150 + 120 * POWER_VALUE * max(econ, 0.2)), [city]
+    if k == "golden_governor":
+        return 50 * sum(1 for c in camp.cities_of(f) if camp.prosperity[c] >= 7), []
+    if k == "wall_first":
+        return _attack_plan(camp, f, k, 1.25)
+    if k == "war_legend":
+        return _attack_plan(camp, f, k, 1.4)
+    if k == "giant_slayer":
+        return (camp.army(f) * 0.2 * 0.25 if frontier(camp, f) else -1), []
+    if k == "peacemaker":
+        return _best_rival(camp, f, k, lambda r: 30 + min(250, _rival_threat(camp, f, r) * 0.2)
+                           if camp.relation(f, r) >= 20 and not camp.at_peace(f, r) else -1)
     if k == "buyout":
         return _best_city(camp, f, k, lambda c: _city_worth(camp, c) - camp.prosperity[c] * 100
                           if camp.gold[f] - camp.prosperity[c] * 100 > camp.upkeep(f) * 2 else -1)
@@ -479,7 +507,7 @@ def choose_answer(camp, b, cards):
 def manage(camp, f: str) -> None:
     """Fill squads with the free troops in their city, hire with spare gold."""
     for c in camp.cities_of(f):
-        offs = sorted(camp.officers_in(c), key=lambda o: -o.leadership)
+        offs = sorted(camp.officers_in(c), key=lambda o: -camp.leadership(o.key))
         for t in sorted(camp.free[c], key=lambda t: -t.power):
             for o in offs:
                 if camp.assign(o.key, t.id):
@@ -489,11 +517,11 @@ def manage(camp, f: str) -> None:
     margin = camp.expected_income(f) - up
     if margin < 0:
         reserve = 4 * up                                # cannot afford a bigger army
-    front = frontier(camp, f) or camp.cities_of(f)
+    front = [c for c in camp.cities_of(f) if camp.muster.get(c, 0) > 0]      # recruiting is open only there
     for c in sorted(front, key=lambda c: -threat(camp, f, c)):
         for o in camp.officers_in(c):
             while camp.gold[f] > reserve:
-                room = o.leadership - camp.power(o.key)
+                room = camp.leadership(o.key) - camp.power(o.key)
                 cands = [k for k in camp._pool(c) if ROSTER[k].cost <= room and ROSTER[k].cost <= camp.gold[f] - reserve
                          and not ROSTER[k].boss and camp.troop_upkeep(f, k) <= max(0, margin - 0.1 * up)]
                 if not cands or len(camp.squads[o.key]) >= 7:
@@ -504,31 +532,32 @@ def manage(camp, f: str) -> None:
                 margin -= camp.troop_upkeep(f, k)
 
 
-COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0, "vice": -60}
+COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0, "vice": -60, "feat": 170}
 
 
-def council_score(members: Sequence[str], taste: Optional[Dict[str, float]] = None) -> float:
+def council_score(camp, members: Sequence[str], taste: Optional[Dict[str, float]] = None) -> float:
     """What a council brings: its personal cards, its threshold cards and its competence.
     ``taste`` makes every computer ruler value things a bit differently (uniques, thresholds)."""
-    from .cards import hand_size, reserve, strife
     taste = taste or {}
-    v = sum(COUNCIL_HINT[CARDS[k].tier] * taste.get(CARDS[k].tier, 1.0) for o in members for k in PERSONAL[o])
-    v += sum(COUNCIL_HINT[CARDS[k].tier] * taste.get("threshold", 1.0) for k in threshold_cards(list(members)))
-    v += 70 * (hand_size(list(members)) - 5) + 45 * reserve(list(members)) - (90 if strife(list(members)) else 0)
+    m = list(members)
+    v = sum(COUNCIL_HINT[CARDS[k].tier] * taste.get(CARDS[k].tier, 1.0) for o in m for k in camp.personal(o))
+    v += sum(COUNCIL_HINT[CARDS[k].tier] * taste.get("threshold", 1.0) for k in camp.thresholds(m))
+    v += 70 * (camp.hand_size(m) - 5) + 45 * camp.reserve(m) - (90 if camp.strife(m) else 0)
+    v -= sum(max(0, 35 - camp.loyalty.get(o, 60)) * 2 for o in m)     # grumblers are a liability
+    v += sum(2 * sum(camp.ostats[o]) + 25 * camp.level.get(o, 0) for o in m[1:])  # skill and renown
     return v
 
 
 def choose_council(camp, f: str) -> List[str]:
     """Leader + four advisers, improved seat by seat while any swap helps."""
-    from .faces import presence
     from .officers import OFFICERS
     leader = OFFICERS[f][0].key
     cands = [o.key for o in camp.officers_of(f) if o.key != leader]
-    members = [leader] + sorted(cands, key=lambda k: -presence(OFFICER[k]))[:COUNCIL_SEATS - 1]
+    members = [leader] + sorted(cands, key=lambda k: -camp.presence(k))[:COUNCIL_SEATS - 1]
     import random as _r
     rr = _r.Random(f"taste:{camp.seed}:{f}")
     taste = {"unique": rr.uniform(0.6, 1.8), "threshold": rr.uniform(0.8, 1.2), "moderate": rr.uniform(0.8, 1.2)}
-    best = council_score(members, taste)
+    best = council_score(camp, members, taste)
     for _ in range(6):
         improved = False
         for i in range(1, len(members)):
@@ -536,7 +565,7 @@ def choose_council(camp, f: str) -> List[str]:
                 if c in members:
                     continue
                 trial = members[:i] + [c] + members[i + 1:]
-                v = council_score(trial, taste)
+                v = council_score(camp, trial, taste)
                 if v > best + 1:
                     members, best, improved = trial, v, True
         if not improved:
@@ -545,10 +574,16 @@ def choose_council(camp, f: str) -> List[str]:
 
 
 def fill_council(camp, f: str) -> None:
+    """Fill empty seats; every few turns look again - a risen officer may deserve a seat."""
     r = camp.realms[f]
-    if len(r.council) >= COUNCIL_SEATS:
+    if len(r.council) < COUNCIL_SEATS:
+        camp.set_council(f, choose_council(camp, f), quiet=True)
         return
-    camp.set_council(f, choose_council(camp, f), quiet=True)
+    if camp.turn % 6 == (camp.order.index(f) if f in camp.order else 0) % 6:
+        new = choose_council(camp, f)
+        if set(new) != set(r.council) and council_score(camp, new) > council_score(camp, r.council) + 80:
+            camp.set_council(f, new, quiet=True)
+            camp.stats["reshuffles"][f] += 1
 
 
 def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float, object, list]]:
@@ -560,7 +595,7 @@ def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float,
         v, targets = VALUE(camp, f, inst)
         if v is None or v <= 0:
             continue
-        cost = inst.card.cost
+        cost = camp.card_cost(f, inst)
         net = v - cost * ap_price
         if net <= 0:
             continue
@@ -584,7 +619,7 @@ def course_scores(camp, f: str) -> Dict[str, float]:
     v, _ = _attack_plan(camp, f, "assault")
     targets = sum(1 for c in options(camp, f, "assault", []))
     danger = max((threat(camp, f, c) / max(1.0, camp.defense_power(c)) for c in frontier(camp, f)), default=0)
-    intrigue = council_totals(camp.realms[f].council)["ИНТРИГА"]
+    intrigue = camp.totals(camp.realms[f].council)["ИНТРИГА"]
     s = {"balance": 1.8,
          "war": (1.2 + min(1.5, v / 300) + 0.1 * min(targets, 4)) * (0.5 if poor else 1.0),
          "economy": 2.6 if poor else 1.1,

@@ -39,7 +39,7 @@ class CardDataTest(unittest.TestCase):
         for f, offs in OFFICERS.items():
             council = [o.key for o in offs[:COUNCIL_SEATS]]
             deck = deck_for(f, council)
-            expect = list(BASE_SET) + [FACTION_CARD[f]] + [k for o in council for k in PERSONAL[o]] + \
+            expect = list(BASE_SET) + ["muster", FACTION_CARD[f]] + [k for o in council for k in PERSONAL[o]] + \
                 threshold_cards(council)
             self.assertEqual(sorted(deck), sorted(expect))
             self.assertEqual(PERSONAL[offs[0].key], ())                 # the leader brings the faction card
@@ -78,7 +78,8 @@ class CampaignCardsTest(unittest.TestCase):
         self.assertEqual(c.realms["aldern"].ap, AP)
         self.assertEqual(c.ap_max("khanate"), AP + 1)                   # the Horde's passive
         for f, r in c.realms.items():
-            self.assertEqual(len(r.hand), hand_size(r.council), f)
+            fired = sum(1 for x in r.discard if x.card.on_draw)          # vices go off when drawn
+            self.assertEqual(len(r.hand) + fired, hand_size(r.council), f)
             self.assertIn(OFFICERS[f][0].key, r.council)
             self.assertEqual(len(r.council), COUNCIL_SEATS)
             keys = Counter(x.key for x in r.all_cards())
@@ -125,6 +126,7 @@ class CampaignCardsTest(unittest.TestCase):
     def test_curses(self):
         c = self.c
         c.realms["sylvan"].council = [OFFICERS["sylvan"][0].key]          # no spy-catchers
+        c.realms["sylvan"].hand = []                                    # nor an answer card
         n = len(c.realms["sylvan"].draw)
         self.assertTrue(c.play("aldern", self._give("aldern", "letters"), ["sylvan"])[0])
         self.assertEqual(len(c.realms["sylvan"].draw), n + 2)

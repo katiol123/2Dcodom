@@ -14,8 +14,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import pygame
 
 from .cardplay import MAX_GROUP, MULTI
-from .cards import (CARDS, COUNCIL_SEATS, COURSES, course_cooldown, KIND_NAMES, PERSONAL, STATS, THRESHOLD_CARDS, THRESHOLDS, TIER_NAMES,
-                    competence, council_totals, hand_size, intercepts, reserve, strife)
+from .cards import CARDS, COUNCIL_SEATS, COURSES, KIND_NAMES, STATS, THRESHOLD_CARDS, THRESHOLDS, TIER_NAMES
 from .factions import CITY, FACTION
 from .officers import OFFICER
 from .render import INK, _c
@@ -23,7 +22,8 @@ from .sim import H, W
 
 CARD_W, CARD_H = 88, 128
 TIER_COLOR = {"basic": "#8b9bb4", "junk": "#5a6988", "moderate": "#41a6f6", "strong": "#feae34",
-              "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44", "vice": "#b86f50"}
+              "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44", "vice": "#b86f50",
+              "feat": "#ffd36b"}
 KIND_COLOR = {"economy": ("#c9a24a", "#4a3a14"), "military": ("#e43b44", "#4a1418"),
               "intrigue": ("#b07ad8", "#2e1a40"), "diplomacy": ("#5fb7d9", "#14304a"),
               "council": ("#63c74d", "#173a1a"), "recruit": ("#d08a4a", "#3e2414"),
@@ -282,7 +282,7 @@ class CardTable:
 
     def _toggle_keep(self, inst) -> None:
         r = self.camp.realms[self.player]
-        n = reserve(r.council)
+        n = self.camp.reserve(r.council)
         if inst.id in r.keep:
             r.keep.remove(inst.id)
         elif n == 0:
@@ -523,6 +523,11 @@ class CardTable:
             if i != self.hand_hover:                     # resting cards peek out above the bottom bar
                 rect = pygame.Rect(rect.x, rect.y, rect.w, max(0, H - BOTTOM - rect.y))
             s.blit(img, rect.topleft, area=pygame.Rect(0, 0, rect.w, rect.h))
+            cost = self.camp.card_cost(self.player, inst)
+            if cost < inst.card.cost:                    # a devoted adviser's card is cheaper
+                pygame.draw.circle(s, INK, (rect.x + 12, rect.y + 14), 8)
+                pygame.draw.circle(s, _c("#c28a2e"), (rect.x + 12, rect.y + 14), 7)
+                self.font.draw(s, str(cost), rect.x + 12, rect.y + 14, "#ffffff", anchor="center")
             ok = self.my_turn() and self.camp.can_play(self.player, inst)[0]
             if not ok:
                 veil = pygame.Surface(rect.size, pygame.SRCALPHA)
@@ -548,8 +553,8 @@ class CardTable:
         s.blit(self.ms.r.panel(er.w, er.h, base=("#c28a2e" if hot else "#9a6a1e") if mine else "#3a4466",
                                 border="#fee761" if mine else "#5a6988"), er.topleft)
         self.font.draw(s, "КОНЕЦ ХОДА (E)" if mine else "ЖДЁМ...", er.centerx, er.centery, "#ffffff", anchor="center")
-        n = reserve(r.council)
-        info = f"РУКА {len(r.hand)}/{hand_size(r.council)}  КОЛОДА {len(r.draw)}  СБРОС {len(r.discard)}"
+        n = self.camp.reserve(r.council)
+        info = f"РУКА {len(r.hand)}/{self.camp.hand_size(r.council)}  КОЛОДА {len(r.draw)}  СБРОС {len(r.discard)}"
         self.font.draw(s, info, er.right, er.y - 8, "#8b9bb4", anchor="topright")
         if n:
             self.font.draw(s, f"ПКМ ПО КАРТЕ - ОСТАВИТЬ ({len(r.keep)}/{n})", er.right, er.y - 16, "#63c74d",
@@ -815,10 +820,9 @@ class CardTable:
 
     def _candidates(self) -> List[str]:
         f = self.player
-        from .faces import presence
         council = self._council()
         offs = [o for o in self.camp.officers_of(f) if o.key not in council]
-        return [o.key for o in sorted(offs, key=lambda o: -presence(o))]
+        return [o.key for o in sorted(offs, key=lambda o: -self.camp.presence(o.key))]
 
     def _deck_rows(self) -> List[Tuple[str, int, str]]:
         r = self.camp.realms[self.player]
@@ -925,12 +929,14 @@ class CardTable:
             o = OFFICER[key]
             self.ms.cards.face(s, pygame.Rect(rect.x + 2, rect.y + 2, 21, 25), key)
             self.ms.cards.name(s, key, rect.x + 27, rect.y + 2)
-            font.draw(s, f"ВЕРН. {self.camp.loyalty[key]}", rect.right - (14 if i else 4), rect.y + 2, "#8b9bb4",
+            loy = self.camp.loyalty[key]
+            col = "#fee761" if self.camp.devoted(key) else "#f6757a" if loy < 35 else "#8b9bb4"
+            font.draw(s, f"УР.{self.camp.level[key]} ВЕРН. {loy}", rect.right - (14 if i else 4), rect.y + 2, col,
                       anchor="topright")
-            cards = list(PERSONAL[key])
+            cards = self.camp.personal(key)
             if i == 0:
                 from .cards import FACTION_CARD
-                cards = [FACTION_CARD[self.player]]
+                cards = [FACTION_CARD[self.player]] + self.camp.extra.get(key, [])
             x, y = rect.x + 27, rect.y + 11
             for k in cards:
                 chip = self.art.chip(k)
@@ -945,16 +951,16 @@ class CardTable:
                 pygame.draw.rect(s, (162, 38, 51), xr)
                 font.draw(s, "X", xr.centerx + 1, xr.centery, "#ffffff", anchor="center")
         # competence
-        comp = competence(council)
+        comp = self.camp.competence(council)
         y = r.y + 18 + COUNCIL_SEATS * 31 + 2
         font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} ПОРОГОВ ИЗ 12", r.x + 6, y, "#fee761")
-        perks = [f"РУКА {hand_size(council)} КАРТ"]
-        n = reserve(council)
+        perks = [f"РУКА {self.camp.hand_size(council)} КАРТ"]
+        n = self.camp.reserve(council)
         perks.append(f"МОЖНО ОСТАВИТЬ {n}" if n else "КАРТЫ НЕ ОСТАЮТСЯ")
-        if intercepts(council):
+        if self.camp.intercepts(council):
             perks.append("ЛОВИТ ШПИОНОВ")
         col = "#a7f070"
-        if strife(council):
+        if self.camp.strife(council):
             perks.append("РАСПРИ!")
             col = "#f6757a"
         for j, line in enumerate(wrap(", ".join(perks), 200)):
@@ -968,7 +974,7 @@ class CardTable:
         # thresholds
         x0 = r.x + 214
         font.draw(s, "НАВЫКИ СОВЕТА", x0, r.y + 18, "#fee761")
-        totals = council_totals(council)
+        totals = self.camp.totals(council)
         for i, st in enumerate(STATS):
             yy = r.y + 27 + i * 29
             v = totals[st]
@@ -1004,7 +1010,7 @@ class CardTable:
                 self.ms.cards.face(s, pygame.Rect(row.x + 1, row.y + 1, 13, 16), key)
                 o = OFFICER[key]
                 font.draw(s, o.name, row.x + 17, row.y + 1, "#ffffff", )
-                labels = PERSONAL[key]
+                labels = self.camp.personal(key)
                 best = max(labels, key=lambda k: ["junk", "basic", "moderate", "strong", "unique"].index(
                     CARDS[k].tier) if CARDS[k].tier in ("junk", "basic", "moderate", "strong", "unique") else 0) \
                     if labels else None
@@ -1016,7 +1022,8 @@ class CardTable:
                     if hot:
                         self.hover_card = (best, o.name)
                 if hot:
-                    tip = f"{o.name}: НАВЫКИ " + " ".join(str(v) for v in o.stats) + "  КАРТЫ: " + \
+                    tip = f"{o.name} УР.{self.camp.level[key]}: НАВЫКИ " + " ".join(str(v) for v in self.camp.ostats[key]) + \
+                          f"  ВЕРНОСТЬ {self.camp.loyalty[key]}  КАРТЫ: " + \
                           ", ".join(CARDS[k].name for k in labels)
             if len(cands) > self.CROWS:
                 font.draw(s, f"{self.council_scroll + 1}-{min(len(cands), self.council_scroll + self.CROWS)} ИЗ "
@@ -1097,11 +1104,10 @@ class CardTable:
         cr = pygame.Rect(r.right - 16, r.y + 3, 12, 11)
         pygame.draw.rect(s, (162, 38, 51), cr)
         font.draw(s, "X", cr.centerx + 1, cr.centery, "#ffffff", anchor="center")
-        font.draw(s, "КУРС ДЕРЖАВЫ: КАКИЕ 5 КАРТ ОСНОВЫ ЛЕЖАТ В КОЛОДЕ", r.centerx, r.y + 4, "#fee761",
+        font.draw(s, "КУРС ДЕРЖАВЫ: КАКИЕ 6 КАРТ ОСНОВЫ ЛЕЖАТ В КОЛОДЕ", r.centerx, r.y + 4, "#fee761",
                   anchor="midtop")
-        cd = course_cooldown(realm.council)
-        from .cards import council_totals
-        gov = council_totals(realm.council)["УПРАВЛЕНИЕ"]
+        cd = self.camp.course_cooldown(realm.council)
+        gov = self.camp.totals(realm.council)["УПРАВЛЕНИЕ"]
         now = "МОЖНО СМЕНИТЬ СЕЙЧАС" if realm.course_cd == 0 else f"СМЕНИТЬ МОЖНО ЧЕРЕЗ {realm.course_cd} Х."
         font.draw(s, f"{now}. ПОСЛЕ СМЕНЫ КУРС ЗАКРЕПЛЁН НА {cd} Х. (УПРАВЛЕНИЕ СОВЕТА {gov}: ЧЕМ ВЫШЕ, ТЕМ "
                      f"КОРОЧЕ)", r.centerx, r.y + 16, "#a7f070" if realm.course_cd == 0 else "#feae34",

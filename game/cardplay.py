@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List
 
-from .cards import CARDS, council_totals
+from .cards import CARDS
 from .factions import CITY, FACTION, neighbors
 from .officers import OFFICER
 from .units import ROSTER
@@ -149,7 +149,7 @@ def _prosper(camp, city, d) -> None:
 
 
 def _best(camp, f, city, stat) -> int:
-    return max((o.stat(stat) for o in camp.officers_in(city) if camp.allegiance[o.key] == f), default=0)
+    return max((camp.stat(o.key, stat) for o in camp.officers_in(city) if camp.allegiance[o.key] == f), default=0)
 
 
 def _cut(camp, city, frac) -> int:
@@ -577,8 +577,10 @@ def _haze(camp, f, t):
 @effect("bribe")
 def _bribe(camp, f, t):
     o = t[1]
-    camp.change_loyalty(o, -30)
     camp.change_relation(f, camp.allegiance[o], -6)
+    if camp.loyalty[o] >= 90:                                    # the devoted send the bribe back
+        return f"{OFFICER[o].name} с презрением вернул{'а' if OFFICER[o].female else ''} золото"
+    camp.change_loyalty(o, -30)
     if camp.loyalty[o] < 20 and OFFICER[o].rank > 0:
         camp.defect(o, f)
         return f"{OFFICER[o].name} перешёл{'а' if OFFICER[o].female else ''} на нашу сторону"
@@ -589,10 +591,12 @@ def _bribe(camp, f, t):
 def _plot(camp, f, t):
     o = t[1]
     victim = camp.allegiance[o]
-    intrigue = council_totals(camp.realms[f].council)["ИНТРИГА"]
+    intrigue = camp.totals(camp.realms[f].council)["ИНТРИГА"]
     chance = 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400 + (0.15 if camp.realms[f].course == "intrigue" else 0)
     if OFFICER[o].rank == 0 and OFFICER[o].faction == victim:
         chance = 0.0
+    if camp.loyalty[o] >= 90:
+        chance -= 0.3                                            # the devoted are hard to turn
     chance = max(0.0, min(0.95, chance))
     camp.change_relation(f, victim, -15)
     if camp.rng.random() < chance:
@@ -881,6 +885,65 @@ def _purge(camp, f, t):
     r.hand.remove(inst)                                          # gone for good
     camp.draw_cards(f, 1)
     return f"сожжена карта {inst.card.name}"
+
+
+@effect("muster")
+def _muster(camp, f, t):
+    n = camp.muster_turns(camp.realms[f].council)
+    camp.muster[t[0]] = max(camp.muster.get(t[0], 0), n)
+    return f"{CITY[t[0]].name}: найм открыт" + (f" на {n} х." if n > 1 else " на этот ход")
+
+
+@effect("ford_hero")
+def _ford_hero(camp, f, t):
+    camp.buff(t[0], 1.35, 3)
+    camp.loyalty[t[0]] = 100
+    return OFFICER[t[0]].name
+
+
+@effect("goblin_bane")
+def _goblin_bane(camp, f, t):
+    _gold(camp, f, 150, "trophies")
+    return f"+150 золота, {CITY[t[0]].name}: новобранцы на {camp.recruit(t[0], 120)} мощи"
+
+
+@effect("golden_governor")
+def _golden_governor(camp, f, t):
+    n = sum(1 for c in camp.cities_of(f) if camp.prosperity[c] >= 7)
+    return f"+{_gold(camp, f, 50 * n, 'tax')} золота"
+
+
+@effect("wall_first")
+def _wall_first(camp, f, t):
+    return camp.attack(f, t[1], t[0], mult=1.25)
+
+
+@effect("unbroken")
+def _unbroken(camp, f, t):
+    camp.ready.add(t[0])
+    camp.buff(t[0], 1.2, 2)
+    return OFFICER[t[0]].name
+
+
+@effect("peacemaker")
+def _peacemaker(camp, f, t):
+    if camp.relation(f, t[0]) < 20:
+        return f"{FACTION[t[0]].short} не желают мира"
+    camp.truce[frozenset((f, t[0]))] = 10
+    camp.change_relation(f, t[0], 10)
+    return f"мир с {FACTION[t[0]].short} на 10 ходов"
+
+
+@effect("giant_slayer")
+def _giant_slayer(camp, f, t):
+    for o in camp.officers_of(f):
+        camp.buff(o.key, 1.2, 3)
+    return "все отряды воодушевлены"
+
+
+@effect("war_legend")
+def _war_legend(camp, f, t):
+    return camp.attack(f, t[1], t[0], mult=1.4)
 
 
 EFFECTS = E

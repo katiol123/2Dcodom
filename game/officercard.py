@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 import pygame
 
 from .campaign import Campaign
-from .faces import face, paint_web, presence, web_points
+from .faces import face, paint_web, web_points
 from .factions import CITY, FACTION
 from .hires import HIRES
 from .officers import OFFICER, SQUAD_SLOTS, STAT_HELP, STATS, bio
@@ -152,7 +152,7 @@ class OfficerCard:
         font = self.font
         serves = FACTION[self.camp.allegiance[o.key]]
         home = FACTION[o.faction]
-        p = presence(o) if o.rank else 1.0
+        p = self.camp.presence(o.key) if o.rank else 1.0
         trim = "#f2c84b" if p >= 0.6 else "#c0cbdc" if p >= 0.36 else "#8b9bb4"
         s.blit(self.r.panel(r.w, r.h, base="#181425", border=serves.color), r.topleft)
         pygame.draw.rect(s, _c(serves.dark), (r.x + 3, r.y + 3, r.w - 6, 13))
@@ -198,7 +198,16 @@ class OfficerCard:
             font.draw(s, f"ПЕРЕБЕЖЧИК, РОДОМ ИЗ: {home.short}", x, y, "#f6757a")
             y += 9
         font.draw(s, "ЛИДЕРСТВО", x, y, "#c0cbdc")
-        font.draw(s, str(o.leadership), x + 62, y - 3, "#fee761", scale=2)
+        font.draw(s, str(self.camp.leadership(o.key)), x + 62, y - 3, "#fee761", scale=2)
+        from .growth import xp_needed
+        lvl, xp = self.camp.level[o.key], int(self.camp.xp[o.key])
+        need = xp_needed(lvl)
+        font.draw(s, f"УР. {lvl}", x + 104, y - 1, "#ffffff")
+        bar = pygame.Rect(x + 104, y + 6, 42, 3)
+        pygame.draw.rect(s, (38, 43, 68), bar)
+        pygame.draw.rect(s, _c("#41a6f6"), (bar.x, bar.y, int(bar.w * min(1, xp / need)), bar.h))
+        if bar.inflate(4, 12).collidepoint(self._mouse):
+            font.draw(s, f"ОПЫТ {xp}/{need}", x + 146, y - 9, "#41a6f6", anchor="topright")
         power = self.camp.power(o.key)
         squad = self.camp.squads[o.key]
         y += 11
@@ -227,10 +236,11 @@ class OfficerCard:
         cx, cy, rad = self._web_axes()
         pygame.draw.line(s, _c("#3a4466"), (r.x + 270, r.y + 22), (r.x + 270, r.bottom - 20))
         font.draw(s, "НЕБОЕВЫЕ НАВЫКИ", cx, r.y + 22, "#fee761", anchor="midtop")
-        font.draw(s, f"СУММА {sum(o.stats)} ИЗ {20 * len(STATS)}", cx, r.y + 31, "#8b9bb4", anchor="midtop")
+        st = self.camp.ostats[o.key]
+        font.draw(s, f"СУММА {sum(st)} ИЗ {20 * len(STATS)}", cx, r.y + 31, "#8b9bb4", anchor="midtop")
         web = pygame.Rect(cx - rad, cy - rad, rad * 2, rad * 2)
-        HIRES.blit(s, web, f"web:{o.key}:{serves.key}",
-                   lambda w, h, st=o.stats, a=serves.color, b=serves.light: paint_web(st, a, b, w, h))
+        HIRES.blit(s, web, f"web:{o.key}:{serves.key}:{','.join(map(str, st))}",
+                   lambda w, h, st=list(st), a=serves.color, b=serves.light: paint_web(st, a, b, w, h))
         hot = self._card_stat_at(*self._mouse)
         for i, (lx, ly) in enumerate(web_points(cx, cy, rad + 10, [20] * len(STATS))):
             anchor = "midbottom" if ly < cy - rad * 0.9 else "midtop" if ly > cy + rad * 0.9 else \
@@ -238,15 +248,19 @@ class OfficerCard:
             dy = {"midbottom": -6, "midtop": 0}.get(anchor, -4)
             col = "#ffffff" if hot == i else "#c0cbdc"
             font.draw(s, STATS[i], lx, ly + dy, col, anchor=anchor)
-            v = o.stats[i]
+            v = st[i]
+            base = o.stats[i]
             vcol = "#63c74d" if v >= 15 else "#fee761" if v >= 9 else "#e43b44"
-            font.draw(s, str(v), lx, ly + dy + 8, vcol, anchor=anchor)
+            txt = str(v) if v == base else f"{v} ({'+' if v > base else ''}{v - base})"
+            font.draw(s, txt, lx, ly + dy + 8, vcol if v == base else "#a7f070" if v > base else "#f6757a",
+                      anchor=anchor)
         # the cards he brings into the council's deck
         from .cardui import CardArt
         from .cards import FACTION_CARD, PERSONAL
         if not hasattr(self, "art"):
             self.art = CardArt(self.r)
         mine = [FACTION_CARD[o.faction]] if o.rank == 0 and o.faction == serves.key else list(PERSONAL[o.key])
+        mine += self.camp.extra.get(o.key, [])
         x1, y1 = r.x + 278, r.y + 168
         font.draw(s, "КАРТЫ В КОЛОДУ СОВЕТА:", x1, y1, "#fee761")
         y1 += 9

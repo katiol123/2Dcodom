@@ -802,6 +802,9 @@ class WorldMapScreen:
             font.draw(s, OFFICER[hot].name, r.right - 5, y + 5, "#ffffff", anchor="topright")
         y += 22
         font.draw(s, "НАЙМ В ГОРОДЕ:", r.x + 5, y, "#fee761")
+        left = self.camp.muster.get(c.key, 0)
+        font.draw(s, f"ОТКРЫТ ЕЩЁ {left} Х." if left else "ЗАКРЫТ (КАРТА СБОР ВОЙСК)", r.right - 5, y,
+                  "#a7f070" if left else "#5a6988", anchor="topright")
         y += 8
         team = TEAMS[0]
         for key in c.pool:
@@ -1192,20 +1195,21 @@ class WorldMapScreen:
         self.cards.face(s, pygame.Rect(card.x + 3, card.y + 3, 34, 40), o.key)
         self.cards.name(s, o.key, card.x + 48, card.y + 4)
         font.draw(s, o.title, card.x + 48, card.y + 12, f.light)
-        font.draw(s, f"ЛИДЕРСТВО {o.leadership}", card.x + 48, card.y + 22, "#ffffff")
+        lead = self.camp.leadership(o.key)
+        font.draw(s, f"ЛИДЕРСТВО {lead}   УР. {self.camp.level[o.key]}", card.x + 48, card.y + 22, "#ffffff")
         power = self.camp.power(o.key)
         bar = pygame.Rect(card.x + 48, card.y + 31, 166, 5)
         pygame.draw.rect(s, INK, bar.inflate(2, 2))
         pygame.draw.rect(s, (38, 43, 68), bar)
-        frac = power / max(1, o.leadership)
+        frac = power / max(1, lead)
         pygame.draw.rect(s, _c("#63c74d" if frac < 0.95 else "#feae34"), (bar.x, bar.y, int(bar.w * min(1, frac)), bar.h))
-        font.draw(s, f"МОЩЬ ОТРЯДА {power} / {o.leadership}", card.x + 48, card.y + 37, "#a7f070")
+        font.draw(s, f"МОЩЬ ОТРЯДА {power} / {lead}", card.x + 48, card.y + 37, "#a7f070")
         # six non-combat stats (1..20)
         mx, my = getattr(self, "_mouse", (0, 0))
         for k, st in enumerate(STATS):
             x = r.x + 6 + (k % 2) * 113
             y = r.y + 82 + (k // 2) * 11
-            v = o.stats[k]
+            v = self.camp.ostats[o.key][k]
             hot = pygame.Rect(x, y, 110, 10).collidepoint(mx, my)
             font.draw(s, st, x, y, "#fee761" if hot else "#c0cbdc")
             font.draw(s, str(v), x + 108, y, "#ffffff", anchor="topright")
@@ -1222,7 +1226,9 @@ class WorldMapScreen:
     def _hire_left(self, s: pygame.Surface, c: City, f: Faction) -> None:
         font = self.font
         gold = self.camp.gold[f.key]
-        font.draw(s, "ВОИНЫ ЭТОГО ГОРОДА", self.WIN.x + 116, self.WIN.y + 18, "#c0cbdc", anchor="midtop")
+        left = self.camp.muster.get(c.key, 0)
+        font.draw(s, f"СБОР ВОЙСК: НАЙМ ОТКРЫТ ЕЩЁ {left} Х." if left else "НАЙМ ЗАКРЫТ: СЫГРАЙТЕ СБОР ВОЙСК",
+                  self.WIN.x + 116, self.WIN.y + 18, "#a7f070" if left else "#f6757a", anchor="midtop")
         for i, key in enumerate(c.pool):
             u = ROSTER[key]
             r = self._hire_rect(i)
@@ -1236,7 +1242,7 @@ class WorldMapScreen:
             font.draw(s, f"{u.role}, {TIER_NAMES[u.tier]}", r.x + 23, r.y + 10, "#8b9bb4")
             font.draw(s, f"ЦЕНА {u.cost}   СОДЕРЖ. {u.upkeep}/ХОД", r.x + 23, r.y + 18, "#feae34")
             b = self._hire_button(i)
-            ok = u.cost <= gold
+            ok = u.cost <= gold and left > 0
             s.blit(self.r.panel(b.w, b.h, base="#3e8948" if ok else "#3a4466", border="#a7f070" if ok else "#5a6988"),
                    b.topleft)
             font.draw(s, "НАНЯТЬ", b.centerx, b.centery, "#ffffff" if ok else "#5a6988", anchor="center")

@@ -126,6 +126,8 @@ class CampaignRulesTest(unittest.TestCase):
         gold = c.gold["aldern"]
         key = CITY[city].pool[0]
         n = len(c.free[city])
+        self.assertEqual(c.can_hire(city, key), (False, "НАЙМ ЗАКРЫТ: НУЖНА КАРТА СБОР ВОЙСК"))
+        c.muster[city] = 1                                          # the card opens hiring
         t = c.hire(city, key)
         self.assertIsNotNone(t)
         self.assertEqual(c.gold["aldern"], gold - ROSTER[key].cost)
@@ -262,6 +264,9 @@ class CampaignScreensTest(unittest.TestCase):
         click(rect.center)
         self.assertEqual(m.window, ("hire", "kronholm"))
         n, gold = len(m.camp.free["kronholm"]), m.camp.gold["aldern"]
+        click(m._hire_button(0).center)                             # hiring closed without СБОР ВОЙСК
+        self.assertEqual(len(m.camp.free["kronholm"]), n)
+        m.camp.muster["kronholm"] = 1
         click(m._hire_button(0).center)
         self.assertEqual(len(m.camp.free["kronholm"]), n + 1)
         self.assertLess(m.camp.gold["aldern"], gold)
