@@ -21,8 +21,17 @@ from .factions import ALL_FACTIONS
 
 
 def one_game(args) -> Dict:
-    seed, rounds = args
+    seed, rounds, fixed = args
     c = Campaign(None, seed=seed)
+    if fixed:                                    # every realm locked on one course (to compare courses)
+        import game.campaign_ai as ai
+        ai.pick_course = lambda camp, f: None
+        for f in c.order:
+            c.current = c.order.index(f)
+            c.realms[f].course_cd = 0
+            c.change_course(f, fixed) if fixed != "balance" else None
+        c.current = 0
+        c.log = []
     curve = defaultdict(list)
     deserted = Counter()
     while c.turn <= rounds:
@@ -43,18 +52,18 @@ def one_game(args) -> Dict:
         "prosperity": {f: (sum(c.prosperity[x] for x in c.cities_of(f)) / max(1, len(c.cities_of(f))))
                        for f in c.order},
         "played": c.stats["played"], "drawn": c.stats["drawn"], "income": c.stats["gold"],
-        "deserted": deserted, "earned": c.stats["earned"], "paid": c.stats["paid"], "battles": battles, "wins": wins, "mid": {f: v[len(v) // 2] for f, v in curve.items()},
+        "deserted": deserted, "earned": c.stats["earned"], "paid": c.stats["paid"], "courses": c.stats["courses"], "battles": battles, "wins": wins, "mid": {f: v[len(v) // 2] for f, v in curve.items()},
     }
 
 
-def run(games: int = 40, rounds: int = 40, procs: int = 0) -> str:
-    args = [(seed, rounds) for seed in range(1, games + 1)]
+def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> str:
+    args = [(seed, rounds, fixed) for seed in range(1, games + 1)]
     if procs == 1:
         results = [one_game(a) for a in args]
     else:
         with Pool(procs or None) as pool:
             results = pool.map(one_game, args)
-    out = [f"{games} кампаний по {rounds} ходов", ""]
+    out = [f"{games} кампаний по {rounds} ходов" + (f", все на курсе {fixed}" if fixed else ""), ""]
     out.append(f"{'ДЕРЖАВА':12s} {'ГОР.СЕРЕД':>9s} {'ГОР.КОНЕЦ':>9s} {'ПАЛА':>5s} {'АРМИЯ':>6s} {'ЗОЛОТО':>6s} "
                f"{'ПРОЦВ':>5s} {'БЕГСТВО':>7s} {'ДОХОД/ХОД':>9s} {'ЖАЛОВ/ХОД':>9s}")
     for fac in ALL_FACTIONS:
@@ -71,6 +80,13 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0) -> str:
         paid = sum(r["paid"][f] for r in results) / n / rounds
         out.append(f"{fac.short:12s} {mid:9.1f} {end:9.1f} {dead:5.0%} {army:6.0f} {gold:6.0f} {pros:5.1f} {des:7.1f}"
                    f" {inc:9.0f} {paid:9.0f}")
+    courses = Counter()
+    for r in results:
+        courses.update(r["courses"])
+    out += ["", "КУРСЫ (доля ходов): " + ", ".join(
+        f"{fac.short} " + "/".join(f"{k[:3]} {courses[f'{fac.key}:{k}'] / max(1, sum(v for kk, v in courses.items() if kk.startswith(fac.key + ':'))):.0%}"
+                                  for k in ("balance", "war", "economy", "defense", "intrigue")
+                                  if courses[f"{fac.key}:{k}"]) for fac in ALL_FACTIONS)]
     played, drawn, income = Counter(), Counter(), Counter()
     for r in results:
         played.update(r["played"])
@@ -95,4 +111,5 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0) -> str:
 if __name__ == "__main__":
     games = int(sys.argv[1]) if len(sys.argv) > 1 else 40
     rounds = int(sys.argv[2]) if len(sys.argv) > 2 else 40
-    print(run(games, rounds))
+    fixed = sys.argv[3] if len(sys.argv) > 3 else ""     # e.g. "war": every realm stays on that course
+    print(run(games, rounds, fixed=fixed))

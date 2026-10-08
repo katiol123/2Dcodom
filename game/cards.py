@@ -4,7 +4,10 @@ Everything a realm does on the world map is a card played for action points (О�
 collecting taxes, marching, storming cities, hiring for free, diplomacy, intrigue.
 
 A realm's deck (see ``deck_for``) is made of
-* the five cards of state (``BASE_SET``: three taxes, a march and an assault);
+* the five cards of state, set by the realm's **course** (``COURSES``): balance = three taxes, a march
+  and an assault; war = three assaults; economy = taxes and a fair; and so on. The course can be
+  changed during the campaign, then it is locked for a while (``course_cooldown``: the better the
+  council governs, the sooner it may change course again); every course but balance has a price;
 * ONE faction card (it belongs to the leader, who always sits in the council);
 * the personal cards of the officers sitting in the council (``personal``);
 * threshold cards: for each of the six stats, the council's total over ``THRESHOLDS[0]``
@@ -239,6 +242,8 @@ _CARDS: List[Card] = [
     _c("strife", "РАСПРИ В СОВЕТЕ", 0, "curse", "curse", "Слабый совет спорит. Мёртвая карта на 2 хода.",
        unplayable=True, expires=2),
     _c("fatigue", "УСТАЛОСТЬ", 0, "curse", "curse", "Мёртвая карта на 3 хода.", unplayable=True, expires=3),
+    _c("war_fatigue", "ВОЕННАЯ УСТАЛОСТЬ", 0, "curse", "curse", "Цена военного курса: каждые 2 штурма. "
+       "Мёртвая карта на 4 хода.", unplayable=True, expires=4),
     _c("debt", "ДОЛГ", 0, "curse", "curse", "Вытянув - проценты 40 золота. Сыграть: вернуть 220 золота, "
        "и долг сгорает.", gold=220, on_draw=True, exhaust=True),
     _c("haze", "ГАЛЛЮЦИНАЦИИ", 0, "curse", "curse", "Вытянув - случайная другая карта уходит из руки в сброс.",
@@ -248,6 +253,38 @@ _CARDS: List[Card] = [
 CARDS: Dict[str, Card] = {c.key: c for c in _CARDS}
 
 BASE_SET: Tuple[str, ...] = ("tax", "tax", "tax", "march", "assault")
+
+
+@dataclass(frozen=True)
+class Course:
+    key: str
+    name: str
+    base: Tuple[str, ...]       # the five cards of state on this course
+    plus: str
+    minus: str
+
+
+COURSES: Dict[str, Course] = {c.key: c for c in (
+    Course("balance", "РАВНОВЕСИЕ", BASE_SET, "Всего понемногу.", "Без штрафа."),
+    Course("war", "ВОЙНА", ("assault", "assault", "assault", "march", "tax"),
+           "Штурм приходит в руку почти каждый ход.",
+           "ВОЕННАЯ УСТАЛОСТЬ: каждые 2 штурма в колоду ложится мёртвая карта. Свои города сами не растут."),
+    Course("economy", "ХОЗЯЙСТВО", ("tax", "tax", "tax", "fair", "march"),
+           "Казна и процветание растут быстро.",
+           "ЛАКОМАЯ ДОБЫЧА: соседи охотнее нападают на богатую державу. Своего штурма в основе нет."),
+    Course("defense", "ОБОРОНА", ("tax", "tax", "fortify", "fortify", "march"),
+           "Города держатся крепко.", "Штурма в основе нет: расширяться можно лишь картами советников."),
+    Course("intrigue", "ТАЙНАЯ ПОЛИТИКА", ("tax", "tax", "letters", "embassy", "march"),
+           "Давит соперников без войны.", "ПАРАНОЙЯ: верность всех своих офицеров падает на 1 каждый ход."),
+)}
+COURSE_BASE_CD, COURSE_MIN_CD = 10, 3
+
+
+def course_cooldown(council: List[str]) -> int:
+    """Turns before the course may change again: 10, one less for every 6 points of the council's
+    УПРАВЛЕНИЕ above 40, never under 3."""
+    gov = council_totals(council)["УПРАВЛЕНИЕ"]
+    return max(COURSE_MIN_CD, COURSE_BASE_CD - max(0, gov - 40) // 6)
 
 FACTION_CARD: Dict[str, str] = {
     "aldern": "edict", "sylvan": "mother_tree", "ashen": "harvest", "khanate": "great_raid",
@@ -404,9 +441,9 @@ def strife(council: List[str]) -> bool:
     return competence(council) <= 1
 
 
-def deck_for(faction: str, council: List[str]) -> List[str]:
+def deck_for(faction: str, council: List[str], course: str = "balance") -> List[str]:
     """Card keys of the realm's deck (curses come on top of this during play)."""
-    cards = list(BASE_SET) + [FACTION_CARD[faction]]
+    cards = list(COURSES[course].base) + [FACTION_CARD[faction]]
     for o in council:
         cards.extend(PERSONAL[o])
     cards.extend(threshold_cards(council))

@@ -20,7 +20,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .cards import (AP, AP_BONUS, BASE_SET, CARDS, COUNCIL_SEATS, FACTION_CARD, PERSONAL, hand_size, reserve,
+from .cards import (AP, AP_BONUS, CARDS, COURSES, COUNCIL_SEATS, FACTION_CARD, PERSONAL, hand_size, reserve,
                     strife, threshold_cards)
 from .factions import ALL_FACTIONS, CITIES, CITY, FACTION, PROSPERITY, City, neighbors, relation
 from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, Officer
@@ -71,6 +71,9 @@ class Realm:
     ap_penalty: int = 0         # taken off the next turn's action points
     keep: List[int] = field(default_factory=list)       # card ids the player marked to keep
     alive: bool = True
+    course: str = "balance"     # see cards.COURSES
+    course_cd: int = 0          # own turns before the course may change again
+    storms: int = 0             # storms since the last war fatigue
     revealed: Dict[str, int] = field(default_factory=dict)   # rival -> turn their hand was seen
 
     def all_cards(self) -> List[CardInst]:
@@ -111,7 +114,7 @@ class Campaign:
         self.log: List[Tuple[int, str, str]] = []
         self.stats: Dict[str, Counter] = {"played": Counter(), "drawn": Counter(), "gold": Counter(),
                                           "captured": Counter(), "battles": Counter(), "earned": Counter(),
-                                          "paid": Counter()}
+                                          "paid": Counter(), "courses": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.turn = 1
@@ -398,7 +401,7 @@ class Campaign:
 
     def _build_deck(self, faction: str) -> None:
         r = self.realms[faction]
-        r.draw = [self._inst(k, "base") for k in BASE_SET]
+        r.draw = [self._inst(k, "base") for k in COURSES[r.course].base]
         r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
         for o in r.council:
             r.draw.extend(self._inst(k, o) for k in PERSONAL[o])
@@ -453,13 +456,42 @@ class Campaign:
             self.change_loyalty(o, 10)
         return True
 
+    def can_change_course(self, faction: str, course: str) -> Tuple[bool, str]:
+        r = self.realms[faction]
+        if course not in COURSES:
+            return False, "НЕТ ТАКОГО КУРСА"
+        if course == r.course:
+            return False, "ЭТО И ЕСТЬ НЫНЕШНИЙ КУРС"
+        if self.whose_turn() != faction:
+            return False, "КУРС МЕНЯЮТ В СВОЙ ХОД"
+        if r.course_cd > 0:
+            return False, f"СМЕНИТЬ КУРС МОЖНО ЧЕРЕЗ {r.course_cd} Х."
+        return True, ""
+
+    def change_course(self, faction: str, course: str) -> bool:
+        """The cards of state are swapped for the new course's (wherever they are, the hand too);
+        then the course is locked for ``course_cooldown`` turns."""
+        from .cards import course_cooldown
+        if not self.can_change_course(faction, course)[0]:
+            return False
+        r = self.realms[faction]
+        for pile in (r.draw, r.hand, r.discard):
+            pile[:] = [c for c in pile if c.origin != "base"]
+        for k in COURSES[course].base:
+            r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "base"))
+        r.course = course
+        r.course_cd = course_cooldown(r.council)
+        r.storms = 0
+        self.log_event(faction, f"Новый курс державы: {COURSES[course].name}")
+        return True
+
     def add_curse(self, faction: str, key: str, n: int = 1, source: str = "") -> int:
         """Slip curses into a realm's draw pile; a watchful council catches some. Returns how many got in."""
         from .cards import intercepts
         r = self.realms[faction]
         got = 0
         for _ in range(n):
-            if key not in ("debt", "fatigue", "strife") and intercepts(r.council) and self.rng.random() < 0.35:
+            if key not in ("debt", "fatigue", "strife", "war_fatigue") and intercepts(r.council) and self.rng.random() < 0.35:
                 self.log_event(faction, f"Разведка перехватила {CARDS[key].name}")
                 continue
             r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(key, "curse"))
@@ -530,6 +562,12 @@ class Campaign:
             self.grudge[k] -= 1
             if self.grudge[k] <= 0:
                 del self.grudge[k]
+        self.stats["courses"][f"{faction}:{r.course}"] += 1
+        if r.course_cd > 0:
+            r.course_cd -= 1
+        if r.course == "intrigue":                            # paranoia: nobody trusts anybody
+            for o in self.officers_of(faction):
+                self.change_loyalty(o.key, -1)
         if strife(r.council) and self.turn % 3 == 0:
             self.add_curse(faction, "strife")
             self.log_event(faction, "Совет погряз в распрях")
@@ -548,7 +586,7 @@ class Campaign:
                     del self.siege[city]
         # untaxed cities grow
         for city in self.cities_of(f):
-            if self.taxed.get(city) == self.turn:
+            if self.taxed.get(city) == self.turn or r.course == "war":     # war: no hands in the fields
                 self.untaxed[city] = 0
             else:
                 self.untaxed[city] += 1
@@ -728,6 +766,13 @@ class Campaign:
         w_loss = max(0.05, min(0.85, 0.6 * ratio ** 1.3 * self.rng.uniform(0.7, 1.3)))
         l_loss = self.rng.uniform(0.6, 0.95)
         self.stats["battles"][faction] += 1
+        r = self.realms.get(faction)
+        if r and r.course == "war":
+            r.storms += 1
+            if r.storms >= 2:
+                r.storms = 0
+                self.add_curse(faction, "war_fatigue")
+                self.log_event(faction, "ВОЕННАЯ УСТАЛОСТЬ")
         self.change_relation(faction, defender, -20 if win else -12)
         for f in self.alive():
             if f not in (faction, defender):

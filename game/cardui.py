@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import pygame
 
 from .cardplay import MAX_GROUP, MULTI
-from .cards import (CARDS, COUNCIL_SEATS, KIND_NAMES, PERSONAL, STATS, THRESHOLD_CARDS, THRESHOLDS, TIER_NAMES,
+from .cards import (CARDS, COUNCIL_SEATS, COURSES, course_cooldown, KIND_NAMES, PERSONAL, STATS, THRESHOLD_CARDS, THRESHOLDS, TIER_NAMES,
                     competence, council_totals, hand_size, intercepts, reserve, strife)
 from .factions import CITY, FACTION
 from .officers import OFFICER
@@ -172,6 +172,7 @@ class CardTable:
         self.play: Optional[dict] = None   # {"inst", "chosen"}
         self.picker: Optional[dict] = None
         self.council_open = False
+        self.course_open = False
         self.chronicle_open = False
         self.chron_scroll = 0
         self.chron_from = 0
@@ -194,7 +195,7 @@ class CardTable:
 
     def busy(self) -> bool:
         """A card window or a target picker is open (the map must not react)."""
-        return bool(self.picker or self.council_open or self.chronicle_open)
+        return bool(self.picker or self.council_open or self.chronicle_open or self.course_open)
 
     # --- geometry -------------------------------------------------------------------------
     def hand(self) -> list:
@@ -233,6 +234,9 @@ class CardTable:
     def handle(self, ev, mouse: Tuple[int, int]) -> bool:
         """True if the event belonged to the cards."""
         mx, my = mouse
+        if self.course_open:
+            self._course_handle(ev, mx, my)
+            return True
         if self.council_open:
             self._council_handle(ev, mx, my)
             return True
@@ -504,6 +508,10 @@ class CardTable:
             s.blit(self.ms.dim, (0, 0))
             self.ms.cards.cover()
             self._chronicle_draw(s)
+        if self.course_open:
+            s.blit(self.ms.dim, (0, 0))
+            self.ms.cards.cover()
+            self._course_draw(s)
 
     # --- picker: officers and realms ------------------------------------------------------------
     ROWS = 9
@@ -728,6 +736,9 @@ class CardTable:
         if not r.collidepoint(mx, my) or pygame.Rect(r.right - 16, r.y + 3, 12, 11).collidepoint(mx, my):
             self.council_open = False
             return
+        if self._course_button().collidepoint(mx, my):
+            self.course_open = True
+            return
         for tab in ("officers", "deck"):
             if self._tab_rect(tab).collidepoint(mx, my):
                 self.council_tab = tab
@@ -832,6 +843,12 @@ class CardTable:
             col = "#f6757a"
         for j, line in enumerate(wrap(", ".join(perks), 200)):
             font.draw(s, line, r.x + 6, y + 9 + j * 8, col)
+        cb = self._course_button()
+        hot = cb.collidepoint(mouse)
+        realm = self.camp.realms[self.player]
+        s.blit(self.ms.r.panel(cb.w, cb.h, base="#5a6988" if hot else "#3a2a10", border="#fee761"), cb.topleft)
+        cd = f", ЗАМОК {realm.course_cd} Х." if realm.course_cd else ""
+        font.draw(s, f"КУРС: {COURSES[realm.course].name}{cd}", cb.centerx, cb.centery, "#fee761", anchor="center")
         # thresholds
         x0 = r.x + 214
         font.draw(s, "НАВЫКИ СОВЕТА", x0, r.y + 18, "#fee761")
@@ -920,3 +937,86 @@ class CardTable:
             s.blit(img, (x, y))
             if label:
                 self.font.draw(s, label, x + CARD_W // 2, y + CARD_H + 2, "#c0cbdc", anchor="midtop")
+
+    # --- course of the realm ------------------------------------------------------------------------
+    def _course_button(self) -> pygame.Rect:
+        r = self.ms.WIN
+        return pygame.Rect(r.x + 6, r.y + 200, 200, 13)
+
+    def _course_row(self, i: int) -> pygame.Rect:
+        r = self.ms.WIN
+        return pygame.Rect(r.x + 6, r.y + 40 + i * 34, r.w - 12, 32)
+
+    def _course_handle(self, ev, mx, my) -> None:
+        r = self.ms.WIN
+        if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE or \
+                ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
+            self.course_open = False
+            return
+        if ev.type != pygame.MOUSEBUTTONDOWN or ev.button != 1:
+            return
+        if not r.collidepoint(mx, my) or pygame.Rect(r.right - 16, r.y + 3, 12, 11).collidepoint(mx, my):
+            self.course_open = False
+            return
+        for i, key in enumerate(COURSES):
+            if self._course_row(i).collidepoint(mx, my):
+                ok, why = self.camp.can_change_course(self.player, key)
+                if not ok:
+                    self.ms._say(why)
+                    return
+                self.camp.change_course(self.player, key)
+                self.ms._say(f"НОВЫЙ КУРС: {COURSES[key].name}. КАРТЫ ОСНОВЫ ЗАМЕНЕНЫ", "#a7f070")
+                self.course_open = False
+                return
+
+    def _course_draw(self, s: pygame.Surface) -> None:
+        from .mapview import wrap
+        r = self.ms.WIN
+        font = self.font
+        realm = self.camp.realms[self.player]
+        mouse = self.ms._mouse
+        s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#c9a24a"), r.topleft)
+        cr = pygame.Rect(r.right - 16, r.y + 3, 12, 11)
+        pygame.draw.rect(s, (162, 38, 51), cr)
+        font.draw(s, "X", cr.centerx + 1, cr.centery, "#ffffff", anchor="center")
+        font.draw(s, "КУРС ДЕРЖАВЫ: КАКИЕ 5 КАРТ ОСНОВЫ ЛЕЖАТ В КОЛОДЕ", r.centerx, r.y + 4, "#fee761",
+                  anchor="midtop")
+        cd = course_cooldown(realm.council)
+        from .cards import council_totals
+        gov = council_totals(realm.council)["УПРАВЛЕНИЕ"]
+        now = "МОЖНО СМЕНИТЬ СЕЙЧАС" if realm.course_cd == 0 else f"СМЕНИТЬ МОЖНО ЧЕРЕЗ {realm.course_cd} Х."
+        font.draw(s, f"{now}. ПОСЛЕ СМЕНЫ КУРС ЗАКРЕПЛЁН НА {cd} Х. (УПРАВЛЕНИЕ СОВЕТА {gov}: ЧЕМ ВЫШЕ, ТЕМ "
+                     f"КОРОЧЕ)", r.centerx, r.y + 16, "#a7f070" if realm.course_cd == 0 else "#feae34",
+                  anchor="midtop")
+        font.draw(s, "СМЕНА КУРСА СРАЗУ МЕНЯЕТ КАРТЫ ОСНОВЫ ВЕЗДЕ, ДАЖЕ В РУКЕ", r.centerx, r.y + 26, "#5a6988",
+                  anchor="midtop")
+        hover = None
+        for i, (key, c) in enumerate(COURSES.items()):
+            row = self._course_row(i)
+            cur = key == realm.course
+            hot = row.collidepoint(mouse)
+            pygame.draw.rect(s, (58, 68, 102) if hot else (38, 43, 68), row)
+            pygame.draw.rect(s, _c("#fee761") if cur else (90, 105, 136), row, 2 if cur else 1)
+            font.draw(s, c.name + (" (СЕЙЧАС)" if cur else ""), row.x + 5, row.y + 3, "#fee761" if cur else "#ffffff")
+            x = row.x + 110
+            from collections import Counter
+            for k, n in Counter(c.base).items():
+                chip = self.art.chip(k)
+                s.blit(chip, (x, row.y + 3))
+                if pygame.Rect(x, row.y + 3, chip.get_width(), 7).collidepoint(mouse):
+                    hover = k
+                x += chip.get_width() + 2
+                if n > 1:
+                    font.draw(s, f"x{n}", x, row.y + 3, "#ffffff")
+                    x += 12
+                x += 6
+            font.draw(s, "+ " + c.plus, row.x + 5, row.y + 12, "#63c74d")
+            for j, line in enumerate(wrap("- " + c.minus, row.w - 10)[:2]):
+                font.draw(s, line, row.x + 5, row.y + 20 + j * 7, "#f6757a")
+        text, colr, until = self.ms.toast
+        if self.ms.time < until:
+            font.draw(s, text, r.centerx, r.bottom - 10, colr, anchor="midtop")
+        if hover:
+            mx, my = mouse
+            img = self.art.full(hover, "ОСНОВА", self.player)
+            s.blit(img, (min(mx + 8, W - CARD_W - 2), max(2, min(H - CARD_H - 2, my - CARD_H // 2))))

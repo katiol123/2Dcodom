@@ -166,6 +166,46 @@ class CampaignCardsTest(unittest.TestCase):
         self.assertTrue(all(any(x.id == k for x in r.hand) for k in keep))
         self.assertEqual(c.whose_turn(), c.order[1])
 
+    def test_courses(self):
+        from game.cards import COURSES, course_cooldown
+        c = self.c
+        r = c.realms["aldern"]
+        self.assertEqual(r.course, "balance")
+        self.assertTrue(c.change_course("aldern", "war"))
+        base = Counter(x.key for x in r.all_cards() if x.origin == "base")
+        self.assertEqual(base, Counter(COURSES["war"].base))
+        cd = course_cooldown(r.council)
+        self.assertEqual(r.course_cd, cd)
+        self.assertFalse(c.can_change_course("aldern", "economy")[0])     # locked for a while
+        for _ in range(cd):
+            c._start_turn("aldern")
+        self.assertTrue(c.can_change_course("aldern", "economy")[0])
+        # the better the council governs, the shorter the lock
+        offs = sorted(OFFICERS["aldern"], key=lambda o: o.stat("УПРАВЛЕНИЕ"))
+        weak = [o.key for o in offs[:5]]
+        strong = [o.key for o in offs[-5:]]
+        self.assertLess(course_cooldown(strong), course_cooldown(weak))
+        self.assertGreaterEqual(course_cooldown(strong), 3)
+        # war fatigue: every second storm
+        target = "shroomhole"
+        for i in range(2):
+            offs = [o.key for o in c.officers_in("hartwell")]
+            for o in offs:
+                c.squads[o] = [c._new("militia")]
+                c.ready.add(o)
+            c.realms["aldern"].ap = 5
+            inst = c._inst("assault", "base")
+            r.hand.append(inst)
+            c.play("aldern", inst, [target, tuple(offs[:1])])
+        self.assertTrue(any(x.key == "war_fatigue" for x in r.all_cards()))
+        # paranoia
+        c.realms["aldern"].course_cd = 0
+        c.change_course("aldern", "intrigue")
+        o = c.officers_of("aldern")[3].key
+        loy = c.loyalty[o]
+        c._start_turn("aldern")
+        self.assertEqual(c.loyalty[o], loy - 1)
+
     def test_storm(self):
         c = self.c
         target = "shroomhole"                                           # a goblin lair next to Hartwell
@@ -256,6 +296,11 @@ class CardScreenTest(unittest.TestCase):
         click(m.table._cand_rect(0).center)
         self.assertEqual(len(m.camp.realms["aldern"].council), COUNCIL_SEATS)
         self.assertNotEqual(m.camp.realms["aldern"].council, before)
+        click(m.table._course_button().center)                         # the course of the realm
+        self.assertTrue(m.table.course_open)
+        click(m.table._course_row(1).center)
+        self.assertEqual(m.camp.realms["aldern"].course, "war")
+        self.assertFalse(m.table.course_open)
         m.table.council_tab = "deck"
         frame(m.table._cand_rect(0).center)
         m.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE), (0, 0))

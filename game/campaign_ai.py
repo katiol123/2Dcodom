@@ -94,6 +94,8 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
         if p < 0.55:
             continue
         hostility = 1.0 + (40 - min(40, camp.relation(f, camp.owner[target]))) / 80
+        if camp.realms[camp.owner[target]].course == "economy":
+            hostility *= 1.4                     # a rich realm that does not arm itself is tempting prey
         v = p * _city_worth(camp, target) * hostility - (1 - p) * a * 0.5 - p * 0.3 * min(a, d) * POWER_VALUE
         if v > best[0]:
             best = (v, [target, tuple(cands)])
@@ -530,10 +532,46 @@ def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float,
     return best
 
 
+# realms' leanings when they pick a course
+COURSE_TASTE = {"khanate": {"war": 0.5}, "north": {"war": 0.3}, "league": {"intrigue": 0.3, "economy": 0.3},
+                "sultanate": {"economy": 0.3}, "highland": {"defense": 0.3}, "ashen": {"intrigue": 0.3},
+                "goblin": {"war": 0.4}, "sylvan": {"defense": 0.2}}
+
+
+def course_scores(camp, f: str) -> Dict[str, float]:
+    """How much each course suits the realm right now."""
+    up = camp.upkeep(f)
+    income = camp.expected_income(f)
+    poor = income < up * 1.1 or camp.gold[f] < up
+    v, _ = _attack_plan(camp, f, "assault")
+    targets = sum(1 for c in options(camp, f, "assault", []))
+    danger = max((threat(camp, f, c) / max(1.0, camp.defense_power(c)) for c in frontier(camp, f)), default=0)
+    intrigue = council_totals(camp.realms[f].council)["ИНТРИГА"]
+    s = {"balance": 1.8,
+         "war": (1.2 + min(1.5, v / 300) + 0.1 * min(targets, 4)) * (0.5 if poor else 1.0),
+         "economy": 2.6 if poor else 1.1,
+         "defense": 1.0 + 1.6 * max(0.0, min(1.5, danger) - 0.6),
+         "intrigue": 1.0 + (0.6 if intrigue >= 62 else 0) + (0.3 if v <= 0 else 0)}
+    for k, d in COURSE_TASTE.get(f, {}).items():
+        s[k] += d
+    return s
+
+
+def pick_course(camp, f: str) -> None:
+    r = camp.realms[f]
+    if r.course_cd > 0:
+        return
+    s = course_scores(camp, f)
+    best = max(s, key=s.get)
+    if best != r.course and s[best] > s[r.course] + 0.5:          # only for a clear reason
+        camp.change_course(f, best)
+
+
 def play_turn(camp, f: str) -> None:
     if not camp.realms[f].alive:
         return
     manage(camp, f)
+    pick_course(camp, f)
     fill_council(camp, f)
     for _ in range(20):
         pick = best_play(camp, f)
