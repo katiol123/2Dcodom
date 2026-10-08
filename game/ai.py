@@ -337,6 +337,14 @@ def _frenzy_targets(world: "World", u: "Unit") -> List["Unit"]:
 
 def _try_abilities(world: "World", u: "Unit") -> bool:
     """Returns True if an ability consumed the turn."""
+    if u.has("charge"):
+        # two rushes head on: a clash where nobody gets the first blow - unless exactly one of the two
+        # meets rushes with a polearm (then his counter below decides it)
+        for e in world.enemies(u):
+            if (e.has("charge") and e.facing != u.facing and in_melee_range(u, e, slack=10)
+                    and (u.key in COUNTERS) == (e.key in COUNTERS)):
+                _joust(world, u, e)
+                return True
     if u.key == "orc" and u.abil.get("warcry", 0) <= 0:
         near = [e for e in world.enemies(u) if u.dist(e) < 115]
         if near:
@@ -393,12 +401,6 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
             world.text(u, "ТЕНЬ!", "#c0cbdc", big=True)
             world.sounds.append("smoke")
             return False
-    if u.key == "lancer" and u.has("charge"):
-        # two knights at full gallop: lance against lance, nobody gets the first blow
-        for e in world.enemies(u):
-            if e.key == "lancer" and e.has("charge") and in_melee_range(u, e, slack=10):
-                _joust(world, u, e)
-                return True
     if u.key in COUNTERS and u.cd <= 0.35:
         # brace: meet an enemy rushing at me with the spear before it reaches me
         for e in world.enemies(u):
@@ -555,8 +557,9 @@ def resolve_action(world: "World", u: "Unit", a: dict) -> None:
 
 
 def _joust(world: "World", a: "Unit", b: "Unit") -> None:
-    """Two riders with lances (uhlans, or mounted knights) rushing at each other: both lances strike at once (counter damage), both riders are
-    thrown back and shaken, both rushes are spent - and both ride off for another run-up."""
+    """Two rushes meeting head on (a clash): both strike at once with double damage, both are thrown
+    back and shaken, both rushes (and their special first blows) are spent; riders ride off for
+    another run-up."""
     world.text(a, "СШИБКА!", "#feae34", big=True)
     world.hitstop = max(world.hitstop, 0.1)
     world.sounds.append("block")
@@ -576,7 +579,8 @@ def _joust(world: "World", a: "Unit", b: "Unit") -> None:
             u.x = min(FIELD[2], max(FIELD[0], u.x - u.facing * 14))
             u.vx = u.vy = 0.0
             _stun(world, u, 0.4, quiet=True)
-            u.status["regroup"] = 1.2
+            if u.key in ("lancer", "uhlan"):
+                u.status["regroup"] = 1.2
     world.burst((a.x + b.x) / 2, (a.y + b.y) / 2, 14, "#feae34", n=14, speed=60, up=40, life=0.5)
 
 

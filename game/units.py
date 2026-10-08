@@ -86,7 +86,7 @@ ROSTER: Dict[str, UnitType] = {u.key: u for u in (
              damage_type="physical", attack_range=14, cooldown=0.7, speed=64, dodge=0.30, radius=6, lane="flank",
              prefers={"mage": 130, "archer": 115, "cleric": 130, "necromancer": 120, "shaman": 115,
                       "crossbowman": 110}),
-    UnitType("orc", "ОРК", "ГРОМИЛА", hp=365, armor=0.25, resist=0.0, damage=(23, 30), damage_type="physical",
+    UnitType("orc", "ОРК", "ГРОМИЛА", hp=365, armor=0.25, resist=0.0, damage=(21, 28), damage_type="physical",
              attack_range=17, cooldown=1.4, speed=37, radius=8,
              prefers={"barbarian": 20, "rogue": 20, "spearman": 15, "knight": -25}),
     UnitType("archer", "ЛУЧНИК", "СТРЕЛОК", hp=165, armor=0.10, resist=0.10, damage=(17, 21),
@@ -153,7 +153,7 @@ ROSTER: Dict[str, UnitType] = {u.key: u for u in (
              prefers={"archer": 50, "mage": 50, "cleric": 50, "crossbowman": 45, "ranger": 45, "ice_witch": 45,
                       "shaman": 40, "alchemist": 40}, tier="above"),
     UnitType("lancer", "КОННЫЙ РЫЦАРЬ", "КАВАЛЕРИЯ", hp=430, armor=0.35, resist=0.05, damage=(24, 30),
-             damage_type="physical", attack_range=20, cooldown=1.4, speed=60, radius=10, short="ВСАДНИК",
+             damage_type="physical", attack_range=18, cooldown=1.4, speed=60, radius=10, short="ВСАДНИК",
              prefers={"archer": 20, "mage": 20, "crossbowman": 20}, tier="above"),
     UnitType("uhlan", "УЛАН", "КОПЕЙНАЯ КАВАЛЕРИЯ", hp=440, armor=0.32, resist=0.10, damage=(23, 29),
              damage_type="physical", attack_range=24, cooldown=1.3, speed=64, radius=10, short="УЛАН",
@@ -416,7 +416,8 @@ TRAITS: Dict[str, Dict[str, Tuple[Tuple[str, str], ...]]] = {
         flaws=(("МИШЕНЬ В НЕБЕ", "стрелы и болты наносят ему +30% урона"),),
         behavior=(("ОХОТНИК НА СТРЕЛКОВ", "выбирает стрелков и магов"),)),
     "lancer": dict(
-        perks=(("ТАРАННЫЙ УДАР", "разгон к врагу: первый удар x2.5 и отбрасывает (раз в 7 с)"),),
+        perks=(("ТАРАННЫЙ УДАР", "разгон к врагу: конь сшибает, первый удар мечом x2.5 и отбрасывает "
+                                 "(раз в 7 с)"),),
         flaws=(("БЕЗ РАЗГОНА", "обычные удары на 15% слабее"),
                ("КОПЬЯ", "копейщики и алебардщики встречают разгон контрударом")),
         behavior=(("НАСКОК", "после таранного удара отъезжает для нового разгона"),)),
@@ -781,7 +782,8 @@ def look_for(key: str, team: Team, seed: int) -> Look:
                         belly=r.choice(["#ead4aa", "#c0cbdc"]), eye="#181425", mane=r.choice(["#181425", "#ead4aa"]),
                         collar=c, body_len=14, body_w=7, leg_len=7, tail="long", size=(60, 52),
                         rider="human", rider_skin=r.choice(SKINS), rider_top="#8b9bb4", rider_helmet="#c0cbdc",
-                        rider_weapon="lance", rider_cloth=c, rider_shield=a, rider_eye="#181425")
+                        rider_weapon="sword", rider_cloth=c, rider_shield=a, rider_eye="#181425",
+                        rider_blade="#c0cbdc")
     # --- Пепельное герцогство --------------------------------------------------------
     if key == "death_knight":
         return HumanoidSpec(skin=r.choice(["#8b9bb4", "#c0cbdc"]), eye=r.choice(["#2ce8f5", "#63c74d"]), hair=None,

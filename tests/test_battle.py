@@ -168,8 +168,23 @@ class BattleTest(unittest.TestCase):
     def test_two_mounted_knights_joust(self):
         self._joust("lancer")
 
+    def test_any_two_rushes_head_on_clash(self):
+        from game import ai
+        for a, b in (("barbarian", "wolf"), ("mamluk", "lancer"), ("wolf_rider", "valkyrie"), ("orc", "barbarian")):
+            ai_, w, u, e = self._pair(a, b)
+            for x in (u, e):
+                x.status["charge"] = 1.0
+                x.status["stunhit"] = 1.5
+            hu, he = u.hp, e.hp
+            self.assertTrue(ai._try_abilities(w, u), (a, b))
+            self.assertFalse(u.has("charge") or e.has("charge"), (a, b))
+            self.assertFalse(u.has("stunhit") or e.has("stunhit"), (a, b))
+            self.assertLess(u.hp + e.hp, hu + he)          # both strike (a dodge may still save one)
+            self.assertTrue(any(t.text == "СШИБКА!" for t in w.texts))
+
     def _joust(self, key):
         ai, w, a, b = self._pair(key, key)
+        a.cd = b.cd = 0.0
         for x in (a, b):
             x.status["charge"] = 1.0
             x.status["lancehit"] = 1.5
