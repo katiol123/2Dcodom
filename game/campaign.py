@@ -686,10 +686,12 @@ class Campaign:
                 r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "threshold"))
 
     def add_curse(self, faction: str, key: str, n: int = 1, source: str = "") -> int:
-        """Slip curses into a realm's draw pile; a watchful council catches some. Returns how many got in."""
+        """Slip curses into a realm's draw pile; a watchful council catches some of those a rival sends
+        (``source``) - the realm's own troubles cannot be intercepted. Returns how many got in."""
         r = self.realms[faction]
         got = 0
-        if source and source != faction and key not in ("debt", "fatigue", "strife", "war_fatigue"):
+        hostile = bool(source) and source != faction and key not in ("debt", "fatigue", "strife", "war_fatigue")
+        if hostile:
             stop = self.answers(faction, "cursed")
             if stop:                                          # the courier never arrives
                 r.hand.remove(stop[0])
@@ -699,7 +701,7 @@ class Campaign:
                 return 0
         for _ in range(n):
             catch = max(0.35 if self.intercepts(r.council) else 0.0, 0.5 if r.course == "intrigue" else 0.0)
-            if key not in ("debt", "fatigue", "strife", "war_fatigue") and self.rng.random() < catch:
+            if hostile and self.rng.random() < catch:
                 self.log_event(faction, f"Разведка перехватила {CARDS[key].name}")
                 continue
             r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(key, "curse"))

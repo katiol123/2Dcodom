@@ -40,6 +40,12 @@ from .sim import FIELD, SUMMON_HP, Lightning, Ring, Vfx
 RETARGET = 0.35
 COUNTER_BONUS = 2.0    # spearman meeting a charge with the spear: +100% damage
 DANGER = 50.0          # shooters start backing off when melee is this close
+# soft formation: melee soldiers march holding their row and prefer the foe facing them; they close in
+# on their target only near the clash (``LINE_CLOSE``). Divers, shooters, healers and the straight-ahead
+# brutes are free of it.
+ROW_PULL = 1.2         # target score per pixel the foe stands off my row
+LINE_CLOSE = (20.0, 80.0)    # x-distance where a soldier starts / ends leaving his row for his target
+FREE_OF_LINE = ("troll", "iron_golem", "bear", "zombie", "cleric", "dryad", "necromancer")
 
 
 # --- helpers ------------------------------------------------------------------------
@@ -120,6 +126,8 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
     if not u.ranged:
         crowd = len(_attackers(world, e, u))
         s -= max(0, crowd - 1) * 30.0               # spread out, don't all dogpile
+    if in_line(u):
+        s -= abs(e.y - u.row) * ROW_PULL            # the foe facing me in the line first
     if u.key in BODYGUARDS and not e.ranged and e.target is not None and e.target.ranged \
             and e.target.team == u.team:
         s += 70.0                                   # bodyguard
@@ -172,6 +180,12 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
     if e.summoned:
         s -= 15.0                                   # minions are less important than their master
     return s + u.bias * 3.0
+
+
+def in_line(u: "Unit") -> bool:
+    """Does this soldier keep the soft formation?"""
+    return (u.row is not None and not u.ranged and u.key not in DIVERS and u.key not in FREE_OF_LINE
+            and not u.summoned and not u.has("rampage") and not u.has("charge") and u.taunted_by is None)
 
 
 def pick_target(world: "World", u: "Unit") -> Optional["Unit"]:
@@ -818,6 +832,10 @@ def think(world: "World", u: "Unit", dt: float) -> None:
             _move(u, 0, (t.y - u.y) * 0.3, dt, scale=0.4)
             return
         want_x, want_y = _melee_slot(world, u, t)
+        if in_line(u):                              # march in line; leave the row only near the clash
+            gap = abs(t.x - u.x)
+            k = max(0.0, min(1.0, (LINE_CLOSE[1] - gap) / (LINE_CLOSE[1] - LINE_CLOSE[0])))
+            want_y = u.row + (want_y - u.row) * k
         if u.key in DIVERS and t.ranged and abs(t.x - u.x) > 70 and not u.type.incorporeal:
             # flank: run along the nearest field edge before diving in
             edge = FIELD[1] + 4 if u.y < (FIELD[1] + FIELD[3]) / 2 else FIELD[3] - 4
@@ -872,6 +890,8 @@ def _melee_slot(world: "World", u: "Unit", t: "Unit") -> Tuple[float, float]:
     my_side = -1 if u.x < t.x else 1
     if u.key in ("rogue", "monk") and t.target is not None and t.target is not u:
         my_side = -t.facing or my_side     # get behind
+    elif in_line(u):
+        my_side = -1 if u.team == 0 else 1     # a soldier in the line fights from his own side: no wrap-around
     elif (my_side < 0 and left >= 2 and right < left) or (my_side > 0 and right >= 2 and left < right):
         my_side = -my_side
     reach = u.type.attack_range * 0.8 + t.type.radius * 0.5

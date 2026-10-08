@@ -102,6 +102,8 @@ def options(camp, f: str, key: str, chosen: list) -> list:
     if step == "building":                               # what a master builder can put up (half price)
         from .buildings import BUILDINGS, ORDER, can_build
         return [k for k in ORDER if can_build(camp, f, chosen[0], k, BUILDINGS[k].cost // 2)[0]]
+    if step == "enemy_town":                             # cities of men: lairs know no order
+        return [c for c in camp.owner if camp.owner[c] not in (f, "goblin") and c in camp.law]
     if step == "enemy_lair":
         return [c for c in camp.owner if camp.owner[c] == "goblin" and _hostile(camp, f, c)
                 and any(camp.owner[n] == f for n in neighbors(c))]
@@ -214,6 +216,9 @@ def _tax(camp, f, t):
     city = t[0]
     from .buildings import count
     g = _gold(camp, f, int(camp.income_of(city, f) * (1.5 if count(camp, city, "market") else 1)), "tax")
+    from .order import DEN_TAX, FENCE, haunted
+    if city in camp.dens and haunted(camp, city):          # the den fences its take through the lairs
+        camp.earn("goblin", int(g / (1 - DEN_TAX) * DEN_TAX * FENCE), "fence")
     if camp.taxed.get(city, -9) >= camp.turn - 1 and camp.realms[f].course != "economy":
         _prosper(camp, city, -1)
         from .order import OVERTAX, hit
@@ -1054,6 +1059,30 @@ def _head_hunters(camp, f, t):
     before = _cut(camp, t[0], 0.25)
     g = _gold(camp, f, 40, "raids")
     return f"{CITY[t[0]].name}: гоблины потеряли четверть ({before} мощи было), +{g} золота за головы"
+
+
+@effect("city_watch")
+def _city_watch(camp, f, t):
+    from .order import MAX
+    city = t[0]
+    camp.law[city] = min(MAX, camp.law.get(city, 6) + 4)
+    den = city in camp.dens
+    camp.dens.discard(city)
+    return f"{CITY[city].name}: порядок {camp.law[city]}" + ("; притон разогнан" if den else "")
+
+
+@effect("thieves_guild")
+def _thieves_guild(camp, f, t):
+    from .order import SAFE, hit
+    city = t[0]
+    hit(camp, city, 4)
+    camp.change_relation(f, camp.owner[city], -5)
+    out = f"{CITY[city].name}: порядок {camp.law[city]}"
+    if camp.law[city] < SAFE and city not in camp.dens:
+        camp.dens.add(city)
+        _prosper(camp, city, -1)
+        out += "; завёлся воровской притон"
+    return out
 
 
 @effect("shiny_pile")

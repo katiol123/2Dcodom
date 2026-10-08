@@ -7,7 +7,10 @@ what the city can keep (``target``):
 * a garrison: +1 with 300 power of troops in the city, +2 with 700;
 * a temple +1, the capital +1;
 * wealth draws thieves: -1 for every point of prosperity above 6;
-* sickness -2, the realm's political instability -1.
+* sickness -2, the realm's political instability -1;
+* the horde's shadow (a passive trait of the goblins): a city next to a lair -``HORDE_FEAR`` unless its
+  realm has bought the horde off; crime there serves the goblins - what smugglers carry off and a
+  ``FENCE`` share of what a thieves' den skims from the tax go to the horde's treasury.
 
 Battles in the city cost 2 order, raids 1, over-taxing 1; a taken city starts at ``TAKEN``.
 Low order breeds crime (``CRIME`` chance per own turn below ``SAFE``): a thieves' den (prosperity -1,
@@ -29,6 +32,7 @@ SAFE, CLEARED = 4, 6
 CRIME = 0.15                  # per point of order below SAFE, per own turn
 DEN_TAX = 0.3
 BATTLE, RAID, OVERTAX = 2, 1, 1
+HORDE_FEAR, FENCE = 2, 0.5
 
 
 def applies(camp, city: str) -> bool:
@@ -50,7 +54,17 @@ def target(camp, city: str) -> int:
     owner = camp.realms.get(camp.owner[city])
     if owner and owner.unrest:
         t -= 1
+    if haunted(camp, city):
+        t -= HORDE_FEAR
     return max(0, min(MAX, t))
+
+
+def haunted(camp, city: str) -> bool:
+    """A city of men in the horde's shadow: next to a lair of an unbought horde."""
+    from .factions import neighbors
+    owner = camp.owner[city]
+    return owner != "goblin" and any(camp.owner[n] == "goblin" for n in neighbors(city)) \
+        and not camp.at_peace("goblin", owner)
 
 
 def hit(camp, city: str, d: int) -> None:
@@ -102,5 +116,8 @@ def _crime(camp, faction: str, city: str, prosper) -> Optional[str]:
         loss = min(camp.gold[faction], 20 + 5 * camp.prosperity[city])
         camp.gold[faction] -= loss
         msg = f"{name}: КОНТРАБАНДИСТЫ увели {loss} золота мимо казны"
+        if haunted(camp, city):
+            camp.earn("goblin", loss, "fence")
+            msg += " - прямиком в логово гоблинов"
     camp.log_event(faction, msg)
     return msg

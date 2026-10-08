@@ -131,11 +131,11 @@ LEADER_REIGN = {"aldern": "noble", "sylvan": "keeper", "ashen": "tyrant", "khana
                 "goblin": "tyrant"}
 
 
-@lru_cache(maxsize=None)
-def reign_of(officer: str) -> str:
+MIN_HOLDERS = 2                # every reign type belongs to at least this many officers of the starting cast
+
+
+def _scores(officer: str) -> Dict[str, float]:
     o = OFFICER[officer]
-    if o.rank == 0 and o.faction in LEADER_REIGN:
-        return LEADER_REIGN[o.faction]
     r = random.Random(f"reign:{officer}")
     goblin = o.faction == "goblin"
     score = {k: sum(w * (o.stats[i] - 10) for i, w in enumerate(lean)) / 10 + r.uniform(0, 1.6)
@@ -145,6 +145,39 @@ def reign_of(officer: str) -> str:
     for v in VICE_OF.get(officer, ()):
         if v in _VICE_LEAN:
             score[_VICE_LEAN[v]] += 1.5
+    return score
+
+
+@lru_cache(maxsize=1)
+def _cast() -> Dict[str, str]:
+    """Reign types of the starting cast: each officer's best fit, then the rare types are handed to the
+    officers they suit nearly as well, so that every type is met in play (``MIN_HOLDERS``)."""
+    from .officers import OFFICERS
+    offs = [o.key for lst in OFFICERS.values() for o in lst]
+    fixed = {k for k in offs if OFFICER[k].rank == 0 and OFFICER[k].faction in LEADER_REIGN}
+    scores = {k: _scores(k) for k in offs if k not in fixed}
+    out = {k: LEADER_REIGN[OFFICER[k].faction] for k in fixed}
+    out.update({k: max(sc, key=sc.get) for k, sc in scores.items()})
+    for kind in REIGNS:
+        while sum(1 for v in out.values() if v == kind) < MIN_HOLDERS:
+            count = {t: sum(1 for v in out.values() if v == t) for t in REIGNS}
+            cands = [k for k, sc in scores.items() if kind in sc and out[k] != kind and count[out[k]] > MIN_HOLDERS]
+            if not cands:
+                break
+            k = min(cands, key=lambda k: (scores[k][out[k]] - scores[k][kind], k))
+            out[k] = kind
+    return out
+
+
+@lru_cache(maxsize=None)
+def reign_of(officer: str) -> str:
+    o = OFFICER[officer]
+    if o.rank == 0 and o.faction in LEADER_REIGN:
+        return LEADER_REIGN[o.faction]
+    cast = _cast()
+    if officer in cast:
+        return cast[officer]
+    score = _scores(officer)                      # a newcomer: his own best fit
     return max(score, key=score.get)
 
 

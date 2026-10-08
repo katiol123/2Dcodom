@@ -29,6 +29,9 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   `ai.py` (per-unit hooks: `NEW_PASSIVES`, `NEW_ABILITIES`, `NEW_ACTIONS`, `_new_melee_mods/_after`), then rebalance
   and add it to some city pools in factions.py. Damage modifiers are data: `missile_mult`, `physical_mult`,
   `magic_mult`, `fire_mult`, `immune`, `incorporeal`, `shield`. `Unit.base_key` is the hired class (druid -> bear).
+- Soft formation (ai.py `in_line`, `ROW_PULL`, `LINE_CLOSE`): melee soldiers remember their spawn row (`Unit.row`),
+  march holding it, prefer the foe facing them and fight from their own side (no wrap-around); divers, shooters,
+  healers, brutes and summons are free of it. Check crowding/balance after changing it.
 - Charges (`status["charge"]`) are countered by `COUNTERS` (spearman, halberdier, militia) whenever the rusher
   comes within reach, not only when it targets them. Cornered shooters (`cornered`) stop kiting and shoot.
 - Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait
@@ -56,7 +59,8 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - City prosperity (`PROSPERITY` in factions.py, 1..10) sets tax income; AI realms must stay pygame-free.
   Battles scar cities (`Campaign._scar`: chance by the council ЛОГИСТИКА of whoever holds the city after the
   battle; 2 battles in 5 rounds = ravaged). Cities of men have ПОРЯДОК (`order.py`, `camp.law` - `camp.order`
-  is the turn order!): low order breeds crime that eats prosperity. Aim (cardsim line ПРОЦВЕТАНИЕ): the
+  is the turn order!): low order breeds crime that eats prosperity; the horde's passive shadow lowers order next
+  to lairs (`order.haunted`) and fences the loot. Aim (cardsim line ПРОЦВЕТАНИЕ): the
   campaign ends near the starting total (~+10%), often within +5%. AI curse cards weigh `arrives` (interception).
 - Hiring is open only in cities with an active СБОР ВОЙСК (`camp.muster`, turns from council ВЕРБОВКА).
 - Officers change during a campaign (`growth.py`): XP/levels (weak officers learn faster, by *starting*

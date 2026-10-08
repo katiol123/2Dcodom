@@ -334,6 +334,23 @@ def _v(camp, f, inst) -> Tuple[float, list]:
             troops = sum(camp.power(o.key) for o in camp.officers_in(c)) + sum(t.power for t in camp.free[c])
             return (troops * 0.25 * POWER_VALUE + 40) * (1.5 if reign.has(camp, f, "hunter") else 1.0)
         return _best_city(camp, f, k, s)
+    if k == "city_watch":
+        from .order import CLEARED, DEN_TAX
+
+        def s(c):
+            law = camp.law.get(c, 6)
+            den = DEN_TAX * camp.income_of(c, f) * 4 if c in camp.dens else 0
+            return max(0, CLEARED + 1 - law) * 22 + den if law < CLEARED or den else -1
+        return _best_city(camp, f, k, s)
+    if k == "thieves_guild":
+        from .order import SAFE
+
+        def s(c):
+            r = camp.owner[c]
+            after = camp.law.get(c, 6) - 4
+            hurt = (PROSPERITY_VALUE * 0.6 + camp.prosperity[c] * 6) if after < SAFE and c not in camp.dens else 0
+            return (max(0, SAFE - after) * 15 + hurt) * (1.0 + (50 - min(50, camp.relation(f, r))) / 50)
+        return _best_city(camp, f, k, s)
     if k == "shiny_pile":
         from .horde import great
         return (20 if great(camp) else 30) * len(camp.cities_of(f)), []

@@ -99,6 +99,30 @@ class OrderTest(unittest.TestCase):
         self.assertNotIn(lair, c.law)                            # lairs know no order
 
 
+class OrderCardsTest(unittest.TestCase):
+    def test_watch_and_guild(self):
+        from game.cardplay import EFFECTS, options
+        from game.cards import PERSONAL
+        self.assertEqual(sum(1 for c in PERSONAL.values() if "city_watch" in c), 4)
+        self.assertEqual(sum(1 for c in PERSONAL.values() if "thieves_guild" in c), 4)
+        c = Campaign("aldern", seed=7)
+        town = c.cities_of("north")[0]
+        self.assertIn(town, options(c, "aldern", "thieves_guild", []))
+        self.assertFalse(set(c.cities_of("goblin")) & set(options(c, "aldern", "thieves_guild", [])))
+        c.law[town] = 6
+        p = c.prosperity[town]
+        EFFECTS["thieves_guild"](c, "aldern", [town])
+        self.assertEqual(c.law[town], 2)
+        self.assertIn(town, c.dens)
+        self.assertEqual(c.prosperity[town], max(1, p - 1))
+        own = c.cities_of("aldern")[0]
+        c.law[own] = 2
+        c.dens.add(own)
+        EFFECTS["city_watch"](c, "aldern", [own])
+        self.assertEqual(c.law[own], 6)
+        self.assertNotIn(own, c.dens)
+
+
 class IntrigueTargetTest(unittest.TestCase):
     def test_watchful_rivals_are_worse_targets(self):
         c = Campaign(None, seed=6)

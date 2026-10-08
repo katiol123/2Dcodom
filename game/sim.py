@@ -195,6 +195,7 @@ class Unit:
         self.once: set = set()        # one-per-battle abilities already used (bats, rampage, shape, valhalla)
         self.exploded = False         # goblin bomber went off
         self.kite_pos = (x, y)        # shooters notice when running away gets them nowhere (cornered)
+        self.row: Optional[float] = None   # row in the battle line; None = no formation (summons)
         self.stuck = 0.0
         self.bias = random.random()   # replaced by world rng
 
@@ -339,6 +340,7 @@ class World:
                     x = W - x
                 u = Unit(ROSTER[s.key], team, x, y + self.rng.uniform(-3, 3), self.anims[s.look], s.look)
                 u.tag = getattr(s, "tag", 0)
+                u.row = u.y                # the soldier's row in the line (soft formation, ai.py)
                 u.bias = self.rng.random()
                 u.anim_t = self.rng.uniform(0, 1)
                 self.units.append(u)

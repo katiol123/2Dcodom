@@ -17,6 +17,13 @@ class ReignTest(unittest.TestCase):
         for o in OFFICER:
             self.assertIn(reign.reign_of(o), reign.REIGNS)
 
+    def test_every_reign_type_is_met(self):
+        from collections import Counter
+        from game.officers import OFFICERS
+        n = Counter(reign.reign_of(o.key) for offs in OFFICERS.values() for o in offs)
+        for kind in reign.REIGNS:
+            self.assertGreaterEqual(n[kind], reign.MIN_HOLDERS, kind)
+
     def test_shown_only_for_computer_rulers(self):
         c = Campaign("aldern", seed=1)
         self.assertFalse(reign.shown(c, c.leader["aldern"]))             # the player rules himself

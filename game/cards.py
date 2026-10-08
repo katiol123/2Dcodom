@@ -275,6 +275,10 @@ _CARDS: List[Card] = [
     _c("thievery", "ВОРОВСТВО", 1, "unique", "economy", "Украсть до 80 золота у соседней державы.",
        ("rival_neighbor",)),
     _c("dragon_gold", "ЗОЛОТО ДРАКОНА", 0, "unique", "economy", "+400 золота. Сгорает.", exhaust=True),
+    _c("city_watch", "ГОРОДСКАЯ СТРАЖА", 1, "moderate", "council", "Свой город: порядок +4, воровской притон "
+       "разогнан.", ("own_city",)),
+    _c("thieves_guild", "ВОРОВСКАЯ ГИЛЬДИЯ", 1, "moderate", "intrigue", "Вражеский город: порядок -4; если он "
+       "упал ниже 4 - там заводится воровской притон (процветание -1, подать на 30% меньше).", ("enemy_town",)),
     _c("head_hunters", "ОХОТНИКИ ЗА ГОЛОВАМИ", 1, "moderate", "military", "Соседнее гоблинское логово: "
        "войска там теряют 25%, за головы +40 золота.", ("enemy_lair",)),
     _c("goblin_tongue", "ГОБЛИНСКИЙ ТОЛМАЧ", 1, "moderate", "diplomacy", "Уговорить вожака без золота: 4 хода "
@@ -564,14 +568,18 @@ _TRADES = {"master_builder": ("УПРАВЛЕНИЕ", ("highland", "sultanate", 
 
 _TRADES.update({"head_hunters": ("РАЗВЕДКА", ("aldern", "league", "highland", "khanate")),
                 "goblin_tongue": ("ДИПЛОМАТИЯ", ("sultanate", "ashen", "north")),
-                "shiny_pile": ("УПРАВЛЕНИЕ", ("goblin", "goblin"))})
+                "shiny_pile": ("УПРАВЛЕНИЕ", ("goblin", "goblin")),
+                "city_watch": ("РАЗВЕДКА", ("aldern", "highland", "north", "sultanate")),
+                "thieves_guild": ("ИНТРИГА", ("league", "ashen", "khanate", "sylvan"))})
 
 
 def _give_trades() -> None:
+    empty = _empty_heads()                       # the able "trifle bringers" stay so (the council's dilemma)
     for card, (stat, realms) in _TRADES.items():
         i = STATS.index(stat)
         for f in realms:
-            offs = [o for o in OFFICER.values() if o.faction == f and o.rank > 0 and card not in PERSONAL[o.key]]
+            offs = [o for o in OFFICER.values() if o.faction == f and o.rank > 0 and card not in PERSONAL[o.key]
+                    and o.key not in empty]
             best = max(offs, key=lambda o: (o.stats[i], o.key))
             PERSONAL[best.key] = PERSONAL[best.key] + (card,)
 
