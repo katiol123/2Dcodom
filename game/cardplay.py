@@ -197,7 +197,7 @@ def effect(key):
 def _tax(camp, f, t):
     city = t[0]
     g = _gold(camp, f, camp.income_of(city, f), "tax")
-    if camp.taxed.get(city, -9) >= camp.turn - 1:
+    if camp.taxed.get(city, -9) >= camp.turn - 1 and camp.realms[f].course != "economy":
         _prosper(camp, city, -1)
         note = " (поборы: процветание -1)"
     else:
@@ -587,7 +587,7 @@ def _plot(camp, f, t):
     o = t[1]
     victim = camp.allegiance[o]
     intrigue = council_totals(camp.realms[f].council)["ИНТРИГА"]
-    chance = 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400
+    chance = 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400 + (0.15 if camp.realms[f].course == "intrigue" else 0)
     if OFFICER[o].rank == 0 and OFFICER[o].faction == victim:
         chance = 0.0
     chance = max(0.0, min(0.95, chance))

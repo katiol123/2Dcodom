@@ -185,7 +185,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     econ = _econ_factor(camp, f)
     if k == "tax":
         def s(c):
-            over = camp.taxed.get(c, -9) >= camp.turn - 1
+            over = camp.taxed.get(c, -9) >= camp.turn - 1 and camp.realms[f].course != "economy"
             return camp.income_of(c, f) - (PROSPERITY_VALUE * 1.3 if over else 0)
         return _best_city(camp, f, k, s)
     if k == "fair":
@@ -404,7 +404,8 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         def s(o):
             if OFFICER[o].rank == 0 and OFFICER[o].faction == camp.allegiance[o]:
                 return -1
-            ch = max(0, min(0.95, 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400))
+            ch = max(0, min(0.95, 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400
+                            + (0.15 if camp.realms[f].course == "intrigue" else 0)))
             return ch * (camp.power(o) * POWER_VALUE + 150)
         return _enemy_officer(camp, f, k, s)
     if k == "book_of_grudges":

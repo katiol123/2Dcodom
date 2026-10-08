@@ -491,7 +491,8 @@ class Campaign:
         r = self.realms[faction]
         got = 0
         for _ in range(n):
-            if key not in ("debt", "fatigue", "strife", "war_fatigue") and intercepts(r.council) and self.rng.random() < 0.35:
+            catch = max(0.35 if intercepts(r.council) else 0.0, 0.5 if r.course == "intrigue" else 0.0)
+            if key not in ("debt", "fatigue", "strife", "war_fatigue") and self.rng.random() < catch:
                 self.log_event(faction, f"Разведка перехватила {CARDS[key].name}")
                 continue
             r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(key, "curse"))
@@ -590,7 +591,7 @@ class Campaign:
                 self.untaxed[city] = 0
             else:
                 self.untaxed[city] += 1
-                if self.untaxed[city] >= GROWTH_TURNS:
+                if self.untaxed[city] >= (GROWTH_TURNS - 1 if r.course == "economy" else GROWTH_TURNS):
                     self.untaxed[city] = 0
                     self.prosperity[city] = min(self.max_prosperity(city), self.prosperity[city] + 1)
         # treaties
@@ -721,6 +722,8 @@ class Campaign:
             d *= self.defense[city][0]
         if city in self.siege and self.siege[city][0] != owner:
             d *= 0.75
+        if owner in self.realms and self.realms[owner].course == "defense":
+            d *= 1.25
         if owner == "sylvan" and CITY[city].faction == "sylvan":
             d *= 1.2                                      # the forest hides its own
         return d
@@ -769,7 +772,7 @@ class Campaign:
         r = self.realms.get(faction)
         if r and r.course == "war":
             r.storms += 1
-            if r.storms >= 2:
+            if r.storms >= 1:
                 r.storms = 0
                 self.add_curse(faction, "war_fatigue")
                 self.log_event(faction, "ВОЕННАЯ УСТАЛОСТЬ")
