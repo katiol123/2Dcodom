@@ -420,6 +420,11 @@ class CardScreenTest(unittest.TestCase):
         # end of turn: the others play, the chronicle opens, our turn again
         click(m.table.end_rect().center)
         settle(m)
+        self.assertFalse(m.table.chronicle_open)                       # the news waits for the new hand
+        for _ in range(200):
+            frame((0, 0))
+            if m.table.chronicle_open:
+                break
         self.assertTrue(m.table.chronicle_open)
         self.assertEqual(m.camp.whose_turn(), "aldern")
         self.assertEqual(m.camp.turn, 2)

@@ -36,5 +36,37 @@ class SaveTest(unittest.TestCase):
             self.assertEqual(back.turn, c.turn + 1)
 
 
+class TitleTest(unittest.TestCase):
+    def test_new_over_a_save_asks_first(self):
+        from test_campaign import _pygame_ui
+        pygame, renderer = _pygame_ui()
+        from game.sim import H, W
+        from game.title import TitleScreen
+        c = Campaign("aldern", seed=3)
+        with unittest.mock.patch("game.saves.load", lambda: c):
+            t = TitleScreen(renderer)
+        surf = pygame.Surface((W, H))
+        key = lambda k: t.handle(pygame.event.Event(pygame.KEYDOWN, key=k), (0, 0))
+
+        def frames(n=10):
+            for _ in range(n):
+                t.update(0.05, (0, 0))
+                t.draw(surf)
+        self.assertEqual(t.focus, 1)                                    # ПРОДОЛЖИТЬ first
+        key(pygame.K_UP)
+        key(pygame.K_RETURN)                                            # НАЧАТЬ over the save
+        frames()
+        self.assertTrue(t.confirm)
+        self.assertIsNone(t.result)
+        key(pygame.K_ESCAPE)                                            # НЕТ
+        frames()
+        self.assertFalse(t.confirm)
+        key(pygame.K_RETURN)
+        frames()
+        key(pygame.K_RETURN)                                            # ДА
+        frames()
+        self.assertEqual(t.result, "new")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,7 +112,7 @@ class TitleScreen:
             self.hover = self._at(*mouse)
             if self.hover is not None and self.items[self.hover][2]:
                 self.focus = self.hover
-        elif self.time - self.picked_at > 0.35:
+        elif self.picked is not None and self.time - self.picked_at > 0.35:
             self.result = self.items[self.picked][1]
         for e in self.embers:
             e[1] -= e[2] * dt
