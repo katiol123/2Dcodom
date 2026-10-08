@@ -212,7 +212,7 @@ class DiploWindow:
         alive = other in camp.alive()
         tags = []
         if not alive:
-            tags.append("ПАЛА")
+            tags.append("РАЗГРОМ")
         if other == dip.hegemon(camp):
             tags.append("ГЕГЕМОН")
         tags.append(f"ГОРОДОВ {len(camp.cities_of(other))}, АРМИЯ {camp.army(other)}")

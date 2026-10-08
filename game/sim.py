@@ -35,6 +35,7 @@ class FloatText:
     big: bool = False
     t: float = 0.0
     life: float = 0.9
+    owner: Optional[int] = None    # the unit the text hangs over (merging, shout limits)
 
 
 @dataclass
@@ -392,13 +393,29 @@ class World:
 
     # --- effects helpers --------------------------------------------------------
     def text(self, u_or_xy, text: str, color: str, big: bool = False, life: float = 0.9) -> None:
+        owner = None
         if isinstance(u_or_xy, Unit):
             x, y = u_or_xy.x + self.rng.uniform(-3, 3), u_or_xy.y - 40
+            owner = u_or_xy.id
         else:
             x, y = u_or_xy
-        # stack instead of overlapping: fresh texts near the same spot push this one up
-        fresh = sum(1 for t in self.texts if t.t < 0.3 and abs(t.x - x) < 14 and abs(t.y - y) < 20)
-        self.texts.append(FloatText(x, y - 7 * min(fresh, 3), text, color, big, 0.0, life))
+        if owner is not None and not big:
+            sign = "+" if text.startswith("+") else ""
+            number = text[len(sign):].isdigit()
+            for t in self.texts:
+                if t.owner != owner or t.big:
+                    continue
+                if number and t.text.startswith(sign) and t.text[len(sign):].isdigit() and t.color == color \
+                        and t.t < 0.35:                       # quick hits (or heals) on one target: one number
+                    t.text = sign + str(int(t.text[len(sign):]) + int(text[len(sign):]))
+                    t.t = min(t.t, 0.1)
+                    return
+                if not number and t.text == text and t.t < 1.5:
+                    return                                    # the same shout again: once is enough
+        # stack instead of overlapping: fresh texts near the same spot go up and aside
+        fresh = sum(1 for t in self.texts if t.t < 0.45 and abs(t.x - x) < 18 and abs(t.y - y) < 26)
+        dx = (0, -9, 9)[fresh % 3] if fresh else 0
+        self.texts.append(FloatText(x + dx, y - 7 * min(fresh, 4), text, color, big, 0.0, life, owner))
 
     def burst(self, x, y, z, color, n=8, speed=60.0, up=60.0, life=0.5, gravity=260.0, size=1) -> None:
         for _ in range(n):

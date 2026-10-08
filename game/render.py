@@ -568,7 +568,10 @@ class Renderer:
                            anchor="topleft" if right else "topright")
             chip = sum(u.chip for u in units)
             self._bar(s, px + 5, 14, 148, 5, hp / mx, chip / mx, tm.accent, ticks=7, real_time=real_time)
-            # portraits
+            # portraits (big squads of a campaign storm: two rows of small tiles)
+            if len(units) > 7:
+                self._hud_tiles(s, units, px, right, tm, real_time)
+                continue
             for i, u in enumerate(units):
                 cx = px + 5 + i * 21 if not right else px + 158 - 5 - 20 - i * 21
                 cy = 22
@@ -593,21 +596,57 @@ class Renderer:
         t = max(0.0, world.end_time if world.winner is not None else world.time)
         self.font.draw(s, f"{int(t // 60)}:{int(t % 60):02d}", W // 2, 6, "#ffffff", scale=2, anchor="midtop")
         y = 22
+        rows = []
         for when, killer, team, victim in world.feed[-4:]:
             age = world.time - when
             if age > 6 and world.winner is None:
                 continue
-            kcol = world.teams[1 - team].light
-            vcol = world.teams[team].light
-            k_s = self.font.render(killer, kcol)
-            a_s = self.font.render(" > ", "#8b9bb4")
-            v_s = self.font.render(victim, vcol)
-            total = k_s.get_width() + a_s.get_width() + v_s.get_width()
-            x = W // 2 - total // 2
-            for part in (k_s, a_s, v_s):
+            parts = (self.font.render(killer, world.teams[1 - team].light), self.font.render(" > ", "#8b9bb4"),
+                     self.font.render(victim, world.teams[team].light))
+            rows.append(parts)
+        if rows:                                   # the kill feed on its own dark plate between the panels
+            wide = min(150, max(sum(p.get_width() for p in parts) for parts in rows) + 6)
+            plate = pygame.Surface((wide, len(rows) * 7 + 3))
+            plate.fill((24, 20, 37))
+            s.blit(plate, (W // 2 - wide // 2, y - 2))
+        for parts in rows:
+            total = sum(p.get_width() for p in parts)
+            x = W // 2 - min(total, 144) // 2
+            clip = s.get_clip()
+            s.set_clip(pygame.Rect(W // 2 - 72, y, 144, 7))
+            for part in parts:
                 s.blit(part, (x, y))
                 x += part.get_width()
+            s.set_clip(clip)
             y += 7
+
+    def _hud_tiles(self, s, units, px, right, tm, real_time) -> None:
+        """Portraits of a big squad: up to two rows of small tiles (face crop + hp bar)."""
+        cols = (len(units) + 1) // 2
+        pitch = min(21, 148 // cols)
+        tw = pitch - 1
+        for i, u in enumerate(units):
+            col, row = i % cols, i // cols
+            cx = px + 5 + col * pitch if not right else px + 158 - 5 - tw - col * pitch
+            cy = 21 + row * 11
+            prev = self.prev_hp.get(u.id, u.hp)
+            if u.hp < prev:
+                self.hud_flash[u.id] = real_time
+            self.prev_hp[u.id] = u.hp
+            flash = real_time - self.hud_flash.get(u.id, -9) < 0.12
+            border = "#ffffff" if flash else (tm.color if u.alive else "#3a4466")
+            pygame.draw.rect(s, _c(border), (cx, cy, tw, 10))
+            pygame.draw.rect(s, (38, 43, 68), (cx + 1, cy + 1, tw - 2, 8))
+            por = self.portrait(u.look, dead=u.dead, flip=right)
+            off = max(0, (18 - (tw - 2)) // 2)
+            s.blit(por, (cx + 1, cy + 1), area=pygame.Rect(off, 2, tw - 2, 6))
+            if u.alive:
+                self._bar(s, cx + 1, cy + 7, tw - 2, 2, u.hp / u.max_hp, u.chip / u.max_hp, tm.accent,
+                          real_time=real_time)
+            else:
+                for k in range(-3, 4):
+                    s.set_at((cx + tw // 2 + k, cy + 5 + k), (228, 59, 68))
+                    s.set_at((cx + tw // 2 + k, cy + 5 - k), (228, 59, 68))
 
     def _overlays(self, world: World, s: pygame.Surface, real_time: float, paused: bool, speed: float) -> None:
         if world.time < 0:

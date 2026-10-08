@@ -265,6 +265,14 @@ def _great_card(key: str):
     return SimpleNamespace(name=g.name, text=f"{g.manner}. {g.text}", color=g.color, header="ОРДА УСИЛИЛАСЬ")
 
 
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Russian plural: 1 ЛОГОВО, 2 ЛОГОВА, 5 ЛОГОВ."""
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return many
+    return one if n % 10 == 1 else few if 2 <= n % 10 <= 4 else many
+
+
 def load_map(progress=None) -> pygame.Surface:
     """The world map surface, generated once and cached as PNG."""
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -723,7 +731,9 @@ class WorldMapScreen:
         e = EVENT[key] if key in EVENT else _great_card(key)
         s.blit(self.dim, (0, 0))
         k = min(1.0, (self.time - self.event_t) / 0.45)
-        final = pygame.Rect(W // 2 - 110, TOP + 18, 220, 190)
+        body = len(wrap(e.text, 196)) + len(wrap(text if not getattr(e, "header", None)
+                                                   else text.split(". ", 1)[0] + ".", 196))
+        final = pygame.Rect(W // 2 - 110, TOP + 18, 220, min(H - TOP - 30, 48 + 7 * body + 15 + 16))
         if k < 1:                                          # the card arrives: grows with a little overshoot
             card = pygame.Surface(final.size)
             self._event_face(card, card.get_rect(), e, turn, text)
@@ -888,11 +898,20 @@ class WorldMapScreen:
             x += 4
         x = f.draw(s, f"ХОД {self.camp.turn}", x, 4, "#c0cbdc").right + 6
         from .events import EVENT
-        for key, left in self.camp.active.items():         # running world events
-            e = EVENT[key]
-            x = f.draw(s, f"{e.name} {left}Х.", x, 4, e.color).right + 6
+        tags = []                                          # own unrest first, then running world events
         if p and self.camp.realms[p].unrest:
-            x = f.draw(s, f"ШАТКИЙ ТРОН {self.camp.realms[p].unrest}Х.", x, 4, "#e43b44").right + 6
+            tags.append((f"СМУТА {self.camp.realms[p].unrest}Х.", "#e43b44"))
+        for key, left in self.camp.active.items():
+            e = EVENT[key]
+            tags.append((f"{e.name.split()[-1]} {left}Х.", e.color))   # short: СТУЖА, ЗАСУХА...
+        limit = self.buttons[0].rect.x - 4 if self.buttons else W
+        for i, (text, col) in enumerate(tags):
+            more = f"+{len(tags) - i}"
+            if x + text_width(text) > limit - (text_width(more) + 4 if i < len(tags) - 1 else 0):
+                if x + text_width(more) <= limit:
+                    f.draw(s, more, x, 4, "#c0cbdc")
+                break
+            x = f.draw(s, text, x, 4, col).right + 6
         for b in self.buttons:
             active = b.action == "diplomacy" and self.diplomacy
             s.blit(self.r.panel(b.rect.w, b.rect.h, base="#5a6988" if active else b.color, border="#8b9bb4"),
@@ -907,9 +926,13 @@ class WorldMapScreen:
             if hot:
                 pygame.draw.rect(s, _c(fac.color), (x, y + 2, cw - 3, BOTTOM - 4), 1)
             s.blit(self.shields[fac.key], (x + 2, y + 3))
-            f.draw(s, fac.short, x + 19, y + 4, fac.light)
+            name = fac.short
+            while text_width(name) > cw - 22 and len(name) > 3:   # never run into the next shield
+                name = name[:-1]
+            f.draw(s, name if name == fac.short else name + ".", x + 19, y + 4, fac.light)
             n = len(self.camp.cities_of(fac.key))
-            label = (f"{n} ГОР." if fac.playable else f"{n} ЛОГОВ") if n else "ПАЛА"
+            label = (f"{n} ГОР." if fac.playable else f"{n} {plural(n, 'ЛОГОВО', 'ЛОГОВА', 'ЛОГОВ')}") if n \
+                else "РАЗГРОМ"
             f.draw(s, label, x + 19, y + 12, "#8b9bb4" if n else "#e43b44")
 
     def _bar_faction(self, mx: int) -> Optional[str]:
@@ -935,8 +958,46 @@ class WorldMapScreen:
         c = CITY[self.selected]
         w = 166
         roads = wrap("ДОРОГИ: " + ", ".join(CITY[n].name for n in neighbors(c.key)), w - 10)
-        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 9 + 21 + 17 + 9
+        status = sum(len(wrap(t, w - 10)) for t, _ in self._city_status(c))
+        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 21 + 17 + 9 \
+            + 8 + 8 * status
         return pygame.Rect(W - w - 4, TOP + 3, w, h)
+
+    def _city_status(self, c: City) -> List[Tuple[str, str]]:
+        """The city's state, one line (wrapped) per topic: tax and order, defence and troubles, buildings."""
+        camp = self.camp
+        owner = camp.owner[c.key]
+        out = []
+        tax = f"ПОДАТЬ {camp.income_of(c.key, owner)}"
+        if c.key in camp.law and owner != "goblin":
+            law = camp.law[c.key]
+            tax += f"   ПОРЯДОК {law}/10" + ("   ВОРОВСКОЙ ПРИТОН" if c.key in camp.dens else "")
+            out.append((tax, "#fee761" if law >= 4 else "#f6757a"))
+        else:
+            out.append((tax, "#fee761"))
+        notes = [f"ЗАЩИТА {int(camp.defense_power(c.key))}"]
+        if c.key in camp.siege:
+            notes.append(f"В ОСАДЕ ({FACTION[camp.siege[c.key][0]].short})")
+        if c.key in camp.defense:
+            notes.append(f"ОБОРОНА x{camp.defense[c.key][0]:.2g}")
+        out.append(("   ".join(notes), "#8b9bb4"))
+        trouble = []
+        if c.key in camp.sick:
+            trouble.append(f"БОЛЕЗНЬ {camp.sick[c.key]} Х.")
+        if camp.ravaged.get(c.key):
+            trouble.append(f"РАЗОРЁН БОЯМИ {camp.ravaged[c.key]} Х.")
+        if trouble:
+            out.append(("   ".join(trouble), "#f6757a"))
+        from .buildings import BUILDINGS, slots
+        from .horde import GREAT, great_in
+        big = great_in(camp, c.key)
+        have = camp.buildings.get(c.key, [])
+        if big:                                          # the horde's great building outshines the rest
+            out.append((f"ВЕЛИКАЯ ПОСТРОЙКА: {GREAT[big].name}", GREAT[big].color))
+        else:
+            out.append(("ЗДАНИЯ: " + (", ".join(BUILDINGS[k].name for k in have) or "НЕТ")
+                        + f" ({len(have)}/{slots(c.key)})", "#feae34" if have else "#5a6988"))
+        return out
 
     PANEL_FACES = 9
 
@@ -948,6 +1009,8 @@ class WorldMapScreen:
         s.blit(self.shields[f.key], (r.x + 5, r.y + 5))
         font.draw(s, c.name, r.x + 24, r.y + 5, "#fee761")
         kind = KIND_NAMES[c.kind] + (" (СТОЛИЦА)" if c.key == f.capital and c.kind != "capital" else "")
+        if c.kind == "capital" and c.faction != f.key:
+            kind = "ЗАХВАЧЕННАЯ СТОЛИЦА"
         font.draw(s, f"{kind} - {f.short}", r.x + 24, r.y + 13, f.light)
         y = r.y + 25
         for line in wrap(c.desc, r.w - 10):
@@ -959,41 +1022,27 @@ class WorldMapScreen:
         for i in range(self.camp.max_prosperity(c.key)):
             pygame.draw.rect(s, INK, (r.x + 62 + i * 6, y, 5, 6))
             pygame.draw.rect(s, _c("#feae34") if i < pros else _c("#3a4466"), (r.x + 63 + i * 6, y + 1, 3, 4))
-        font.draw(s, f"ПОДАТЬ {self.camp.income_of(c.key, self.camp.owner[c.key])}", r.right - 5, y, "#fee761",
-                  anchor="topright")
         y += 8
-        notes = []
-        if c.key in self.camp.siege:
-            notes.append(f"В ОСАДЕ ({FACTION[self.camp.siege[c.key][0]].short})")
-        if c.key in self.camp.defense:
-            notes.append(f"ОБОРОНА x{self.camp.defense[c.key][0]:.2g}")
-        notes.append(f"ЗАЩИТА {int(self.camp.defense_power(c.key))}")
-        if c.key in self.camp.sick:
-            notes.append(f"БОЛЕЗНЬ {self.camp.sick[c.key]} Х.")
-        if self.camp.ravaged.get(c.key):
-            notes.append(f"РАЗОРЁН {self.camp.ravaged[c.key]} Х.")
-        if c.key in self.camp.law and self.camp.owner[c.key] != "goblin":
-            notes.append(f"ПОРЯДОК {self.camp.law[c.key]}" + (" ПРИТОН" if c.key in self.camp.dens else ""))
-        font.draw(s, "  ".join(notes), r.x + 5, y, "#8b9bb4")
-        y += 9
-        from .buildings import BUILDINGS, slots
-        from .horde import GREAT, great_in
-        have = self.camp.buildings.get(c.key, [])
-        big = great_in(self.camp, c.key)
-        if big:                                          # the horde's great building outshines the rest
-            font.draw(s, f"ВЕЛИКАЯ ПОСТРОЙКА: {GREAT[big].name}", r.x + 5, y, GREAT[big].color)
-        else:
-            font.draw(s, "ЗДАНИЯ: " + (", ".join(BUILDINGS[k].name for k in have) or "НЕТ")
-                      + f" ({len(have)}/{slots(c.key)})", r.x + 5, y, "#feae34" if have else "#5a6988")
-        y += 9
+        for text, col in self._city_status(c):
+            for line in wrap(text, r.w - 10):
+                font.draw(s, line, r.x + 5, y, col)
+                y += 8
         offs = self.camp.officers_in(c.key)
-        font.draw(s, f"ОФИЦЕРОВ: {len(offs)}   СВОБОДНЫХ ВОИНОВ: {len(self.camp.free[c.key])}", r.x + 5, y, "#a7f070")
-        y += 9
-        for i, o in enumerate(offs[:self.PANEL_FACES]):
-            self.cards.face(s, pygame.Rect(r.x + 6 + i * 17, y, 15, 18), o.key)
         hot = next((k for rect, k in self.cards.hits if rect.collidepoint(self._mouse)), None)
-        if hot:
-            font.draw(s, OFFICER[hot].name, r.right - 5, y + 5, "#ffffff", anchor="topright")
+        if hot and hot in [o.key for o in offs]:              # the hovered face's name, on its own line
+            font.draw(s, OFFICER[hot].name, r.x + 5, y, "#ffffff")
+        else:
+            font.draw(s, f"ОФИЦЕРОВ: {len(offs)}   СВОБОДНЫХ ВОИНОВ: {len(self.camp.free[c.key])}", r.x + 5, y,
+                      "#a7f070")
+        y += 9
+        shown = offs[:self.PANEL_FACES] if len(offs) <= self.PANEL_FACES else offs[:self.PANEL_FACES - 1]
+        for i, o in enumerate(shown):
+            self.cards.face(s, pygame.Rect(r.x + 6 + i * 17, y, 15, 18), o.key)
+        if len(offs) > len(shown):                            # the rest as "+N"
+            box = pygame.Rect(r.x + 6 + len(shown) * 17, y, 15, 18)
+            pygame.draw.rect(s, (38, 43, 68), box)
+            pygame.draw.rect(s, (90, 105, 136), box, 1)
+            font.draw(s, f"+{len(offs) - len(shown)}", box.centerx, box.centery, "#ffffff", anchor="center")
         y += 22
         font.draw(s, "НАЙМ В ГОРОДЕ:", r.x + 5, y, "#fee761")
         left = self.camp.muster.get(c.key, 0)
@@ -1047,12 +1096,15 @@ class WorldMapScreen:
         s.blit(self.r.panel(r.w, r.h, base="#181425", border=f.color), r.topleft)
         s.blit(self.big_shields[f.key], (r.x + 6, r.y + 6))
         font.draw(s, f.name, r.x + 42, r.y + 6, f.light)
-        font.draw(s, f"{'ЛИДЕР' if f.playable else 'ГЛАВАРЬ'}: {f.leader} - {f.leader_title}", r.x + 42, r.y + 15,
-                  "#ffffff")
-        cap = CITY[f.capital].name
-        n = len(cities_of(f.key))
-        font.draw(s, f"СТОЛИЦА: {cap}   ГОРОДОВ: {n}" if f.playable else f"ЛОГОВО БОССА: {cap}   ЛОГОВ: {n}",
-                  r.x + 42, r.y + 24, "#c0cbdc")
+        ruler = self.camp.leader.get(f.key)
+        alive = self.camp.realms[f.key].alive
+        who = (f"{OFFICER[ruler].name} - {OFFICER[ruler].title}" if ruler and alive else "ДЕРЖАВА ПАЛА")
+        font.draw(s, f"{'ПРАВИТЕЛЬ' if f.playable else 'ВОЖАК'}: {who}", r.x + 42, r.y + 15,
+                  "#ffffff" if alive else "#e43b44")
+        cap = CITY[f.capital].name + ("" if self.camp.owner[f.capital] == f.key else " (ПОТЕРЯНА)")
+        n = len(self.camp.cities_of(f.key))
+        font.draw(s, f"СТОЛИЦА: {cap}   ГОРОДОВ: {n}" if f.playable else
+                  f"ЛОГОВО БОССА: {cap}   {n} {plural(n, 'ЛОГОВО', 'ЛОГОВА', 'ЛОГОВ')}", r.x + 42, r.y + 24, "#c0cbdc")
         if not f.playable:
             font.draw(s, "НЕИГРОВАЯ ФРАКЦИЯ", r.x + 42, r.y + 33, "#e43b44")
         y = r.y + 44
@@ -1060,7 +1112,7 @@ class WorldMapScreen:
             font.draw(s, line, r.x + 6, y, "#c0cbdc")
             y += 7
         y += 4
-        font.draw(s, "ОСОБЕННОСТИ (БУДУТ В ПОШАГОВОМ РЕЖИМЕ):", r.x + 6, y, "#fee761")
+        font.draw(s, "ОСОБЕННОСТИ:", r.x + 6, y, "#fee761")
         y += 9
         for name, desc in f.mechanics:
             head = font.render(name, "#a7f070")
@@ -1263,7 +1315,9 @@ class WorldMapScreen:
             ok = ok and mine and camp.realms[p].ap >= 1
             s.blit(self.r.panel(btn.w, btn.h, base="#3e8948" if ok else "#3a4466",
                                 border="#a7f070" if ok else "#5a6988"), btn.topleft)
-            font.draw(s, "ПОСТРОИТЬ" if ok else (why[:16] if why else "НЕТ ОД"), btn.centerx, btn.centery,
+            short = {"НЕ ХВАТАЕТ ЗОЛОТА": "МАЛО ЗОЛОТА", "НЕТ МЕСТА ДЛЯ СТРОЙКИ": "НЕТ МЕСТА",
+                     "ЭТО НЕ ВАШ ГОРОД": "ЧУЖОЙ ГОРОД"}.get(why, why)
+            font.draw(s, "ПОСТРОИТЬ" if ok else (short if why else "НЕТ ОД"), btn.centerx, btn.centery,
                       "#ffffff" if ok else "#8b9bb4", anchor="center")
         block = sickness_block(camp, city)
         if block:

@@ -315,4 +315,4 @@ def buy_off(camp, faction: str, turns: int = BUY_OFF_TURNS, free: bool = False) 
         camp.earn(GOBLIN, price, "tribute")
         camp.stats["bought_off"][faction] += 1
     camp.paid[faction] = max(camp.paid.get(faction, 0), turns)
-    return f"орда не тронет вас {turns} х." + (f" (заплачено {price} золота)" if price else "")
+    return f"мир с ордой на {turns} х." + (f" (заплачено {price} золота)" if price else "")

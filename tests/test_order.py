@@ -138,5 +138,22 @@ class IntrigueTargetTest(unittest.TestCase):
         self.assertEqual(arrives(c, "aldern", "north"), 0.0)
 
 
+
+class CardFaceTest(unittest.TestCase):
+    def test_every_card_text_fits_its_face(self):
+        import os
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        from game.cardui import CARD_W
+        from game.cards import CARDS
+        from game.mapview import wrap
+        for k, c in CARDS.items():
+            self.assertLessEqual(len(wrap(c.text, CARD_W - 9)), 8, k)
+
+    def test_plural(self):
+        from game.mapview import plural
+        self.assertEqual([plural(n, "ЛОГОВО", "ЛОГОВА", "ЛОГОВ") for n in (1, 2, 5, 11, 21, 22)],
+                         ["ЛОГОВО", "ЛОГОВА", "ЛОГОВ", "ЛОГОВ", "ЛОГОВО", "ЛОГОВА"])
+
+
 if __name__ == "__main__":
     unittest.main()

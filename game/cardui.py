@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import pygame
 
+from pixelforge.text import text_width
+
 from .cardplay import MAX_GROUP, MULTI
 from .cards import CARDS, COUNCIL_SEATS, COURSES, KIND_NAMES, STATS, THRESHOLD_CARDS, THRESHOLDS, TIER_NAMES
 from .factions import CITY, FACTION
@@ -32,7 +34,7 @@ KIND_COLOR = {"economy": ("#c9a24a", "#4a3a14"), "military": ("#e43b44", "#4a141
 
 CITY_STEPS = {"own_city", "own_city_officers", "own_city_pair", "own_city_pair2", "dest_adj", "dest_2", "enemy_built",
               "dest_any", "dest_any_one", "enemy_adj", "enemy_adj_any", "enemy_reach", "enemy_port",
-              "enemy_city", "enemy_city_officers", "city_buyable"}
+              "enemy_city", "enemy_city_officers", "city_buyable", "enemy_town", "enemy_lair"}
 RIVAL_STEPS = {"rival", "rival_diplo", "rival_neighbor"}
 PROMPTS = {
     "own_city": "ВЫБЕРИТЕ СВОЙ ГОРОД", "own_city_officers": "ГОРОД, ОТКУДА ВЫСТУПАЮТ",
@@ -48,6 +50,7 @@ PROMPTS = {
     "rival": "КАКАЯ ДЕРЖАВА", "rival_diplo": "С КАКОЙ ДЕРЖАВОЙ", "rival_neighbor": "КАКОЙ СОСЕД",
     "hand_card": "КАКУЮ КАРТУ СЖЕЧЬ НАВСЕГДА", "city_buyable": "КАКОЙ ГОРОД КУПИТЬ",
     "building": "ЧТО ПОСТРОИТЬ", "enemy_built": "ГДЕ РУШИТЬ",
+    "enemy_town": "КАКОЙ ВРАЖЕСКИЙ ГОРОД", "enemy_lair": "КАКОЕ ЛОГОВО",
 }
 
 
@@ -147,8 +150,11 @@ class CardArt:
             pygame.draw.line(s, _c(hi), (x, band.bottom - 1 - (x * 7) % 5), (x, band.bottom - 1))
         s.blit(_icon(card.kind, hi), (band.centerx - 11, band.y + 2))
         self.font.draw(s, KIND_NAMES[card.kind], band.x + 2, band.bottom - 7, "#c0cbdc")
-        if card.gold:
-            self.font.draw(s, f"{card.gold}З", band.right - 2, band.y + 2, "#feae34", anchor="topright")
+        if card.gold:                                        # a coin and the price (a "З" read as a 3)
+            r = self.font.draw(s, str(card.gold), band.right - 2, band.y + 2, "#fee761", anchor="topright")
+            pygame.draw.circle(s, INK, (r.x - 5, r.y + 3), 4)
+            pygame.draw.circle(s, _c("#feae34"), (r.x - 5, r.y + 3), 3)
+            s.set_at((r.x - 6, r.y + 2), _c("#fee761"))
         # text
         y = 57
         for line in wrap(card.text, CARD_W - 9):
@@ -501,9 +507,17 @@ class CardTable:
         preview = None
         for rect, value in self._req_buttons(req):
             hot = rect.collidepoint(mouse)
-            if mine and value is not None:
-                img = self.art.full(value.key, "ОТВЕТ", self.player)
-                s.blit(pygame.transform.scale(img, (rect.w, rect.h)), rect.topleft)
+            if mine and value is not None:                 # a crisp little card: name and cost (preview at full size)
+                card = value.card
+                s.blit(self.ms.r.panel(rect.w, rect.h, base="#1c1830", border=TIER_COLOR[card.tier]), rect.topleft)
+                pygame.draw.circle(s, INK, (rect.x + 9, rect.y + 9), 6)
+                pygame.draw.circle(s, _c("#124e89") if card.cost else _c("#3a4466"), (rect.x + 9, rect.y + 9), 5)
+                self.font.draw(s, str(card.cost), rect.x + 9, rect.y + 9, "#ffffff", anchor="center")
+                from .mapview import wrap
+                for i, line in enumerate(wrap(card.name, rect.w - 8)[:3]):
+                    self.font.draw(s, line, rect.centerx, rect.y + 20 + i * 8, "#fee761", anchor="midtop")
+                s.blit(_icon(card.kind, KIND_COLOR[card.kind][0]), (rect.centerx - 11, rect.y + 48))
+                self.font.draw(s, "ОТВЕТ", rect.centerx, rect.bottom - 11, "#8b9bb4", anchor="midtop")
                 if hot or preview is None:
                     preview = value
                 if hot:
@@ -665,8 +679,12 @@ class CardTable:
         if self.player is None:
             self._spectator_bar(s)
             return
-        if not self.camp.realms[self.player].alive:
-            self.font.draw(s, "ВАША ДЕРЖАВА ПАЛА", W // 2, H // 2, "#e43b44", scale=2, anchor="center")
+        if not self.camp.realms[self.player].alive:          # a plaque above the hand area, the world goes on
+            pr = pygame.Rect(W // 2 - 110, H - 22 - 44, 220, 36)
+            s.blit(self.ms.r.panel(pr.w, pr.h, base="#181425", border="#e43b44"), pr.topleft)
+            self.font.draw(s, "ВАША ДЕРЖАВА ПАЛА", pr.centerx, pr.y + 5, "#e43b44", scale=2, anchor="midtop")
+            self.font.draw(s, "МИР ЖИВЁТ ДАЛЬШЕ - СЛЕДИТЕ ЗА ХРОНИКОЙ", pr.centerx, pr.y + 24, "#c0cbdc",
+                           anchor="midtop")
             return
         r = self.camp.realms[self.player]
         self._piles(s)
@@ -747,10 +765,13 @@ class CardTable:
         self.font.draw(s, "КОНЕЦ ХОДА (E)" if mine else "ЖДЁМ...", er.centerx, er.centery, "#ffffff", anchor="center")
         n = self.camp.reserve(r.council)
         info = f"РУКА {len(r.hand)}/{self.camp.hand_size(r.council)}  КОЛОДА {len(r.draw)}  СБРОС {len(r.discard)}"
-        self.font.draw(s, info, er.right, er.y - 8, "#8b9bb4", anchor="topright")
+        keep = f"ПКМ ПО КАРТЕ - ОСТАВИТЬ ({len(r.keep)}/{n})" if n else ""
+        wide = max(text_width(info), text_width(keep)) + 6
+        plate = pygame.Rect(er.right - wide, er.y - (18 if n else 10), wide, 18 if n else 10)
+        s.blit(self.ms.r.panel(plate.w, plate.h, base="#181425", border="#3a4466"), plate.topleft)
+        self.font.draw(s, info, er.right - 3, er.y - 8, "#8b9bb4", anchor="topright")
         if n:
-            self.font.draw(s, f"ПКМ ПО КАРТЕ - ОСТАВИТЬ ({len(r.keep)}/{n})", er.right, er.y - 16, "#63c74d",
-                           anchor="topright")
+            self.font.draw(s, keep, er.right - 3, er.y - 16, "#63c74d", anchor="topright")
         if self.play and not self.picker:
             self._prompt(s)
 
@@ -860,7 +881,12 @@ class CardTable:
         font = self.font
         card = self.play["inst"].card
         s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#fee761"), r.topleft)
-        font.draw(s, f"{card.name}: {PROMPTS.get(p['step'], '')}", r.x + 6, r.y + 6, "#fee761")
+        chosen = self.play["chosen"]
+        where = f" - {CITY[chosen[0]].name}" if chosen and isinstance(chosen[0], str) and chosen[0] in CITY else ""
+        font.draw(s, f"{card.name}{where}: {PROMPTS.get(p['step'], '')}", r.x + 6, r.y + 6, "#fee761")
+        ruler = self.camp.leader.get(self.player)
+        if p["step"] in ("attackers", "attackers_far", "attackers_port") and ruler in p["options"]:
+            font.draw(s, "ПРАВИТЕЛЬ РИСКУЕТ ЖИЗНЬЮ В ШТУРМЕ", r.right - 6, r.y + 6, "#f6757a", anchor="topright")
         s.blit(self.art.full(card.key, "", self.player), (r.x - CARD_W - 6, r.y))
         camp = self.camp
         for i, opt in enumerate(p["options"][p["scroll"]:p["scroll"] + self.ROWS]):
@@ -882,7 +908,11 @@ class CardTable:
                 from .buildings import BUILDINGS
                 b = BUILDINGS[opt]
                 font.draw(s, b.name, row.x + 4, row.y + 2, "#fee761")
-                font.draw(s, f"{b.cost // 2} ЗОЛ. (ПОЛЦЕНЫ)   " + b.text[:44], row.x + 4, row.y + 10, "#8b9bb4")
+                from .mapview import wrap
+                tail = wrap(b.text, row.w - 8 - text_width(f"{b.cost // 2} ЗОЛ. (ПОЛЦЕНЫ)   "))
+                more = "..." if len(tail) > 1 else ""
+                font.draw(s, f"{b.cost // 2} ЗОЛ. (ПОЛЦЕНЫ)   " + tail[0] + more, row.x + 4, row.y + 10, "#8b9bb4")
+
             elif p["step"] in RIVAL_STEPS:
                 fac = FACTION[opt]
                 s.blit(self.ms.shields[opt], (row.x + 2, row.y + 1))
@@ -1274,7 +1304,10 @@ class CardTable:
         else:
             rows = self._deck_rows()
             total = sum(n for _, n, _ in rows)
-            font.draw(s, f"ВСЕГО {total}", r.right - 6, r.y + 18, "#8b9bb4", anchor="topright")
+            shown = f"{self.council_scroll + 1}-{min(len(rows), self.council_scroll + self.CROWS)} ИЗ {len(rows)}, " \
+                if len(rows) > self.CROWS else ""
+            font.draw(s, f"{shown}ВСЕГО КАРТ {total}", r.right - 6, r.y + 18 + 12 + self.CROWS * 19, "#5a6988",
+                      anchor="topright")
             for i, (key, n, origin) in enumerate(rows[self.council_scroll:self.council_scroll + self.CROWS]):
                 row = self._cand_rect(i)
                 hot = row.collidepoint(mouse)

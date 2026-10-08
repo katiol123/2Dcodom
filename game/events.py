@@ -80,7 +80,7 @@ def _plague(camp):
             _cull(camp, city, 0.6 if d == 0 else 0.4 if d == 1 else 0.25)
         hit[owner] = hit.get(owner, 0) + 1
     worst = max(hit, key=hit.get)
-    return (f"мор вспыхнул в {CITY[origin].name} и прошёл по {len(reach)} городам: процветание упало, "
+    return (f"мор вспыхнул в городе {CITY[origin].name} и прошёл по {len(reach)} городам: процветание упало, "
             f"гарнизоны поредели (нежить Пепла не болеет)", worst)
 
 
@@ -146,7 +146,7 @@ def _gold_rush(camp):
     camp.recruit(city, 220)                                   # the miners take up arms
     for n in {camp.owner[x] for x in neighbors(city)} - {f, "goblin"}:
         camp.change_relation(f, n, -6)                        # the neighbours grow envious
-    return (f"жила в {CITY[city].name}: процветание 10, казна {FACTION[f].short} +600, рудокопы взялись "
+    return (f"жила в городе {CITY[city].name}: процветание 10, казна державы {FACTION[f].short} +600, рудокопы взялись "
             f"за оружие; соседи завидуют"), f
 
 
@@ -175,8 +175,8 @@ def _revolt(camp):
         for city in sorted(camp.cities_of(f), key=lambda c: camp.prosperity[c])[:3]:
             camp.prosperity[city] = max(1, camp.prosperity[city] - 2)
             _cull(camp, city, 0.3)
-        return f"бунт в землях {FACTION[f].short}: три города разорены, гарнизоны разбежались", f
-    return f"покорённые земли {FACTION[f].short} восстали: " + ", ".join(done), f
+        return f"бунт в землях державы {FACTION[f].short}: три города разорены, гарнизоны разбежались", f
+    return f"покорённые земли державы {FACTION[f].short} восстали: " + ", ".join(done), f
 
 
 def _omen(camp):
@@ -201,7 +201,7 @@ def _prophet(camp):
     for i, a in enumerate(others):
         for b in others[i + 1:]:
             camp.change_relation(a, b, 10)
-    return (f"пророк зовёт все державы против {FACTION[f].short}: клятвы им расторгнуты, отношения с ними -25, "
+    return (f"пророк зовёт все державы против державы {FACTION[f].short}: клятвы им расторгнуты, отношения с ними -25, "
             f"между прочими +10"), f
 
 

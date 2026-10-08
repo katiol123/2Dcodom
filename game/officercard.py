@@ -188,7 +188,7 @@ class OfficerCard:
         if dead:
             pass
         elif self.camp.is_leader(o.key):
-            font.draw(s, "ВЛАСТЬ НЕ ОСПАРИВАЕТ", pr.centerx, pr.bottom + 23, "#8b9bb4", anchor="midtop")
+            font.draw(s, "ПРАВИТЕЛЬ ДЕРЖАВЫ", pr.centerx, pr.bottom + 23, "#8b9bb4", anchor="midtop")
         else:
             font.draw(s, f"ВЕРНОСТЬ {loy}", pr.centerx, pr.bottom + 23, "#63c74d" if loy >= 60 else "#feae34"
                       if loy >= 35 else "#e43b44", anchor="midtop")
