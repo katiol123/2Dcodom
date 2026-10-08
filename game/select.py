@@ -372,13 +372,14 @@ class SelectScreen:
                 s.blit(self.art.full(card.key, "ЛИДЕР", c.key), (col - CARD_W - 8, r.y - CARD_H + 60))
             if why:                                        # the reason, in a box above the panel
                 lines = wrap(why[1], 250)
-                box = pygame.Rect(col - 120, r.y - 14 - 7 * len(lines), 258, 12 + 7 * len(lines))
+                h = 14 + 7 * len(lines)                    # right by the hovered row, over the lore
+                box = pygame.Rect(max(2, col - 262), max(2, self._mouse[1] - h - 4), 258, h)
                 s.blit(self.r.panel(box.w, box.h, base="#181425", border=why[2]), box.topleft)
                 font.draw(s, why[0], box.x + 4, box.y + 3, why[2])
                 for i, line in enumerate(lines):
                     font.draw(s, line, box.x + 4, box.y + 11 + i * 7, "#e6dfd0")
         blink = int(self.time * 2) % 2 == 0
-        who = "ЗА " + f.short if c else "В РЕЖИМЕ ЗРИТЕЛЯ"
-        hint = f"КЛИК ПО ЗНАМЕНИ ИЛИ ENTER - НАЧАТЬ {who}" if self.chosen is None else "В ПУТЬ!"
+        who = ": " + f.short if c else " В РЕЖИМЕ ЗРИТЕЛЯ"
+        hint = f"КЛИК ПО ЗНАМЕНИ ИЛИ ENTER - НАЧАТЬ{who}" if self.chosen is None else "В ПУТЬ!"
         font.draw(s, hint, r.centerx, r.bottom - 10, "#fee761" if blink or self.chosen is not None else "#feae34",
                   anchor="midtop")

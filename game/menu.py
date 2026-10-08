@@ -57,6 +57,8 @@ def preview_box(rend, look: str, boxes: dict) -> pygame.Rect:
 
 def info_wrap(text: str, y0: int, preview_bottom: int, narrow: int, wide: int = INFO_WRAP) -> List[str]:
     """Word wrap where lines beside the preview are shorter; continuation lines indented."""
+    import re
+    text = re.sub(r" (\S{1,2})(?= |$)", "\u00a0\\1", text)   # "2.5 С": a short tail never starts a line
     words, lines, cur, y = text.split(" "), [], "", y0
     for wd in words:
         limit = narrow if y < preview_bottom else wide
@@ -69,14 +71,16 @@ def info_wrap(text: str, y0: int, preview_bottom: int, narrow: int, wide: int = 
             cur = cand
     if cur:
         lines.append(cur)
-    return lines
+    return [ln.replace("\u00a0", " ") for ln in lines]
 
 
 def draw_unit_info(s: pygame.Surface, rend, f, key: str, x: int, y: int, w: int, h: int, active: int, time: float,
                    boxes: dict) -> Tuple[int, int]:
     """Name, stats, price, an animated preview and the traits of a unit class in the box (x, y, w, h)."""
     u = ROSTER[key]
-    f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2 if len(u.name) <= 13 else 1)
+    from .mapview import text_width
+    big = text_width(u.name) * 2 <= w - 70                # beside the preview
+    f.draw(s, u.name, x + 6, y + 4 if big else y + 7, "#fee761", scale=2 if big else 1)
     f.draw(s, f"{u.role}   {TIER_NAMES[u.tier]}", x + 6, y + 18, "#8b9bb4")
     lo, hi = u.damage
     dtype = {"physical": "", "magic": " МАГ", "holy": " СВЯТ"}[u.damage_type]

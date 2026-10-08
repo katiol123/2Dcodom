@@ -61,6 +61,14 @@ def count(camp, city: str, key: str) -> int:
     return 1 if key in camp.buildings.get(city, ()) else 0
 
 
+MASONS = {"highland": 0.7}       # МАСТЕРА КАМНЯ: the highlanders build for less
+
+
+def price_for(faction: str, cost: int) -> int:
+    """What a building (or half of it, for a card) costs this faction."""
+    return int(round(cost * MASONS.get(faction, 1.0)))
+
+
 def can_build(camp, faction: str, city: str, key: str, price: int = None) -> Tuple[bool, str]:
     if camp.owner.get(city) != faction:
         return False, "ЭТО НЕ ВАШ ГОРОД"
@@ -69,15 +77,16 @@ def can_build(camp, faction: str, city: str, key: str, price: int = None) -> Tup
         return False, "УЖЕ ПОСТРОЕНО"
     if len(have) >= slots(city):
         return False, "НЕТ МЕСТА ДЛЯ СТРОЙКИ"
-    price = BUILDINGS[key].cost if price is None else price
+    price = price_for(faction, BUILDINGS[key].cost if price is None else price)
     if camp.gold[faction] < price:
         return False, "НЕ ХВАТАЕТ ЗОЛОТА"
     return True, ""
 
 
 def build(camp, faction: str, city: str, key: str, price: int = None, ap: int = 1) -> Tuple[bool, str]:
-    price = BUILDINGS[key].cost if price is None else price
-    ok, why = can_build(camp, faction, city, key, price)
+    base = BUILDINGS[key].cost if price is None else price
+    price = price_for(faction, base)
+    ok, why = can_build(camp, faction, city, key, base)
     if not ok:
         return False, why
     r = camp.realms[faction]
@@ -145,11 +154,12 @@ def ai_build(camp, faction: str, reserve: float) -> None:
                     for n in neighbors(city))
         for key in ORDER:
             b = BUILDINGS[key]
-            if key in have or camp.gold[faction] < b.cost + reserve + margin:
+            cost = price_for(faction, b.cost)
+            if key in have or camp.gold[faction] < cost + reserve + margin:
                 continue
             v = _ai_value(camp, faction, city, key, front)
-            if v > 0 and (best is None or v / b.cost > best[0]):
-                best = (v / b.cost, city, key)
+            if v > 0 and (best is None or v / cost > best[0]):
+                best = (v / cost, city, key)
     if best and best[0] > 0.9:
         build(camp, faction, best[1], best[2])
 

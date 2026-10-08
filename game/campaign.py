@@ -27,6 +27,7 @@ from .factions import ALL_FACTIONS, CITIES, CITY, FACTION, PROSPERITY, City, nei
 from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, STATS, Officer
 from .units import ROSTER
 
+LOOT_PER_PROSPERITY = 25        # the North's ДОБЫЧА: gold for every point of a stormed city's prosperity
 START_GOLD = {"league": 700, "sultanate": 650, "goblin": 250}
 DEFAULT_GOLD = 450
 START_SQUAD = (0.25, 0.4)       # starting squads: this share of the officer's leadership
@@ -1331,6 +1332,8 @@ class Campaign:
         from .buildings import RUIN_CAPTURE, ruin
         ruin(self, city, 1.0 if faction == "goblin" else RUIN_CAPTURE,     # goblins keep nothing people built
              "город взят штурмом", all_of_them=True)
+        if faction == "north":                                   # ДОБЫЧА: the longships carry the city's wealth home
+            self.earn(faction, LOOT_PER_PROSPERITY * self.prosperity[city], "loot")
         self.handover(city, faction)
         self.prosperity[city] = max(1, self.prosperity[city] - 1)
         self.stats["captured"][faction] += 1

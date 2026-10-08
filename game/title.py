@@ -26,12 +26,8 @@ class TitleScreen:
         self.r = renderer
         self.font = renderer.font
         world = load_map(progress)
-        k = 2
-        import numpy as np
-        arr = pygame.surfarray.array3d(world)
-        w, h = arr.shape[0] // k, arr.shape[1] // k
-        a = arr[:w * k, :h * k].reshape(w, k, h, k, 3).mean(axis=(1, 3)).astype(np.uint8)
-        self.bg = pygame.surfarray.make_surface(a).convert()
+        arr = pygame.surfarray.array3d(world)[::2, ::2]     # nearest pixels: the backdrop stays crisp
+        self.bg = pygame.surfarray.make_surface(arr).convert()
         self.shade = pygame.Surface((W, H), pygame.SRCALPHA)
         self.shade.fill((16, 12, 26, 170))
         self.shields = [shield_surface(f, 2) for f in FACTIONS]
@@ -46,6 +42,7 @@ class TitleScreen:
         self.time = 0.0
         self.result: Optional[str] = None
         self.picked: Optional[int] = None
+        self.confirm = False                              # НАЧАТЬ over a saved campaign asks first
         self.picked_at = 0.0
         rng = random.Random(11)
         self.embers = [[rng.uniform(0, W), rng.uniform(0, H), rng.uniform(6, 18), rng.uniform(0, 6.3)]
@@ -53,7 +50,10 @@ class TitleScreen:
 
     def _rect(self, i: int) -> pygame.Rect:
         y0 = 112
-        return pygame.Rect((W - BTN_W) // 2, y0 + i * (BTN_H + BTN_GAP), BTN_W, BTN_H)
+        return pygame.Rect((W - BTN_W) // 2, y0 + i * (BTN_H + BTN_GAP) + (8 if i >= 2 else 0), BTN_W, BTN_H)
+
+    def _yes_no(self) -> Tuple[pygame.Rect, pygame.Rect]:
+        return pygame.Rect(W // 2 - 64, 172, 56, 15), pygame.Rect(W // 2 + 8, 172, 56, 15)
 
     def _at(self, mx: int, my: int) -> Optional[int]:
         for i in range(len(self.items)):
@@ -66,6 +66,18 @@ class TitleScreen:
         if self.picked is not None:
             return None
         n = len(self.items)
+        if self.confirm:
+            yes, no = self._yes_no()
+            if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_RETURN, pygame.K_y):
+                self._pick(0, sure=True)
+            elif ev.type == pygame.KEYDOWN and ev.key in (pygame.K_ESCAPE, pygame.K_n):
+                self.confirm = False
+            elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                if yes.collidepoint(mouse):
+                    self._pick(0, sure=True)
+                elif no.collidepoint(mouse):
+                    self.confirm = False
+            return None
         if ev.type == pygame.KEYDOWN:
             if ev.key == pygame.K_ESCAPE:
                 return "quit"
@@ -83,16 +95,20 @@ class TitleScreen:
                 self._pick(i)
         return None
 
-    def _pick(self, i: int) -> None:
+    def _pick(self, i: int, sure: bool = False) -> None:
         if not self.items[i][2]:
             return
         from .audio import ui
         ui("click")
+        if i == 0 and self.saved is not None and not sure:
+            self.confirm = True
+            return
+        self.confirm = False
         self.picked, self.picked_at, self.focus = i, self.time, i
 
     def update(self, dt: float, mouse: Tuple[int, int]) -> None:
         self.time += dt
-        if self.picked is None:
+        if self.picked is None and not self.confirm:
             self.hover = self._at(*mouse)
             if self.hover is not None and self.items[self.hover][2]:
                 self.focus = self.hover
@@ -134,7 +150,7 @@ class TitleScreen:
         x0 = (W - len(self.shields) * (sw + gap) + gap) // 2
         for i, sh in enumerate(self.shields):
             bob = int(round(math.sin(self.time * 1.2 + i * 0.8) * 1.5))
-            s.blit(sh, (x0 + i * (sw + gap), H - sh.get_height() - 22 + bob))
+            s.blit(sh, (x0 + i * (sw + gap), H - sh.get_height() - 15 + bob))
         # the buttons
         for i, (label, _, ok) in enumerate(self.items):
             self._button(s, i, label, ok)
@@ -142,6 +158,8 @@ class TitleScreen:
             r = self._rect(1)
             self.font.draw(s, saves.describe(self.saved), W // 2, r.bottom + 1, "#8b9bb4", anchor="midtop")
         self.font.draw(s, "ESC - ВЫХОД   F - ВО ВЕСЬ ЭКРАН", W // 2, H - 9, "#5a6988", anchor="midtop")
+        if self.confirm:
+            self._confirm(s)
         if self.picked is not None:                          # a short fade before the next screen
             a = int(255 * min(1.0, (self.time - self.picked_at) / 0.35))
             veil = pygame.Surface((W, H))
@@ -169,3 +187,17 @@ class TitleScreen:
                 pygame.draw.polygon(s, gold, pts)
         self.font.draw(s, label, r.centerx, r.centery + 1, "#ffffff" if ok else "#5a6988", scale=2,
                        anchor="center")
+
+    def _confirm(self, s: pygame.Surface) -> None:
+        s.blit(self.shade, (0, 0))
+        box = pygame.Rect(W // 2 - 120, 120, 240, 74)
+        s.blit(self.r.panel(box.w, box.h, base="#181425", border="#e43b44"), box.topleft)
+        self.font.draw(s, "НАЧАТЬ НОВУЮ КАМПАНИЮ?", box.centerx, box.y + 7, "#fee761", scale=2, anchor="midtop")
+        self.font.draw(s, f"СОХРАНЁННАЯ ({saves.describe(self.saved)})", box.centerx, box.y + 26, "#c0cbdc",
+                       anchor="midtop")
+        self.font.draw(s, "БУДЕТ ПЕРЕЗАПИСАНА", box.centerx, box.y + 34, "#f6757a", anchor="midtop")
+        for rect, label, col in zip(self._yes_no(), ("ДА", "НЕТ"), ("#a22633", "#3a4466")):
+            pygame.draw.rect(s, INK, rect.inflate(2, 2))
+            pygame.draw.rect(s, _c(col), rect)
+            pygame.draw.line(s, _c("#8b9bb4"), rect.topleft, (rect.right - 1, rect.top))
+            self.font.draw(s, label, rect.centerx, rect.centery + 1, "#ffffff", anchor="center")

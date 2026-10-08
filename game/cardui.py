@@ -455,10 +455,12 @@ class CardTable:
 
     # --- requests from a running action: watch a battle? answer a storm? ------------------------
     def _req_rect(self) -> pygame.Rect:
+        from .mapview import TOP
         if self.ms.focus is not None:                     # a storm on the map: the question sits beside the city
             req = self.ms.runner.request
             h = 66 if req and req["kind"] == "ask" else 180
-            return pygame.Rect(W - 326, 36, 320, h)
+            x = 6 if self.ms.focus.get("left") else W - 326
+            return pygame.Rect(x, TOP + 34, 320, h)           # under the battle's banner
         return pygame.Rect(W // 2 - 160, 36, 320, 180)
 
     def _req_buttons(self, req) -> List[Tuple[pygame.Rect, object]]:
@@ -931,9 +933,11 @@ class CardTable:
                 b = BUILDINGS[opt]
                 font.draw(s, b.name, row.x + 4, row.y + 2, "#fee761")
                 from .mapview import wrap
-                tail = wrap(b.text, row.w - 8 - text_width(f"{b.cost // 2} ЗОЛ. (ПОЛЦЕНЫ)   "))
+                from .buildings import price_for
+                cost = f"{price_for(self.player, b.cost // 2)} ЗОЛ. (ПОЛЦЕНЫ)   "
+                tail = wrap(b.text, row.w - 8 - text_width(cost))
                 more = "..." if len(tail) > 1 else ""
-                font.draw(s, f"{b.cost // 2} ЗОЛ. (ПОЛЦЕНЫ)   " + tail[0] + more, row.x + 4, row.y + 10, "#8b9bb4")
+                font.draw(s, cost + tail[0] + more, row.x + 4, row.y + 10, "#8b9bb4")
 
             elif p["step"] in RIVAL_STEPS:
                 fac = FACTION[opt]
@@ -1250,13 +1254,18 @@ class CardTable:
         if without is not None:
             comp2 = self.camp.competence(without)
             col = "#f6757a" if comp2 < comp else "#a7f070" if comp2 > comp else "#fee761"
-            font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} -> {comp2} ПОРОГОВ", r.x + 6, y, col)
+            from .mapview import plural
+            font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} -> {comp2} {plural(comp2, 'ПОРОГ', 'ПОРОГА', 'ПОРОГОВ')}",
+                      r.x + 6, y, col)
             lost = [k for k in self.camp.thresholds(council) if k not in self.camp.thresholds(without)]
             gone = ", ".join(CARDS[k].name for k in lost) or "ничего"
-            xtip = f"БЕЗ НЕГО: РУКА {self.camp.hand_size(without)}, ОСТАВИТЬ {self.camp.reserve(without)}; " \
+            him = "НЕЁ" if OFFICER[[k for k in council if k not in without][0]].female else "НЕГО"
+            xtip = f"БЕЗ {him}: РУКА {self.camp.hand_size(without)}, ОСТАВИТЬ {self.camp.reserve(without)}; " \
                   f"УЙДУТ ПОРОГОВЫЕ КАРТЫ: {gone}"
         else:
-            font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} ПОРОГОВ ИЗ 12", r.x + 6, y, "#fee761")
+            from .mapview import plural
+            font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} {plural(comp, 'ПОРОГ', 'ПОРОГА', 'ПОРОГОВ')} ИЗ 12", r.x + 6, y,
+                      "#fee761")
         perks = [f"РУКА {self.camp.hand_size(council)} КАРТ"]
         n = self.camp.reserve(council)
         perks.append(f"МОЖНО ОСТАВИТЬ {n}" if n else "КАРТЫ НЕ ОСТАЮТСЯ")
@@ -1272,7 +1281,7 @@ class CardTable:
         hot = cb.collidepoint(mouse)
         realm = self.camp.realms[self.player]
         s.blit(self.ms.r.panel(cb.w, cb.h, base="#5a6988" if hot else "#3a2a10", border="#fee761"), cb.topleft)
-        cd = f", ЗАМОК {realm.course_cd} Х." if realm.course_cd else ""
+        cd = f", ЗАКРЕПЛЁН ЕЩЁ {realm.course_cd} Х." if realm.course_cd else ""
         font.draw(s, f"КУРС: {COURSES[realm.course].name}{cd}", cb.centerx, cb.centery, "#fee761", anchor="center")
         from .succession import contenders, heir_score
         heirs = contenders(self.camp, self.player)[:3]
@@ -1359,8 +1368,16 @@ class CardTable:
                 if hot:
                     self.hover_card = (key, origin_label(origin))
         text, colr, until = self.ms.toast
-        tip = tip or xtip
-        if tip:
+        if xtip and not tip:                               # over the perks and the course, under the competence
+            from .mapview import wrap
+            cb = self._course_button()
+            y0 = r.y + 18 + COUNCIL_SEATS * 31 + 12
+            lines = wrap(xtip, cb.w - 6)[:4]
+            box = pygame.Rect(cb.x - 1, y0 - 2, cb.w + 2, max(cb.bottom - y0 + 3, 8 * len(lines) + 3))
+            s.blit(self.ms.r.panel(box.w, box.h, base="#181425", border="#a22633"), box.topleft)
+            for j, line in enumerate(lines):
+                font.draw(s, line, box.x + 4, box.y + 2 + 8 * j, "#c0cbdc")
+        elif tip:
             font.draw(s, tip[:120], r.centerx, r.bottom - 10, "#c0cbdc", anchor="midtop")
         elif heir_tip:
             font.draw(s, heir_tip, r.centerx, r.bottom - 10, "#fee761", anchor="midtop")
