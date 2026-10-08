@@ -184,6 +184,7 @@ class CardTable:
         self.chronicle_open = False
         self.chron_scroll = 0
         self.chron_from = 0
+        self.arrows_from = 0                            # storms shown as arrows on the map
         self.council_seat: Optional[int] = None
         self.council_tab = "officers"
         self.council_scroll = 0
@@ -359,6 +360,7 @@ class CardTable:
             return
         self.cancel()
         self.chron_from = len(self.camp.log)
+        self.arrows_from = len(self.camp.attacks)
 
         def turn():
             self.camp.end_turn()
@@ -368,6 +370,7 @@ class CardTable:
     def next_round(self) -> None:
         """Spectator: every realm plays once."""
         self.chron_from = len(self.camp.log)
+        self.arrows_from = len(self.camp.attacks)
         self.ms.run(lambda: self.camp.run_ai(stop_at_player=False, max_turns=1), ("round", ""))
 
     def finished(self, what, result) -> None:
@@ -390,6 +393,9 @@ class CardTable:
 
     def _req_buttons(self, req) -> List[Tuple[pygame.Rect, object]]:
         r = self._req_rect()
+        if req["kind"] == "diplo":
+            return [(pygame.Rect(r.x + 40, r.bottom - 22, 110, 15), True),
+                    (pygame.Rect(r.right - 150, r.bottom - 22, 110, 15), False)]
         if req["kind"] == "ask":
             labels = [("СМОТРЕТЬ БОЙ", "watch"), ("РАССЧИТАТЬ", "calc"), ("ВСЕГДА СЧИТАТЬ", "never")]
             return [(pygame.Rect(r.x + 8 + i * 102, r.bottom - 22, 98, 15), v) for i, (_, v) in enumerate(labels)]
@@ -403,7 +409,7 @@ class CardTable:
             return
         mx, my = mouse
         if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
-            self.ms.runner.reply("calc" if req["kind"] == "ask" else None)
+            self.ms.runner.reply("calc" if req["kind"] == "ask" else False if req["kind"] == "diplo" else None)
             return
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             for rect, value in self._req_buttons(req):
@@ -415,6 +421,8 @@ class CardTable:
         req = self.ms.runner.request
         if not req or req["kind"] == "battle":
             return
+        if req["kind"] == "diplo":
+            return self._draw_diplo(s, req)
         b = req["battle"]
         camp = self.camp
         font = self.font
@@ -454,6 +462,40 @@ class CardTable:
             font.draw(s, "КЛИК ПО КАРТЕ - ОТВЕТИТЬ ЕЮ", r.x + 8, r.bottom - 32, "#8b9bb4")
             if preview is not None:
                 s.blit(self.art.full(preview.key, "ОТВЕТ", self.player), (r.right - CARD_W - 8, r.y + 40))
+
+    def _draw_diplo(self, s: pygame.Surface, req) -> None:
+        """A realm's envoys: their offer and what they say for it; accept or refuse."""
+        from .diplomacy import KIND_NAMES, TRUCE_TURNS, ALLIANCE_TURNS, for_recipient, tier
+        font = self.font
+        r = self._req_rect()
+        frm = FACTION[req["from"]]
+        s.blit(self.ms.dim, (0, 0))
+        s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border=frm.color), r.topleft)
+        s.blit(self.ms.shields[frm.key], (r.x + 8, r.y + 6))
+        font.draw(s, f"ПОСЛЫ: {frm.name}", r.x + 26, r.y + 6, frm.light)
+        kind = req["treaty"]
+        what = {"truce": f"МИР НА {TRUCE_TURNS} Х.: НИКТО НЕ НАПАДАЕТ",
+                "alliance": f"СОЮЗ НА {ALLIANCE_TURNS} Х.: МИР, ПОМОЩЬ ОТРЯДАМИ В БОЯХ ДРУГ ДРУГА",
+                "trade": "ТОРГОВЛЯ НА 8 Х.: ЗОЛОТО ОБЕИМ СТОРОНАМ КАЖДЫЙ ХОД"}[kind]
+        font.draw(s, f"ПРЕДЛАГАЮТ: {KIND_NAMES[kind]}", r.x + 26, r.y + 15, "#fee761")
+        font.draw(s, what, r.x + 8, r.y + 27, "#ffffff")
+        v = self.camp.relation(self.player, frm.key)
+        _, name, col = tier(v)
+        font.draw(s, f"ВАШИ ОТНОШЕНИЯ: {v} ({name}), ГОРОДОВ У НИХ {len(self.camp.cities_of(frm.key))}, "
+                     f"АРМИЯ {self.camp.army(frm.key)}", r.x + 8, r.y + 36, col)
+        font.draw(s, "ЧТО ГОВОРЯТ ВАШИ СОВЕТНИКИ (+ ЗА, - ПРОТИВ):", r.x + 8, r.y + 48, "#8b9bb4")
+        y = r.y + 57
+        for text, val in sorted(for_recipient(req["reasons"]), key=lambda t: -abs(t[1]))[:9]:
+            font.draw(s, f"{val:+d}", r.x + 24, y, "#63c74d" if val > 0 else "#e43b44", anchor="topright")
+            font.draw(s, text, r.x + 28, y, "#c0cbdc")
+            y += 7
+        font.draw(s, "ОТКАЗ НЕМНОГО ЗАДЕНЕТ ИХ (ОТНОШЕНИЯ -2)", r.centerx, r.bottom - 32, "#5a6988", anchor="midtop")
+        mouse = self.ms._mouse
+        for rect, value in self._req_buttons(req):
+            hot = rect.collidepoint(mouse)
+            base = "#3e8948" if value else "#a22633"
+            s.blit(self.ms.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
+            font.draw(s, "ПРИНЯТЬ" if value else "ОТКАЗАТЬ", rect.centerx, rect.centery, "#ffffff", anchor="center")
 
     def update(self, dt: float, mouse) -> None:
         mx, my = mouse

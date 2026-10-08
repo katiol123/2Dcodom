@@ -95,6 +95,8 @@ class Battle:
     att: List[Tuple[str, "Troop"]] = field(default_factory=list)
     deff: List[Tuple[Optional[str], "Troop"]] = field(default_factory=list)
     militia: int = 0
+    aux: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))   # allied detachments
+    helpers: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))
     a: float = 0.0
     d: float = 0.0
     p: float = 0.0
@@ -138,6 +140,17 @@ class Campaign:
         self.muster: Dict[str, int] = {}                      # city -> own turns its recruiting stays open
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
+        self.alliance: Dict[frozenset, List] = {}             # pair -> [turns left, common enemy]
+        self.betrayals: Counter = Counter()                   # broken treaties, by realm
+        self.last_attack: Dict[Tuple[str, str], int] = {}     # (attacker, victim) -> turn
+        self.losses: List[Tuple[int, str, str, str]] = []     # (turn, old owner, new owner, city)
+        self.proposals: Dict[Tuple[str, str], int] = {}       # (from, to) -> turn of the last envoys
+        self.attacks: List[Tuple[int, str, Optional[str], str, bool]] = []   # turn, by, from, city, won
+        self.world_events: List[Tuple[int, str, str]] = []  # (turn, event, what happened)
+        self.active: Dict[str, int] = {}                      # running world events -> rounds left
+        self.last_event = -99
+        self.no_events = False                                # tests switch the world's whims off
+        self.diplo_hook = None      # (camp, from, to, kind, reasons) -> the player's yes/no
         self.trade: Dict[frozenset, Tuple[int, int]] = {}     # pair -> (turns left, gold each)
         self.buffs: Dict[str, List[List[float]]] = {}         # officer -> [[mult, turns]]
         self.frozen: Dict[str, int] = {}                      # faction -> its next turns frozen
@@ -150,7 +163,8 @@ class Campaign:
                                           "captured": Counter(), "battles": Counter(), "earned": Counter(),
                                           "paid": Counter(), "courses": Counter(), "levels": Counter(),
                                           "declines": Counter(), "feats": Counter(),
-                                          "deserted_officers": Counter(), "reshuffles": Counter()}
+                                          "deserted_officers": Counter(), "reshuffles": Counter(),
+                                          "diplomacy": Counter(), "hegemon": Counter(), "events": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
@@ -284,6 +298,8 @@ class Campaign:
 
     def troop_upkeep(self, faction: str, key: str) -> float:
         u = ROSTER[key].upkeep
+        if "frost" in self.active and faction not in ("north", "highland"):
+            u *= 1.3
         if faction == "ashen" and ROSTER[key].undead:
             return u * 0.3                                # the dead ask for little pay, only for bones
         return u
@@ -327,7 +343,7 @@ class Campaign:
             self.rel[k] = max(1, min(100, self.rel[k] + d))
 
     def at_peace(self, a: str, b: str) -> bool:
-        return self.truce.get(_pair(a, b), 0) > 0
+        return self.truce.get(_pair(a, b), 0) > 0 or _pair(a, b) in self.alliance
 
     def max_prosperity(self, city: str) -> int:
         return min(MAX_PROSPERITY, PROSPERITY[city] + PROSPERITY_ROOM)
@@ -336,7 +352,8 @@ class Campaign:
         """What a tax card brings in this city now."""
         best = max((self.stat(o.key, "УПРАВЛЕНИЕ") for o in self.officers_in(city) if self.allegiance[o.key] == faction),
                    default=0)
-        return self.prosperity[city] * TAX + 2 * best
+        g = self.prosperity[city] * TAX + 2 * best
+        return g // 2 if "drought" in self.active else g
 
     def army(self, faction: str) -> int:
         return sum(self.power(o.key) for o in self.officers_of(faction)) + \
@@ -712,11 +729,15 @@ class Campaign:
                     del self.siege[city]
         # untaxed cities grow
         for city in self.cities_of(f):
-            if self.taxed.get(city) == self.turn or r.course == "war":     # war: no hands in the fields
+            if self.taxed.get(city) == self.turn or r.course == "war" or "frost" in self.active:
                 self.untaxed[city] = 0
             else:
                 self.untaxed[city] += 1
-                if self.untaxed[city] >= (GROWTH_TURNS - 1 if r.course == "economy" else GROWTH_TURNS):
+                need = GROWTH_TURNS - 1 if r.course == "economy" else GROWTH_TURNS
+                from .diplomacy import growth_blocked
+                if growth_blocked(self, city):
+                    need += 1                                 # a restless border
+                if self.untaxed[city] >= need:
                     self.untaxed[city] = 0
                     self.prosperity[city] = min(self.max_prosperity(city), self.prosperity[city] + 1)
         # treaties
@@ -779,6 +800,9 @@ class Campaign:
             self.current = (self.current + 1) % n
             if self.current == 0:
                 self.turn += 1
+                from . import diplomacy, events
+                diplomacy.round_tick(self)
+                events.round_tick(self)
             if self.realms[self.whose_turn()].alive:
                 break
         self._start_turn(self.whose_turn())
@@ -863,6 +887,8 @@ class Campaign:
         a = sum(self.power(o) * self.officer_mult(o) for o in officers) * mult
         if (faction, self.owner[city]) in self.grudge:
             a *= 1.3
+        if self.owner[city] != "goblin" and self.relation(faction, self.owner[city]) <= 14:
+            a *= 1.15                                         # blood feud
         return a
 
     def win_chance(self, a: float, d: float) -> float:
@@ -879,6 +905,9 @@ class Campaign:
             self.ready.discard(o)
         b = Battle(faction, defender, city, list(officers), [o.key for o in self.officers_in(city)],
                    mult=mult, seed=self.rng.randrange(1 << 30))
+        self.last_attack[(faction, defender)] = self.turn
+        src = self.officer_city.get(officers[0]) if officers else None
+        self.attacks.append((self.turn, faction, src, city, False))
         answer = self._answer(b)
         if b.withdrawn:
             return self._withdraw(b, answer)
@@ -895,6 +924,29 @@ class Campaign:
         b.d = self.defense_power(city) * b.def_mult
         if (b.defender, b.attacker) in self.grudge:
             b.d *= 1.3
+        if "goblin" not in (b.attacker, b.defender) and self.relation(b.attacker, b.defender) <= 14:
+            b.d *= 1.15                                       # blood feud: they fight to the last
+        from .diplomacy import ally_help
+        for side, (me, enemy) in enumerate(((b.attacker, b.defender), (b.defender, b.attacker))):
+            if enemy == "goblin" and me == "goblin":
+                continue
+            power, who = ally_help(self, me, city, enemy)
+            if power <= 0:
+                continue
+            b.helpers[side].extend(who)
+            if side == 0:
+                b.a += power
+            else:
+                b.d += power
+            pool = sorted((t for a in who for o in self.officers_of(a) for n in neighbors(city)
+                           if self.officer_city.get(o.key) == n for t in self.squads[o.key]),
+                          key=lambda t: -t.power)
+            got = 0
+            for t in pool:                                # the detachment that actually marches
+                if got >= power:
+                    break
+                b.aux[side].append(t.key)
+                got += t.power
         b.p = self.win_chance(b.a, b.d)
         troops = sum(t.power for _, t in b.deff)
         b.militia = max(0, min(8, int((b.d - troops) / ROSTER["militia"].cost)))   # walls and townsfolk
@@ -936,6 +988,15 @@ class Campaign:
             self.add_curse(faction, "war_fatigue")
             self.log_event(faction, "ВОЕННАЯ УСТАЛОСТЬ")
         won = bool(b.att_won)
+        if self.attacks and self.attacks[-1][3] == city:
+            t, by, src, c, _ = self.attacks[-1]
+            self.attacks[-1] = (t, by, src, c, won)
+        for a in b.helpers[0]:
+            self.change_relation(a, defender, -4)
+            self.change_relation(a, faction, 2)
+        if b.helpers[0] or b.helpers[1]:
+            names = ", ".join(FACTION[x].short for x in b.helpers[0] + b.helpers[1])
+            answer += f"; союзники в бою: {names}"
         self.change_relation(faction, defender, -20 if won else -12)
         for f in self.alive():
             if f not in (faction, defender):
@@ -1058,6 +1119,7 @@ class Campaign:
             growth.on_city_lost(self, old, city)
         growth.on_city_won(self, faction)
         self.owner[city] = faction
+        self.losses.append((self.turn, old, faction, city))
         self.prosperity[city] = max(1, self.prosperity[city] - 1)
         self.siege.pop(city, None)
         self.defense.pop(city, None)
@@ -1069,7 +1131,8 @@ class Campaign:
                 self.change_loyalty(o, -5)
                 continue
             leader = OFFICER[o].rank == 0 and OFFICER[o].faction == old
-            if not leader and (self.rng.random() < (100 - self.loyalty[o]) / 100 + 0.15
+            feud = old != "goblin" and self.relation(old, faction) <= 14      # blood feud: no oaths
+            if not leader and not feud and (self.rng.random() < (100 - self.loyalty[o]) / 100 + 0.15
                                or not self.cities_of(old)):
                 self.squads[o] = []
                 self.defect(o, faction)

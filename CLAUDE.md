@@ -66,7 +66,16 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   (`campaign_runner.Runner`); a storm involving the player (or an AI storm he chose to watch) asks the screen to
   fight it (`battle.py` builds it with `match.campaign_battle`, units carry `tag` = troop id). Tests fight such
   battles with `match.headless_campaign_world`.
-- Courses (`COURSES` in cards.py) set the 5 base cards; vices (`VICE_OF`) are extra personal cards of 30 officers.
+- Courses (`COURSES` in cards.py) set the 6 base cards; vices (`VICE_OF`) are extra personal cards of 30 officers.
+- Diplomacy (`diplomacy.py`, UI `diploui.py`): war by default, truce/alliance/trade by proposal (1 AP),
+  answered by `evaluate` (weighted reasons, shown in the UI; the player answers AI envoys via `diplo_hook`),
+  `declare_war` = betrayal. Relation tiers (`TIERS`/`TIER_EFFECTS`) have mechanical effects - keep the texts
+  true. The hegemon (`hegemon`) is feared: coalitions form against it. AI: `ai_turn` (one proposal a turn).
+- World events (`events.py`): ~2 a campaign (`CHANCE`, `GAP`); timed ones live in `camp.active` and change
+  rules in campaign.py. Check each event's impact with `python -m game.cardsim events 48` after changes.
+- Map overlays: city badges (officers, garrison), storm arrows since the player's last turn
+  (`camp.attacks`), В ОСАДЕ plaque. The camera may slide half a screen past the map edge; zooming back in
+  restores the view left when zooming out (`zoom_back`).
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

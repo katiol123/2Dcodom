@@ -189,8 +189,9 @@ def turn(camp, faction: str) -> None:
                 and camp.rng.random() < 0.2:
             desert(camp, o)
     # feats of peace and plenty
-    truces = sum(1 for k, v in camp.truce.items() if faction in k and v > 0)
-    if truces >= 5 and r.council:
+    truces = sum(1 for k, v in camp.truce.items() if faction in k and v > 0) + \
+        sum(1 for k in camp.alliance if faction in k)
+    if truces >= 7 and r.council:
         diplomat = max(r.council, key=lambda o: camp.stat(o, "ДИПЛОМАТИЯ"))
         award(camp, diplomat, "peacemaker")
     rich = [c for c in camp.cities_of(faction) if camp.prosperity[c] >= 10]

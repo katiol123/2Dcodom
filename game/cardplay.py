@@ -635,32 +635,28 @@ def _embassy(camp, f, t):
 
 @effect("trade_pact")
 def _trade(camp, f, t):
-    if camp.relation(f, t[0]) < 50:
-        camp.change_relation(f, t[0], 5)
-        return f"{FACTION[t[0]].short} отказались торговать"
-    camp.trade[frozenset((f, t[0]))] = (6, 25)
-    camp.change_relation(f, t[0], 5)
-    return f"торговля с {FACTION[t[0]].short} на 6 ходов"
+    from .diplomacy import propose
+    ok, msg = propose(camp, f, t[0], "trade", bonus=20, turns=8)
+    return msg
 
 
 @effect("truce")
 def _truce(camp, f, t):
-    if camp.relation(f, t[0]) < 30:
-        camp.change_relation(f, t[0], 5)
-        return f"{FACTION[t[0]].short} отвергли перемирие"
-    camp.truce[frozenset((f, t[0]))] = 4
-    return f"перемирие с {FACTION[t[0]].short} на 4 хода"
+    from .diplomacy import propose
+    ok, msg = propose(camp, f, t[0], "truce", bonus=20, turns=8)
+    return msg
 
 
 @effect("grand_embassy")
 def _grand_embassy(camp, f, t):
-    if camp.relation(f, t[0]) < 40:
-        camp.change_relation(f, t[0], 12)
-        return f"{FACTION[t[0]].short} приняли дары, но мира не будет"
-    camp.truce[frozenset((f, t[0]))] = 8
-    camp.trade[frozenset((f, t[0]))] = (8, 30)
-    camp.change_relation(f, t[0], 15)
-    return f"мир и торговля с {FACTION[t[0]].short} на 8 ходов"
+    from .diplomacy import propose, status
+    camp.change_relation(f, t[0], 15)                        # the gifts stay, whatever the answer
+    kind = "alliance" if status(camp, f, t[0]) == "truce" else "truce"
+    ok, msg = propose(camp, f, t[0], kind, bonus=35, turns=10)
+    if ok and frozenset((f, t[0])) not in camp.trade:
+        camp.trade[frozenset((f, t[0]))] = (10, 30)
+        msg += ", ТОРГОВЛЯ 30 ЗОЛ."
+    return msg
 
 
 @effect("buyout")

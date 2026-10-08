@@ -17,13 +17,16 @@ from typing import Dict
 
 from .campaign import Campaign
 from .cards import CARDS, TIER_NAMES
-from .factions import ALL_FACTIONS
+from .factions import ALL_FACTIONS, FACTION
 from .officers import OFFICER
 
 
 def one_game(args) -> Dict:
-    seed, rounds, fixed = args
+    seed, rounds, fixed = args[:3]
+    force = args[3] if len(args) > 3 else None          # (event key or "", round) for events mode
     c = Campaign(None, seed=seed)
+    if force is not None:
+        c.no_events = True
     if fixed:                                    # every realm locked on one course (to compare courses)
         import game.campaign_ai as ai
         ai.pick_course = lambda camp, f: None
@@ -37,7 +40,13 @@ def one_game(args) -> Dict:
     deserted = Counter()
     first_council = {o for f in c.order for o in c.realms[f].council}
     ever_council = set(first_council)
+    snap = None
     while c.turn <= rounds:
+        if force is not None and c.turn >= force[1] and snap is None:
+            snap = {f: (len(c.cities_of(f)), c.army(f), c.gold[f]) for f in c.order}
+            if force[0]:
+                from .events import fire
+                fire(c, force[0])
         c.run_ai(stop_at_player=False, max_turns=1)
         for f in c.order:
             curve[f].append(len(c.cities_of(f)))
@@ -57,8 +66,12 @@ def one_game(args) -> Dict:
         delta = sum(c.ostats[o.key]) - sum(o.stats)
         growth.append((q, delta, c.level[o.key], c.olead[o.key] - o.leadership,
                        o.key in ever_council and o.key not in first_council))
+    from .diplomacy import standing
     return {
-        "growth": growth, "levels": c.stats["levels"], "declines": c.stats["declines"],
+        "snap": snap, "standing": {f: standing(c, f) for f in c.order},
+        "army_end": {f: c.army(f) for f in c.order},
+        "diplomacy": c.stats["diplomacy"], "hegemon": c.stats["hegemon"], "events": c.stats["events"],
+        "alliances": len(c.alliance), "growth": growth, "levels": c.stats["levels"], "declines": c.stats["declines"],
         "feats": c.stats["feats"], "turncoats": c.stats["deserted_officers"], "reshuffles": c.stats["reshuffles"],
         "cities": {f: len(c.cities_of(f)) for f in c.order},
         "alive": {f: c.realms[f].alive for f in c.order},
@@ -119,6 +132,16 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> s
         out.append(f"{label:18s} {sum(g[1] for g in rows) / k:+9.2f} {sum(g[2] for g in rows) / k:7.2f} "
                    f"{sum(g[3] for g in rows) / k:+9.1f} {sum(g[1] < 0 for g in rows) / k:6.1%} "
                    f"{sum(g[1] >= 5 for g in rows) / k:10.1%} {sum(g[4] for g in rows) / k:13.1%}")
+    dip, heg, ev = Counter(), Counter(), Counter()
+    for r in results:
+        dip.update(r["diplomacy"])
+        heg.update(r["hegemon"])
+        ev.update(r["events"])
+    out.append("ДИПЛОМАТИЯ за кампанию: " + ", ".join(f"{k} {v / n:.1f}" for k, v in sorted(dip.items()))
+               + f"; союзов в конце {sum(r['alliances'] for r in results) / n:.1f}")
+    out.append("ГЕГЕМОН (ходов): " + ", ".join(f"{FACTION[k].short} {v / n:.1f}" for k, v in heg.most_common()))
+    out.append(f"СОБЫТИЯ МИРА: {sum(ev.values()) / n:.2f} за кампанию: " +
+               ", ".join(f"{k} {v / n:.2f}" for k, v in ev.most_common()))
     feats = Counter()
     for r in results:
         feats.update(r["feats"])
@@ -145,7 +168,49 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> s
     return "\n".join(out)
 
 
+def events_impact(games: int = 40, at: int = 15, after: int = 12) -> str:
+    """Every event forced at round ``at`` against the same seeds without it: how the realms differ
+    ``after`` rounds later (cities, army, standing)."""
+    from .events import EVENTS
+    keys = [""] + [e.key for e in EVENTS]
+    jobs = [(seed, at + after, "", (k, at)) for k in keys for seed in range(1, games + 1)]
+    with Pool() as pool:
+        res = pool.map(one_game, jobs)
+    by = {k: res[i * games:(i + 1) * games] for i, k in enumerate(keys)}
+    base = by[""]
+    out = [f"влияние событий: {games} кампаний, событие на ходу {at}, сравнение через {after} ходов", "",
+           f"{'СОБЫТИЕ':16s} {'ГОР.МАКС.СДВИГ':>14s} {'АРМИЯ ВСЕГО':>11s} {'ЛИДЕР ГОР.':>10s} {'СЛАБЫЕ ГОР.':>11s} "
+           f"{'РАЗБРОС':>8s} {'ПАЛО':>5s}"]
+
+    def summary(rows):
+        cities = {f: sum(r["cities"][f] for r in rows) / len(rows) for f in rows[0]["cities"]}
+        army = sum(sum(r["army_end"].values()) for r in rows) / len(rows)
+        lead = weak = 0.0
+        spread = 0.0
+        for r in rows:                                   # the realms that led / trailed at the event
+            order = sorted((f for f in r["snap"] if f != "goblin"), key=lambda f: -r["snap"][f][0])
+            lead += sum(r["cities"][f] for f in order[:2]) / 2
+            weak += sum(r["cities"][f] for f in order[-3:]) / 3
+            vals = [r["cities"][f] for f in order]
+            m = sum(vals) / len(vals)
+            spread += (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5
+        dead = sum(1 for r in rows for f, a in r["alive"].items() if not a and f != "goblin")
+        return cities, army, lead / len(rows), weak / len(rows), spread / len(rows), dead / len(rows)
+
+    c0, a0, l0, w0, s0, d0 = summary(base)
+    out.append(f"{'(без события)':16s} {'':>14s} {a0:11.0f} {l0:10.2f} {w0:11.2f} {s0:8.2f} {d0:5.2f}")
+    for k in keys[1:]:
+        c1, a1, l1, w1, s1, d1 = summary(by[k])
+        shift = max(c1, key=lambda f: abs(c1[f] - c0[f]))
+        out.append(f"{k:16s} {FACTION[shift].short[:8]:>8s} {c1[shift] - c0[shift]:+5.2f} {a1 / a0 - 1:+11.0%} "
+                   f"{l1 - l0:+10.2f} {w1 - w0:+11.2f} {s1 - s0:+8.2f} {d1 - d0:+5.2f}")
+    return "\n".join(out)
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "events":
+        print(events_impact(int(sys.argv[2]) if len(sys.argv) > 2 else 40))
+        sys.exit()
     games = int(sys.argv[1]) if len(sys.argv) > 1 else 40
     rounds = int(sys.argv[2]) if len(sys.argv) > 2 else 40
     fixed = sys.argv[3] if len(sys.argv) > 3 else ""     # e.g. "war": every realm stays on that course

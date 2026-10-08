@@ -29,6 +29,10 @@ def campaign_squads(b) -> Tuple[List[List[str]], List[List[int]]]:
     deff = sorted(b.deff, key=lambda ot: -ot[1].power)[:FIELD_CAP]
     keys = [[t.key for _, t in att], [t.key for _, t in deff]]
     tags = [[t.id for _, t in att], [t.id for _, t in deff]]
+    for side, aux in enumerate(getattr(b, "aux", ([], []))):   # allies' detachments (not at risk)
+        for k in aux[:max(0, FIELD_CAP + 2 - len(keys[side]))]:
+            keys[side].append(k)
+            tags[side].append(0)
     for _ in range(min(b.militia, FIELD_CAP + 4 - len(deff))):
         keys[1].append("militia")
         tags[1].append(0)

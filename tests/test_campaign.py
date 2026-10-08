@@ -186,7 +186,8 @@ class MapScreenTest(unittest.TestCase):
         from game.sim import H, W
         pygame.init()
         pygame.display.set_mode((W, H))
-        m = WorldMapScreen(Renderer(ensure_unit_sheets()))
+        from game.campaign import Campaign
+        m = WorldMapScreen(Renderer(ensure_unit_sheets()), campaign=Campaign("aldern"))
         surf = pygame.Surface((W, H))
 
         def ev(kind, pos, **kw):
@@ -216,9 +217,22 @@ class MapScreenTest(unittest.TestCase):
         b = next(b for b in m.buttons if b.action == "diplomacy")
         m.handle(ev(pygame.MOUSEBUTTONDOWN, b.rect.center, button=1), b.rect.center)
         self.assertTrue(m.diplomacy)
-        x0, y0 = m._diplo_origin()
-        m.update(0.1, (x0 + m.CELL_W + 3, y0 + 3))
-        self.assertEqual(m.hover_rel, (ALL_FACTIONS[0].key, ALL_FACTIONS[1].key))
+        d = m.diplo
+        x0, y0 = d._origin()
+        cell = (x0 + d.CELL_W + 3, y0 + 3)
+        m.update(0.1, cell)
+        self.assertEqual(d.hover_cell, (ALL_FACTIONS[0].key, ALL_FACTIONS[1].key))
+        m.draw(surf)
+        m.handle(ev(pygame.MOUSEBUTTONDOWN, cell, button=1), cell)          # pick a realm
+        self.assertEqual(d.sel, ALL_FACTIONS[1].key)
+        rect = next(r for r, k in d._action_rects() if k == "truce")
+        ap = m.camp.realms["aldern"].ap
+        m.update(0.1, rect.center)
+        m.draw(surf)                                                         # shows how they weigh it
+        m.handle(ev(pygame.MOUSEBUTTONDOWN, rect.center, button=1), rect.center)
+        self.assertEqual(m.camp.realms["aldern"].ap, ap - 1)                 # the envoys cost an action
+        self.assertTrue(d.result[0])
+        self.assertEqual(sum(m.camp.stats["diplomacy"].values()), 1)
         m.draw(surf)
         b = next(b for b in m.buttons if b.action == "battle")
         self.assertEqual(m.handle(ev(pygame.MOUSEBUTTONDOWN, b.rect.center, button=1), b.rect.center), "battle")
@@ -293,6 +307,17 @@ class CampaignScreensTest(unittest.TestCase):
         self.assertIsNotNone(m.window)
         m.window = None
         m.selected = None
+        view = list(m.cam)
+        m.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), (240, 140))
+        self.assertEqual(m.zoom, 0.5)
+        m.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), (100, 60))
+        m.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), (400, 200))
+        m.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=1), (30, 30))
+        self.assertEqual((m.zoom, m.cam), (1.0, view))             # back in: exactly the old view
+        edge = min(CITIES, key=lambda c: c.x)                       # a city on the very edge
+        m.cam = [edge.x - W / 2, edge.y - H / 2]
+        m._clamp()
+        self.assertEqual(m._to_screen(edge.x, edge.y)[0], W // 2)  # can be brought to the centre
         m.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), (240, 140))
         self.assertEqual(m.zoom, 0.5)
         m.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1), (240, 140))

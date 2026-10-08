@@ -4,7 +4,8 @@ screen: a real battle to be fought, or the player's answer card (pure Python, no
 The map screen calls ``start`` for anything that may lead to a battle (playing a card, ending
 the turn, a spectator round). While the worker runs, the screen shows a frozen frame and only
 serves ``request`` - ``ask`` (watch an AI battle or work it out?), ``answer`` (the player's city
-is stormed and he holds answer cards) or ``battle`` (fight it now); ``reply`` lets the worker go on.
+is stormed and he holds answer cards), ``diplo`` (a realm sends envoys to the player: yes or no?)
+or ``battle`` (fight it now); ``reply`` lets the worker go on.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ class Runner:
         self.finished = False
         camp.battle_hook = self._battle_hook
         camp.answer_hook = self._answer_hook
+        camp.diplo_hook = self._diplo_hook
 
     # --- main thread ---------------------------------------------------------------------------
     def busy(self) -> bool:
@@ -87,3 +89,8 @@ class Runner:
         if not self._in_worker():
             return None
         return self._wait({"kind": "answer", "battle": b, "cards": cards})
+
+    def _diplo_hook(self, camp, frm, to, kind, reasons):
+        if not self._in_worker():
+            return None
+        return self._wait({"kind": "diplo", "from": frm, "treaty": kind, "reasons": reasons})

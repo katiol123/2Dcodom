@@ -173,9 +173,9 @@ class OfficerCard:
         pygame.draw.rect(s, INK, pr.inflate(2, 2), 1)
         self.face(s, pr, o.key, frame=trim, click=False)
         font.draw(s, self.RANKS[min(o.rank, 3)], pr.centerx, pr.bottom + 6, "#c0cbdc", anchor="midtop")
-        verdict = ("ВЫДАЮЩИЙСЯ" if p >= 0.6 else "ДОСТОЙНЫЙ" if p >= 0.36 else "ЗАУРЯДНЫЙ")
-        if o.female:
-            verdict = verdict[:-2] + "АЯ"
+        k = 0 if p >= 0.6 else 1 if p >= 0.36 else 2
+        verdict = (("ВЫДАЮЩАЯСЯ", "ДОСТОЙНАЯ", "ЗАУРЯДНАЯ") if o.female else
+                   ("ВЫДАЮЩИЙСЯ", "ДОСТОЙНЫЙ", "ЗАУРЯДНЫЙ"))[k]
         font.draw(s, verdict, pr.centerx, pr.bottom + 14, trim, anchor="midtop")
         loy = self.camp.loyalty.get(o.key, 100)
         font.draw(s, f"ВЕРНОСТЬ {loy}", pr.centerx, pr.bottom + 23, "#63c74d" if loy >= 60 else "#feae34"

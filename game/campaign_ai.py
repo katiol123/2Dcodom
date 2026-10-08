@@ -85,7 +85,10 @@ def _city_worth(camp, city: str) -> float:
 
 
 def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list]:
+    from .diplomacy import enemy_of_alliance, hegemon
     best = (-1.0, [])
+    h = hegemon(camp)
+    foes = set(enemy_of_alliance(camp, f)) | ({h} if h and h != f else set())
     for target in options(camp, f, key, []):
         cands = options(camp, f, key, [target])
         cands = sorted(cands, key=lambda o: -camp.power(o) * camp.officer_mult(o))[:MAX_GROUP]
@@ -95,12 +98,16 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
         d = camp.defense_power(target)
         if (camp.owner[target], f) in camp.grudge:
             d *= 1.3
+        if camp.owner[target] != "goblin" and camp.relation(f, camp.owner[target]) <= 14:
+            d *= 1.15
         p = camp.win_chance(a, d)
         if p < 0.55:
             continue
         hostility = 1.0 + (40 - min(40, camp.relation(f, camp.owner[target]))) / 80
         if camp.realms[camp.owner[target]].course == "economy":
             hostility *= 1.4                     # a rich realm that does not arm itself is tempting prey
+        if camp.owner[target] in foes:
+            hostility *= 1.35                    # the alliance's common enemy / the hegemon
         v = p * _city_worth(camp, target) * hostility - (1 - p) * a * 0.5 - p * 0.3 * min(a, d) * POWER_VALUE
         if v > best[0]:
             best = (v, [target, tuple(cands)])
@@ -458,19 +465,26 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     if k == "embassy":
         return _best_rival(camp, f, k, lambda r: (60 if _rival_threat(camp, f, r) > camp.army(f) * 0.3 else 15)
                            if camp.relation(f, r) < 70 else -1)
+    from .diplomacy import can_propose, evaluate
     if k == "trade_pact":
-        return _best_rival(camp, f, k, lambda r: 150 if camp.relation(f, r) >= 50
-                           and frozenset((f, r)) not in camp.trade else -1)
+        from .diplomacy import trade_gold
+        return _best_rival(camp, f, k, lambda r: trade_gold(camp, f, r) * 8
+                           if can_propose(camp, f, r, "trade")[0] and evaluate(camp, f, r, "trade", 20)[0] >= 0
+                           else -1)
     if k in ("truce", "grand_embassy"):
-        need = 30 if k == "truce" else 40
+        from .diplomacy import status
+        bonus = 20 if k == "truce" else 35
 
         def s(r):
-            if camp.relation(f, r) < need or camp.at_peace(f, r):
-                return -1
+            kind = "alliance" if k == "grand_embassy" and status(camp, f, r) == "truce" else "truce"
+            if not can_propose(camp, f, r, kind)[0] or evaluate(camp, f, r, kind, bonus)[0] < 0:
+                return 40 if k == "grand_embassy" and camp.relation(f, r) < 60 else -1
+            if kind == "alliance":
+                return 250
             danger = _rival_threat(camp, f, r)
             our = sum(camp.defense_power(c) for c in frontier(camp, f)) or 1
             v = 30 + min(250, danger / our * 120)
-            return v + (300 if k == "grand_embassy" else 0)
+            return v + (240 if k == "grand_embassy" else 0)
         return _best_rival(camp, f, k, s)
     return -1, []
 
@@ -646,6 +660,8 @@ def play_turn(camp, f: str) -> None:
     manage(camp, f)
     pick_course(camp, f)
     fill_council(camp, f)
+    from .diplomacy import ai_turn
+    ai_turn(camp, f, AP_PRICE)
     for _ in range(20):
         pick = best_play(camp, f)
         if pick is None:                 # nothing worth a full action left: spend what remains
