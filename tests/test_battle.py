@@ -163,7 +163,13 @@ class BattleTest(unittest.TestCase):
             self.assertLessEqual(hp - e.hp, hi + 1)
 
     def test_two_uhlans_joust(self):
-        ai, w, a, b = self._pair("uhlan", "uhlan")
+        self._joust("uhlan")
+
+    def test_two_mounted_knights_joust(self):
+        self._joust("lancer")
+
+    def _joust(self, key):
+        ai, w, a, b = self._pair(key, key)
         for x in (a, b):
             x.status["charge"] = 1.0
             x.status["lancehit"] = 1.5

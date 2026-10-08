@@ -393,6 +393,12 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
             world.text(u, "ТЕНЬ!", "#c0cbdc", big=True)
             world.sounds.append("smoke")
             return False
+    if u.key == "lancer" and u.has("charge"):
+        # two knights at full gallop: lance against lance, nobody gets the first blow
+        for e in world.enemies(u):
+            if e.key == "lancer" and e.has("charge") and in_melee_range(u, e, slack=10):
+                _joust(world, u, e)
+                return True
     if u.key in COUNTERS and u.cd <= 0.35:
         # brace: meet an enemy rushing at me with the spear before it reaches me
         for e in world.enemies(u):
@@ -549,7 +555,7 @@ def resolve_action(world: "World", u: "Unit", a: dict) -> None:
 
 
 def _joust(world: "World", a: "Unit", b: "Unit") -> None:
-    """Two lancers rushing at each other: both lances strike at once (counter damage), both riders are
+    """Two riders with lances (uhlans, or mounted knights) rushing at each other: both lances strike at once (counter damage), both riders are
     thrown back and shaken, both rushes are spent - and both ride off for another run-up."""
     world.text(a, "СШИБКА!", "#feae34", big=True)
     world.hitstop = max(world.hitstop, 0.1)
