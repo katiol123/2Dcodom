@@ -38,8 +38,16 @@ class SaveTest(unittest.TestCase):
 
 class TitleTest(unittest.TestCase):
     def test_new_over_a_save_asks_first(self):
-        from test_campaign import _pygame_ui
-        pygame, renderer = _pygame_ui()
+        import os
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+        import pygame
+        from game.assets import ensure_unit_sheets
+        from game.render import Renderer
+        from game.sim import H, W
+        pygame.init()
+        pygame.display.set_mode((W, H))
+        renderer = Renderer(ensure_unit_sheets())
         from game.sim import H, W
         from game.title import TitleScreen
         c = Campaign("aldern", seed=3)
