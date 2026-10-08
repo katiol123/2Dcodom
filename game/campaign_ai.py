@@ -182,9 +182,16 @@ def _rival_threat(camp, f: str, rival: str) -> float:
     return total
 
 
+def _peaceful(camp, f: str, key: str, realm: Optional[str]) -> bool:
+    """A hostile act aimed at a realm we are at peace with: the computer does not do that."""
+    return key in HOSTILE and realm is not None and realm != f and camp.at_peace(f, realm)
+
+
 def _best_rival(camp, f: str, key: str, score: Callable[[str], float]) -> Tuple[float, list]:
     best = (-1.0, [])
     for r in options(camp, f, key, []):
+        if _peaceful(camp, f, key, r):
+            continue
         v = score(r)
         if v > best[0]:
             best = (v, [r])
@@ -194,6 +201,8 @@ def _best_rival(camp, f: str, key: str, score: Callable[[str], float]) -> Tuple[
 def _best_city(camp, f: str, key: str, score: Callable[[str], float]) -> Tuple[float, list]:
     best = (-1.0, [])
     for c in options(camp, f, key, []):
+        if c in CITY and _peaceful(camp, f, key, camp.owner[c]):
+            continue
         v = score(c)
         if v > best[0]:
             best = (v, [c])
@@ -207,8 +216,8 @@ def _best_officer(camp, f: str, key: str, score: Callable[[str], float]) -> Tupl
 def _enemy_officer(camp, f: str, key: str, score: Callable[[str], float]) -> Tuple[float, list]:
     best = (-1.0, [])
     for c in options(camp, f, key, []):
-        if camp.owner[c] == "goblin" and key != "plot":
-            pass
+        if _peaceful(camp, f, key, camp.owner[c]):
+            continue
         for o in options(camp, f, key, [c]):
             v = score(o)
             if v > best[0]:
@@ -508,6 +517,9 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         return 70 + 40 * curses, []
     if k == "counterspy":
         return sum(55 for c in camp.realms[f].all_cards() if c.card.tier == "curse" and c.key != "debt"), []
+    if k == "pride":                       # listening to the proud adviser saves his loyalty (-8 if he waits)
+        loyal = camp.loyalty.get(inst.origin, 60)
+        return 24 + (45 if loyal < 45 else 0), []
     if k == "mobilize":
         return (90 if _hand_has_more(camp, f, inst) else -1), []
     if k == "genie_lamp":
@@ -780,7 +792,7 @@ def fill_council(camp, f: str) -> None:
 # hostile acts: the computer does not spend them on realms it is at peace with (allies least of all)
 HOSTILE = {"arson", "agitators", "letters", "dirty_tricks", "plague_cauldron", "mushroom_haze", "all_seeing",
            "secret_auction", "harem_intrigue", "winter_storm", "sabotage", "bribe", "plot", "sappers",
-           "thieves_guild", "thievery", "intimidate", "denounce"}
+           "thieves_guild", "thievery", "intimidate", "denounce", "old_debt"}
 
 
 def _victim(camp, targets) -> Optional[str]:
@@ -816,7 +828,9 @@ def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float,
         v, targets = VALUE(camp, f, inst)
         if v is None or v <= 0:
             continue
-        v *= reign.card_mult(camp, f, inst.card) * peace_mult(camp, f, inst.key, targets)
+        if peace_mult(camp, f, inst.key, targets) < 1:
+            continue                                     # no hostile acts against friends, not even with spare points
+        v *= reign.card_mult(camp, f, inst.card)
         cost = camp.card_cost(f, inst)
         net = v - cost * ap_price
         if net <= 0:

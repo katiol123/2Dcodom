@@ -155,5 +155,37 @@ class CardFaceTest(unittest.TestCase):
                          ["ЛОГОВО", "ЛОГОВА", "ЛОГОВ", "ЛОГОВ", "ЛОГОВО", "ЛОГОВА"])
 
 
+
+class CouncilStartTest(unittest.TestCase):
+    def test_councils_start_empty_and_the_ai_fills_them(self):
+        from game.cards import COUNCIL_SEATS
+        c = Campaign("aldern", seed=2)
+        self.assertTrue(all(r.council == [c.leader[f]] for f, r in c.realms.items()))
+        c.end_turn()
+        c.run_ai()
+        self.assertEqual(len(c.realms["aldern"].council), 1)          # the player chooses his own advisers
+        self.assertTrue(all(len(r.council) == COUNCIL_SEATS for f, r in c.realms.items()
+                            if f != "aldern" and r.alive and len(c.officers_of(f)) >= COUNCIL_SEATS))
+
+    def test_pride_costs_a_point_or_loyalty(self):
+        c = Campaign("aldern", seed=2)
+        c.seat_councils()
+        r = c.realms["aldern"]
+        holder = r.council[1]
+        inst = c._inst("pride", holder)
+        r.hand.append(inst)
+        loy = c.loyalty[holder]
+        ok, _ = c.play("aldern", inst, [])
+        self.assertTrue(ok)
+        c.end_turn()
+        self.assertGreaterEqual(c.loyalty[holder], loy)                 # listened to: no offence
+        c.run_ai()
+        inst = c._inst("pride", holder)
+        r.hand.append(inst)
+        loy = c.loyalty[holder]
+        c.end_turn()
+        self.assertLessEqual(c.loyalty[holder], max(0, loy - 8))        # left in hand: offended
+
+
 if __name__ == "__main__":
     unittest.main()

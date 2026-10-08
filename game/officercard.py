@@ -44,12 +44,14 @@ class OfficerCard:
         """Start of a frame: forget last frame's clickable spots."""
         self._mouse = mouse
         self.hits = []
+        self.units = []                                  # unit portraits: (rect, unit key, mouse button) -> unit card
         HIRES.drop()                                     # a new frame: forget last frame's pictures
 
     def cover(self) -> None:
         """A window now covers whatever was drawn so far: its faces are neither sharp nor clickable."""
         HIRES.drop()
         self.hits = []
+        self.units = []
 
     def handle(self, ev, mouse: Tuple[int, int]) -> bool:
         """True if the event was the card's (an open card swallows everything)."""
@@ -270,6 +272,7 @@ class OfficerCard:
             if k < len(squad):
                 por = self.r.portrait(f"{squad[k].key}_{TEAMS[0].key}")
                 s.blit(por, (box.x + 1, box.y + 1), area=pygame.Rect(0, 0, 19, 13))
+                self.units.append((box, squad[k].key, 1))
         # the stat web
         cx, cy, rad = self._web_axes()
         pygame.draw.line(s, _c("#3a4466"), (r.x + 270, r.y + 22), (r.x + 270, r.bottom - 20))
@@ -319,9 +322,9 @@ class OfficerCard:
             if pygame.Rect(x1, y1, chip.get_width(), 7).collidepoint(self._mouse):
                 hover = k
             y1 += 8
-        if hover:
+        if hover:                                      # the preview hides only what it covers (the portrait stays sharp)
             img = self.art.full(hover, o.name, serves.key)
-            self.cover()
+            HIRES.drop_in(img.get_rect(topleft=(r.x + 118, r.y + 40)))
             s.blit(img, (r.x + 118, r.y + 40))
         tip = STAT_HELP[STATS[hot]] if hot is not None else "НАВЕДИ НА НАВЫК ИЛИ КАРТУ.  < > - ДРУГИЕ ОФИЦЕРЫ"
         font.draw(s, tip.upper() if hot is not None else tip, r.centerx, r.bottom - 11,

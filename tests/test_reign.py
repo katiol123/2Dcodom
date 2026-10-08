@@ -26,6 +26,7 @@ class ReignTest(unittest.TestCase):
 
     def test_shown_only_for_computer_rulers(self):
         c = Campaign("aldern", seed=1)
+        c.seat_councils()
         self.assertFalse(reign.shown(c, c.leader["aldern"]))             # the player rules himself
         self.assertTrue(reign.shown(c, c.leader["ashen"]))
         adviser = c.realms["ashen"].council[1]

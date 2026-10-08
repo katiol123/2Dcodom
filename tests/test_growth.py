@@ -11,6 +11,7 @@ from game.officers import OFFICER, OFFICERS, STATS
 class GrowthTest(unittest.TestCase):
     def setUp(self):
         self.c = Campaign("aldern", seed=3)
+        self.c.seat_councils()
 
     def _weak_and_strong(self, f="aldern"):
         offs = sorted((o for o in OFFICERS[f] if o.rank), key=presence)

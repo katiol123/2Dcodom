@@ -1443,8 +1443,7 @@ def _new_melee_mods(world, u, t, dmg, crit, label):
     if k == "uhlan" and u.has("lancehit"):
         del u.status["lancehit"]
         dmg *= 2.0
-        crit, label = True, "ПИКА"
-        u.status["regroup"] = 1.0
+        crit, label = True, "ПИКА"                # then he stays in the fight; the next run-up comes with the charge
         if t.alive and t.type.radius < 12:
             t.x = min(FIELD[2], max(FIELD[0], t.x + u.facing * 14))
     if k == "griffon_knight" and u.has("divehit"):

@@ -72,16 +72,19 @@ class CardDataTest(unittest.TestCase):
 class CampaignCardsTest(unittest.TestCase):
     def setUp(self):
         self.c = Campaign("aldern", seed=3)
+        self.c.seat_councils()
 
     def test_turn_start(self):
-        c = self.c
+        c = Campaign("aldern", seed=3)                                  # as a campaign starts: empty seats
         self.assertEqual(c.whose_turn(), "aldern")
         self.assertEqual(c.realms["aldern"].ap, AP)
         self.assertEqual(c.ap_max("khanate"), AP + 1)                   # the Horde's passive
         for f, r in c.realms.items():
             fired = sum(1 for x in r.discard if x.card.tier == "vice")   # vices go off when drawn
             self.assertEqual(len(r.hand) + fired, hand_size(r.council), f)
-            self.assertIn(OFFICERS[f][0].key, r.council)
+            self.assertEqual(r.council, [OFFICERS[f][0].key])
+        c = self.c
+        for f, r in c.realms.items():
             self.assertEqual(len(r.council), COUNCIL_SEATS)
             keys = Counter(x.key for x in r.all_cards())
             self.assertEqual(keys[FACTION_CARD[f]], 1)
@@ -266,7 +269,7 @@ class CampaignCardsTest(unittest.TestCase):
             inst = c._inst(v, holder)
             r.draw.append(inst)
             c._draw("aldern", 1)
-            self.assertTrue(inst in r.hand if v == "sloth" else inst in r.discard, v)
+            self.assertTrue(inst in r.hand if v in ("sloth", "pride") else inst in r.discard, v)
         self.assertLess(c.gold["aldern"], 500)
         self.assertGreaterEqual(r.ap_penalty, 1)
 
@@ -333,7 +336,9 @@ class CardScreenTest(unittest.TestCase):
         pygame.init()
         pygame.display.set_mode((W, H))
         HIRES.sync = True
-        m = WorldMapScreen(Renderer(ensure_unit_sheets()), campaign=Campaign("aldern"))
+        camp = Campaign("aldern")
+        camp.seat_councils()
+        m = WorldMapScreen(Renderer(ensure_unit_sheets()), campaign=camp)
         surf = pygame.Surface((W, H))
 
         def frame(pos):

@@ -40,6 +40,91 @@ def faction_units() -> dict:
 SAVE = "squads.json"
 
 
+# --- the unit card (squad builder and campaign screens) -------------------------------------------------
+INFO_COLORS = {"perks": ("#a7f070", "#63c74d"), "flaws": ("#f6757a", "#e43b44"), "behavior": ("#73eff7", "#41a6f6")}
+INFO_WRAP, INFO_LINE = 53, 6
+
+
+def preview_box(rend, look: str, boxes: dict) -> pygame.Rect:
+    """Union of the visible pixels of the attack and walk frames (stable crop, no jitter)."""
+    if look not in boxes:
+        art = rend.art(look)
+        rects = [fr.get_bounding_rect() for a in ("attack", "walk") for fr in art.frames[a]]
+        box = rects[0].unionall(rects[1:])
+        boxes[look] = box.clip(pygame.Rect(0, 0, art.w, art.h))
+    return boxes[look]
+
+
+def info_wrap(text: str, y0: int, preview_bottom: int, narrow: int, wide: int = INFO_WRAP) -> List[str]:
+    """Word wrap where lines beside the preview are shorter; continuation lines indented."""
+    words, lines, cur, y = text.split(" "), [], "", y0
+    for wd in words:
+        limit = narrow if y < preview_bottom else wide
+        cand = (cur + " " + wd) if cur else (("  " + wd) if lines else wd)
+        if len(cand) > limit and cur:
+            lines.append(cur)
+            y += INFO_LINE
+            cur = "  " + wd
+        else:
+            cur = cand
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def draw_unit_info(s: pygame.Surface, rend, f, key: str, x: int, y: int, w: int, h: int, active: int, time: float,
+                   boxes: dict) -> Tuple[int, int]:
+    """Name, stats, price, an animated preview and the traits of a unit class in the box (x, y, w, h)."""
+    u = ROSTER[key]
+    f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2 if len(u.name) <= 13 else 1)
+    f.draw(s, f"{u.role}   {TIER_NAMES[u.tier]}", x + 6, y + 18, "#8b9bb4")
+    lo, hi = u.damage
+    dtype = {"physical": "", "magic": " МАГ", "holy": " СВЯТ"}[u.damage_type]
+    f.draw(s, f"HP {u.hp}   УРОН {lo}-{hi}{dtype}   ДАЛЬН {int(u.attack_range)}", x + 6, y + 26, "#c0cbdc")
+    extra = f"   УКЛОН {int(u.dodge * 100)}%" if u.dodge else ""
+    f.draw(s, f"БРОНЯ {int(u.armor * 100)}%   МАГЗАЩ {int(u.resist * 100)}%   СКОР {int(u.speed)}{extra}",
+           x + 6, y + 33, "#c0cbdc")
+    f.draw(s, f"ЦЕНА {u.cost} ЗОЛОТА   СОДЕРЖАНИЕ {u.upkeep} ЗА ХОД", x + 6, y + 40, "#feae34")
+    # animated preview (top right): the unit attacking, then walking
+    look = f"{key}_{TEAMS[active].key}"
+    art = rend.art(look)
+    box = preview_box(rend, look, boxes)
+    cyc = time % 3.0
+    anim = "attack" if cyc < 1.4 else "walk"
+    meta = rend.metas[look]["animations"][anim]["frames"]
+    t = (cyc if anim == "attack" else cyc - 1.4) * 1000
+    idx = len(meta) - 1
+    for j, fr in enumerate(meta):
+        if t < fr["duration"]:
+            idx = j
+            break
+        t -= fr["duration"]
+    img = art.frames[anim][idx].subsurface(box)
+    if active == 1:
+        img = pygame.transform.flip(img, True, False)
+    px, py = x + w - box.w - 4, y + 3
+    s.blit(img, (px, py))
+    # perks (green), then flaws (red), then behavior (blue); one trait per entry,
+    # text flows around the preview
+    yy = y + 50
+    for grp in ("perks", "flaws", "behavior"):
+        bright, dim = INFO_COLORS[grp]
+        for name, desc in getattr(u, grp):
+            first = True
+            for line in info_wrap(f"{name} - {desc}", yy, py + box.h + 1, (px - x - 8) // 4, (w - 10) // 4):
+                if first:
+                    head = f.render(name, bright)
+                    s.blit(head, (x + 5, yy - 1))
+                    if line[len(name):]:
+                        s.blit(f.render(line[len(name):], dim), (x + 5 + head.get_width() - 2, yy - 1))
+                    first = False
+                else:
+                    s.blit(f.render(line, dim), (x + 5, yy - 1))
+                yy += INFO_LINE
+        yy += 1
+    return yy, y + h
+
+
 class Button:
     def __init__(self, rect: Tuple[int, int, int, int], label: str, action: str, color: str = "#3a4466",
                  scale: int = 1):
@@ -312,54 +397,8 @@ class Menu:
             for i, (grp, label) in enumerate((("perks", "ПЕРК"), ("flaws", "НЕДОСТАТОК"), ("behavior", "ПОВЕДЕНИЕ"))):
                 f.draw(s, label, x + w // 2 + (i - 1) * 64, y + h // 2 + 8, self.COLORS[grp][0], anchor="midtop")
             return
-        u = ROSTER[key]
-        f.draw(s, u.name, x + 6, y + 4, "#fee761", scale=2 if len(u.name) <= 13 else 1)
-        f.draw(s, f"{u.role}   {TIER_NAMES[u.tier]}", x + 6, y + 18, "#8b9bb4")
-        lo, hi = u.damage
-        dtype = {"physical": "", "magic": " МАГ", "holy": " СВЯТ"}[u.damage_type]
-        f.draw(s, f"HP {u.hp}   УРОН {lo}-{hi}{dtype}   ДАЛЬН {int(u.attack_range)}", x + 6, y + 26, "#c0cbdc")
-        extra = f"   УКЛОН {int(u.dodge * 100)}%" if u.dodge else ""
-        f.draw(s, f"БРОНЯ {int(u.armor * 100)}%   МАГЗАЩ {int(u.resist * 100)}%   СКОР {int(u.speed)}{extra}",
-               x + 6, y + 33, "#c0cbdc")
-        f.draw(s, f"ЦЕНА {u.cost} ЗОЛОТА   СОДЕРЖАНИЕ {u.upkeep} ЗА ХОД", x + 6, y + 40, "#feae34")
-        # animated preview (top right): the unit attacking, then walking
-        look = f"{key}_{TEAMS[self.active].key}"
-        art = self.r.art(look)
-        box = self._preview_box(look)
-        cyc = self.time % 3.0
-        anim = "attack" if cyc < 1.4 else "walk"
-        meta = self.r.metas[look]["animations"][anim]["frames"]
-        t = (cyc if anim == "attack" else cyc - 1.4) * 1000
-        idx = len(meta) - 1
-        for j, fr in enumerate(meta):
-            if t < fr["duration"]:
-                idx = j
-                break
-            t -= fr["duration"]
-        img = art.frames[anim][idx].subsurface(box)
-        if self.active == 1:
-            img = pygame.transform.flip(img, True, False)
-        px, py = x + w - box.w - 4, y + 3
-        s.blit(img, (px, py))
-        # perks (green), then flaws (red), then behavior (blue); one trait per entry,
-        # text flows around the preview
-        yy = y + 50
-        for grp in ("perks", "flaws", "behavior"):
-            bright, dim = self.COLORS[grp]
-            for name, desc in getattr(u, grp):
-                first = True
-                for line in self._wrap(f"{name} - {desc}", yy, py + box.h + 1, (px - x - 8) // 4):
-                    if first:
-                        head = f.render(name, bright)
-                        s.blit(head, (x + 5, yy - 1))
-                        if line[len(name):]:
-                            s.blit(f.render(line[len(name):], dim), (x + 5 + head.get_width() - 2, yy - 1))
-                        first = False
-                    else:
-                        s.blit(f.render(line, dim), (x + 5, yy - 1))
-                    yy += self.LINE
-            yy += 1
-        self.text_bottom = (yy, y + h)
+        self.text_bottom = draw_unit_info(s, self.r, f, key, x, y, w, h, self.active, self.time,
+                                          self.__dict__.setdefault("_boxes", {}))
 
     def _wrap(self, text: str, y0: int, preview_bottom: int, narrow: int) -> List[str]:
         """Word wrap where lines beside the preview are shorter; continuation lines indented."""

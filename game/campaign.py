@@ -216,12 +216,7 @@ class Campaign:
         self.realms: Dict[str, Realm] = {}
         for f in ALL_FACTIONS:
             offs = OFFICERS[f.key]
-            self.realms[f.key] = Realm(f.key, [offs[0].key])
-            from .campaign_ai import choose_council
-            self.realms[f.key].council = choose_council(self, f.key)
-            for o in self.realms[f.key].council:
-                self.loyalty[o] = min(100, self.loyalty[o] + 8)
-                self.last_used[o] = self.turn
+            self.realms[f.key] = Realm(f.key, [offs[0].key])      # the council starts empty: only the ruler
             self._build_deck(f.key)
             self._draw(f.key, self.hand_size(self.realms[f.key].council))
         self._start_turn(self.order[0])
@@ -865,6 +860,12 @@ class Campaign:
         if self.gold[f] < 0:
             self._desert(f)
             self.gold[f] = 0
+        # a proud adviser nobody listened to this turn takes offence
+        for c in r.hand:
+            if c.key == "pride" and c.origin in OFFICER:
+                self.change_loyalty(c.origin, -8)
+                self.log_event(f, f"ГОРДЫНЯ: {OFFICER[c.origin].name} обижен{'а' if OFFICER[c.origin].female else ''}, "
+                                  f"что {'её' if OFFICER[c.origin].female else 'его'} не выслушали: верность -8")
         # hand: keep what the council allows, draw the rest
         keep_n = self.reserve(r.council)
         if f == self.player:
@@ -922,6 +923,8 @@ class Campaign:
             play_turn(self, f)
             self.end_turn()
             steps += 1
+            if stop_at_player and self.player and not self.realms[self.player].alive:
+                max_turns = min(max_turns, 1)             # the player's realm fell meanwhile: one round, no more
 
     # --- playing cards ------------------------------------------------------------------------
     def can_play(self, faction: str, inst: CardInst) -> Tuple[bool, str]:
@@ -1077,8 +1080,9 @@ class Campaign:
         fa = b.a / raw_a if raw_a else 1.0
         owner = b.defender
         own = sum(self.power(o) for o in b.defenders)
-        spirit = (sum(self.power(o) * self.officer_mult(o) for o in b.defenders) + sum(t.power for t in self.free[b.city])) \
-            / max(1, own + sum(t.power for t in self.free[b.city]))
+        base = own + sum(t.power for t in self.free[b.city])
+        spirit = (sum(self.power(o) * self.officer_mult(o) for o in b.defenders)
+                  + sum(t.power for t in self.free[b.city])) / base if base else 1.0   # only townsfolk: plain spirit
         fd = spirit * b.def_mult
         if b.city in self.defense:
             fd *= self.defense[b.city][0]
@@ -1271,6 +1275,13 @@ class Campaign:
         return f"; ответ: {pick.card.name}"
 
     def _withdraw(self, b: "Battle", answer: str) -> str:
+        if self.attacks and self.attacks[-1][3] == b.city:   # the city changed hands: the storm succeeded
+            t, by, src, c, _ = self.attacks[-1]
+            self.attacks[-1] = (t, by, src, c, True)
+        self.stats["battles"][b.attacker] += 1
+        r = self.realms.get(b.attacker)
+        if r and r.course == "war":
+            self.add_curse(b.attacker, "war_fatigue")
         refuge = [n for n in neighbors(b.city) if self.owner[n] == b.defender]
         dest = max(refuge, key=lambda c: self.defense_power(c)) if refuge else None
         if dest:
@@ -1353,6 +1364,13 @@ class Campaign:
                     self.defect(o, faction)
                     self.officer_city[o] = city
         self.check_fall(old, faction)
+
+    def seat_councils(self) -> None:
+        """Fill every council as the computer would (the campaign itself starts with empty seats)."""
+        from .campaign_ai import choose_council
+        for f, r in self.realms.items():
+            if r.alive:
+                self.set_council(f, choose_council(self, f), quiet=True)
 
     def handover(self, city: str, faction: str) -> None:
         """The city changes hands (storm, event, purchase): what belonged to the old owner's rule goes."""

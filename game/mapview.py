@@ -28,6 +28,7 @@ from .factions import (ALL_FACTIONS, CITIES, CITY, EMBLEMS, FACTION, FACTIONS, G
 from .render import INK, Renderer, _c
 from .sim import H, W
 from .campaign import Campaign
+from .cards import COUNCIL_SEATS
 from .campaign_runner import Runner
 from .cardui import CardTable
 from .officercard import OfficerCard
@@ -312,6 +313,8 @@ class WorldMapScreen:
         home = CITY[FACTION[self.camp.player].capital] if self.camp.player else CITY["kronholm"]
         self.cam = [float(home.x - W // 2), float(home.y - H // 2)]
         self.zoom_back: List[Tuple[float, List[float]]] = []   # views left by zooming out, to come back to
+        self.unit_card: Optional[str] = None               # a unit class shown in its card (click on a portrait)
+        self._unit_boxes: dict = {}
         self.window: Optional[Tuple[str, str]] = None      # ("army" | "hire", city)
         self.win_officer = 0
         self.win_scroll = 0
@@ -369,6 +372,7 @@ class WorldMapScreen:
         self.runner = Runner(self.camp)                   # card plays and turns run in a worker thread
         self.running: Optional[tuple] = None              # what the runner is doing (for its result)
         self.frozen: Optional[pygame.Surface] = None      # the last frame, shown while it runs
+        self.focus: Optional[dict] = None                 # a storm the camera flies to (battle_focus)
         self._clamp()
 
     # --- helpers -----------------------------------------------------------------------------
@@ -395,15 +399,13 @@ class WorldMapScreen:
 
     def _clamp(self) -> None:
         """Keep the map on screen, but let it slide up to half a screen past its edges, so that a city
-        on the very edge can still be brought to the centre. A map smaller than the view stays centred."""
+        on the very edge can still be brought to the centre. A map smaller than the view (zoomed far out)
+        moves too: any of its edges may reach the middle of the screen."""
         z = self.zoom
         vw, vh = W / z, (H - TOP - BOTTOM) / z
         for i, (size, view, pad) in enumerate(((MAP_W, vw, 0.0), (MAP_H, vh, TOP / z))):
             lo, hi = -pad, size - view - pad
-            if hi < lo:
-                self.cam[i] = (lo + hi) / 2
-            else:
-                self.cam[i] = max(lo - view / 2, min(hi + view / 2, self.cam[i]))
+            self.cam[i] = max(min(lo, hi) - view / 2, min(max(lo, hi) + view / 2, self.cam[i]))
 
     def _to_screen(self, x: float, y: float) -> Tuple[int, int]:
         return round((x - self.cam[0]) * self.zoom), round((y - self.cam[1]) * self.zoom)
@@ -473,6 +475,18 @@ class WorldMapScreen:
             if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
                 self.event_show = None
             return None
+        if self.unit_card is not None:                   # the unit card: any click or key closes it
+            if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
+                self.unit_card = None
+            return None
+        if ev.type == pygame.MOUSEBUTTONDOWN:            # a click on a unit's portrait anywhere: its card
+            hit = next((key for rect, key, button in getattr(self.cards, "units", ())
+                        if button == ev.button and rect.collidepoint(mx, my) and unit_exists(key)), None)
+            if hit:
+                from .audio import ui
+                ui("click")
+                self.unit_card = hit
+                return None
         if self.cards.handle(ev, mouse):                 # a face or a name anywhere opens the card
             return None
         if self.window is None and not self.faction_panel and not self.diplomacy:
@@ -611,6 +625,12 @@ class WorldMapScreen:
 
     # --- drawing ------------------------------------------------------------------------------
     def draw(self, s: pygame.Surface) -> None:
+        req = self.runner.request
+        if self.runner.busy() and req and req.get("battle") is not None and req["kind"] in ("ask", "answer"):
+            if self._battle_focus(s, req):               # the camera flies to the storm, then the question
+                self.table.draw_request(s)
+            return
+        self.focus = None
         if self.runner.busy() and self.frozen is not None:
             self.cards.begin(self._mouse)
             s.blit(self.frozen, (0, 0))
@@ -670,6 +690,8 @@ class WorldMapScreen:
         self.cards.draw(s)
         if self.event_show is not None:
             self._event_card(s)
+        if self.unit_card is not None:
+            self._unit_card_draw(s)
         if self.flash > 0:
             veil = pygame.Surface((W, H))
             veil.fill((255, 244, 214))
@@ -717,6 +739,78 @@ class WorldMapScreen:
             s.blit(ban, (px - ban.get_width() // 2, pole_top + 1))
             s.blit(art, (sx - aw // 2, top))
             self._ribbon(s, c, f, sx, sy, hot)
+
+    FOCUS_FLY = 0.9                                      # seconds the camera flies to a storm
+    FOCUS_X = 84                                         # where the stormed city settles on the screen
+
+    def _battle_focus(self, s: pygame.Surface, req: dict) -> bool:
+        """A storm: the camera glides to the city, the attackers' arrow grows towards it, the city flashes
+        under crossed blades and a banner names the battle. True once the question may be asked."""
+        from .fx import ease_back, ease_out
+        b = req["battle"]
+        c = CITY[b.city]
+        if self.focus is None or self.focus["req"] is not req:
+            z = self.zoom
+            to = [c.x - self.FOCUS_X / z, c.y - (TOP + (H - TOP - BOTTOM) * 0.55) / z]
+            src = next((a[2] for a in reversed(self.camp.attacks) if a[3] == b.city), None)
+            self.focus = {"req": req, "t0": self.time, "from": list(self.cam), "to": to, "src": src, "sound": False}
+            self.zoom_back.clear()
+        fo = self.focus
+        t = self.time - fo["t0"]
+        k = ease_out(min(1.0, t / self.FOCUS_FLY))
+        self.cam = [a + (bb - a) * k for a, bb in zip(fo["from"], fo["to"])]
+        self._draw(s)                                    # the living map under the storm
+        att, deff = FACTION[b.attacker], FACTION[b.defender]
+        cx, cy = self._to_screen(c.x, c.y - 6)
+        # the attackers' arrow grows from their city
+        if fo["src"] and fo["src"] != b.city:
+            a = CITY[fo["src"]]
+            ax, ay = self._to_screen(a.x, a.y - 6)
+            g = max(0.0, min(1.0, (t - 0.3) / 0.6))
+            ex, ey = ax + (cx - ax) * g, ay + (cy - ay) * g
+            pygame.draw.line(s, INK, (ax, ay + 1), (ex, ey + 1), 5)
+            pygame.draw.line(s, _c(att.color), (ax, ay), (ex, ey), 3)
+            pygame.draw.line(s, _c(att.light), (ax, ay), (ex, ey), 1)
+        if t > self.FOCUS_FLY * 0.8:
+            if not fo["sound"]:
+                fo["sound"] = True
+                from .audio import ui
+                ui("gong")
+            p = (self.time * 2.2) % 1.0                   # rings rolling out of the city
+            for off in (0.0, 0.5):
+                q = (p + off) % 1.0
+                rad = int(8 + 22 * q)
+                pygame.draw.ellipse(s, _c("#e43b44") if q < 0.6 else _c("#a22633"),
+                                    (cx - rad, cy - rad // 2, rad * 2, rad), 1)
+            pop = ease_back(min(1.0, (t - self.FOCUS_FLY * 0.8) / 0.35))
+            size = int(9 * pop)                          # crossed blades over the city
+            if size > 1:
+                for d in (-1, 1):
+                    pygame.draw.line(s, INK, (cx - size * d, cy - 14 - size), (cx + size * d, cy - 14 + size), 4)
+                    pygame.draw.line(s, _c("#e6dfd0"), (cx - size * d, cy - 14 - size), (cx + size * d, cy - 14 + size), 2)
+                pygame.draw.rect(s, _c("#feae34"), (cx - 2, cy - 16, 4, 4))
+            # the banner slides in under the top bar
+            slide = ease_out(min(1.0, (t - self.FOCUS_FLY * 0.8) / 0.4))
+            title = f"БИТВА ЗА {c.name}"
+            w = max(text_width(title) * 2, text_width(f"{att.short} ПРОТИВ {deff.short}")) + 20
+            bx = int(-w + (w + 6) * slide)
+            s.blit(self.r.panel(w, 26, base="#181425", border=att.color), (bx, TOP + 4))
+            self.font.draw(s, title, bx + w // 2, TOP + 7, "#fee761", scale=2, anchor="midtop")
+            vs = self.font.draw(s, f"{att.short}", bx + 10, TOP + 20, att.light)
+            self.font.draw(s, " ПРОТИВ ", vs.right, TOP + 20, "#8b9bb4")
+            self.font.draw(s, deff.short, vs.right + text_width(" ПРОТИВ "), TOP + 20, deff.light)
+        return t > self.FOCUS_FLY + 0.35
+
+    def _unit_card_draw(self, s: pygame.Surface) -> None:
+        """The squad builder's unit card, over everything."""
+        from .menu import draw_unit_info
+        s.blit(self.dim, (0, 0))
+        self.cards.cover()
+        w, h = 236, 150
+        x, y = W // 2 - w // 2, TOP + 30
+        s.blit(self.r.panel(w, h, base="#181425", border="#c9a24a"), (x, y))
+        draw_unit_info(s, self.r, self.font, self.unit_card, x, y, w, h, 0, self.time, self._unit_boxes)
+        self.font.draw(s, "КЛИК - ЗАКРЫТЬ", x + w // 2, y + h - 9, "#5a6988", anchor="midtop")
 
     def _event_card(self, s: pygame.Surface) -> None:
         """A world event: a big card in the middle of the screen."""
@@ -913,11 +1007,19 @@ class WorldMapScreen:
                 f.draw(s, f"+{len(tags) - i}", min(x, limit - text_width(f"+{len(tags) - i}")), 4, "#fee761")
                 break
             x = f.draw(s, text, x, 4, col).right + 4
+        free_seats = COUNCIL_SEATS - len(self.camp.realms[p].council) if p and self.camp.realms[p].alive else 0
         for b in self.buttons:
             active = b.action == "diplomacy" and self.diplomacy
             s.blit(self.r.panel(b.rect.w, b.rect.h, base="#5a6988" if active else b.color, border="#8b9bb4"),
                    b.rect.topleft)
             f.draw(s, b.label, b.rect.centerx, b.rect.centery, "#ffffff", anchor="center")
+            if b.action == "council" and free_seats > 0:   # free seats: the button calls for an adviser
+                glow = int(abs(math.sin(self.time * 3)) * 255)
+                pygame.draw.rect(s, (255, glow, 60), b.rect.inflate(2, 2), 1)
+                badge = pygame.Rect(b.rect.right - 5, b.rect.y - 2, 7, 7)
+                pygame.draw.rect(s, INK, badge.inflate(2, 2))
+                pygame.draw.rect(s, _c("#e43b44"), badge)
+                f.draw(s, str(free_seats), badge.centerx + 1, badge.centery, "#ffffff", anchor="center")
         y = H - BOTTOM
         s.blit(self.r.panel(W, BOTTOM, base="#181425", border="#5a6988"), (0, y))
         cw = W // len(ALL_FACTIONS)
@@ -1067,6 +1169,7 @@ class WorldMapScreen:
             if unit_exists(key):
                 por = self.r.portrait(f"{key}_{team.key}")
                 s.blit(por, (box.x + 1, box.y + 1), area=pygame.Rect(0, 0, 18, 13))
+                self.cards.units.append((box, key, 1))
             else:
                 font.draw(s, "?", box.centerx, box.centery, "#5a6988", anchor="center")
         y += 17
@@ -1442,6 +1545,7 @@ class WorldMapScreen:
         u = ROSTER[key]
         por = self.r.portrait(f"{key}_{TEAMS[0].key}")
         s.blit(por, (rect.x + 1, rect.y + 2), area=pygame.Rect(0, 0, 18, 13))
+        self.cards.units.append((rect, key, 3))              # a left click moves him, a right click shows him
         name = u.short if len(u.name) > 16 and u.short else u.name
         self.font.draw(s, name, rect.x + 22, rect.y + 2, "#ffffff")
         self.font.draw(s, f"МОЩЬ {u.cost}", rect.x + 22, rect.y + 10, "#feae34")
@@ -1493,8 +1597,8 @@ class WorldMapScreen:
         elif self.time < until:
             font.draw(s, text, r.centerx, r.bottom - 10, col, anchor="midtop")
         else:
-            hint = ("КЛИК ПО СВОБОДНОМУ ВОИНУ - В ОТРЯД ОФИЦЕРА, ПО СЛОТУ - ВЕРНУТЬ В ГОРОД   < > - ОФИЦЕР"
-                    if kind == "army" else "НАНЯТЫЕ ВОИНЫ ВСТАЮТ В ГОРОДЕ. В ОТРЯД ИХ БЕРЁТ ОФИЦЕР В ОКНЕ АРМИИ")
+            hint = ("КЛИК - В ОТРЯД ИЛИ В ГОРОД, ПКМ - КАРТОЧКА ВОИНА   < > - ОФИЦЕР"
+                    if kind == "army" else "НАНЯТЫЕ ВСТАЮТ В ГОРОДЕ, В ОТРЯД ИХ БЕРЁТ ОФИЦЕР. КЛИК ПО ПОРТРЕТУ - КАРТОЧКА")
             font.draw(s, hint, r.centerx, r.bottom - 10, "#5a6988", anchor="midtop")
 
     def _army_left(self, s: pygame.Surface, f: Faction) -> None:
@@ -1559,6 +1663,8 @@ class WorldMapScreen:
             pygame.draw.rect(s, (90, 105, 136), r, 1)
             por = self.r.portrait(f"{key}_{TEAMS[0].key}")
             s.blit(por, (r.x + 2, r.y + 2), area=pygame.Rect(0, 0, 18, 13))
+            self.cards.units.append((pygame.Rect(r.x + 1, r.y + 1, 21, 16), key, 1))
+            self.cards.units.append((r, key, 3))
             name = u.short if len(u.name) > 18 and u.short else u.name
             font.draw(s, name, r.x + 23, r.y + 2, "#ffffff")
             font.draw(s, f"{u.role}, {TIER_NAMES[u.tier]}", r.x + 23, r.y + 10, "#8b9bb4")

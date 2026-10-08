@@ -336,7 +336,12 @@ class CardTable:
         return card.targets[n] if n < len(card.targets) else None
 
     def _options(self) -> list:
-        return self.camp.options(self.player, self.play["inst"].key, self.play["chosen"])
+        """The next step's choices - only those that can still lead to a whole set of targets."""
+        from .cardplay import MULTI as _MULTI, completable
+        key, chosen = self.play["inst"].key, self.play["chosen"]
+        opts = self.camp.options(self.player, key, chosen)
+        multi = self._step() in _MULTI
+        return [o for o in opts if completable(self.camp, self.player, key, chosen + [(o,) if multi else o])]
 
     def _advance(self) -> None:
         """Ask for the next target, or play the card when all are chosen."""
@@ -385,8 +390,10 @@ class CardTable:
     # --- turns ------------------------------------------------------------------------------
     def end_turn(self) -> None:
         if not self.my_turn():
-            if self.player is None:
+            if self.watching():
                 self.next_round()
+            elif not self.ms.runner.busy():               # a realm come back to life: let the others play up to it
+                self.ms.run(self.camp.run_ai, ("end", ""))
             return
         self.cancel()
         self.chron_from = len(self.camp.log)
@@ -401,7 +408,8 @@ class CardTable:
         """Spectator: every realm plays once."""
         self.chron_from = len(self.camp.log)
         self.arrows_from = len(self.camp.attacks)
-        self.ms.run(lambda: self.camp.run_ai(stop_at_player=False, max_turns=1), ("round", ""))
+        # a fallen player watches round by round; should his realm rise again, the round stops at his turn
+        self.ms.run(lambda: self.camp.run_ai(stop_at_player=self.player is not None, max_turns=1), ("round", ""))
 
     def finished(self, what, result) -> None:
         """A background action is over: say what came of it."""
@@ -447,6 +455,10 @@ class CardTable:
 
     # --- requests from a running action: watch a battle? answer a storm? ------------------------
     def _req_rect(self) -> pygame.Rect:
+        if self.ms.focus is not None:                     # a storm on the map: the question sits beside the city
+            req = self.ms.runner.request
+            h = 66 if req and req["kind"] == "ask" else 180
+            return pygame.Rect(W - 326, 36, 320, h)
         return pygame.Rect(W // 2 - 160, 36, 320, 180)
 
     def _req_buttons(self, req) -> List[Tuple[pygame.Rect, object]]:
@@ -493,7 +505,8 @@ class CardTable:
         camp = self.camp
         font = self.font
         r = self._req_rect()
-        s.blit(self.ms.dim, (0, 0))
+        if self.ms.focus is None:                         # with a storm on the map the city stays in plain sight
+            s.blit(self.ms.dim, (0, 0))
         mine = req["kind"] == "answer"
         s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#e43b44" if mine else "#c9a24a"), r.topleft)
         a = camp.attack_power(b.attacker, b.officers, b.city, b.mult)
@@ -771,12 +784,16 @@ class CardTable:
         n = self.camp.reserve(r.council)
         info = f"РУКА {len(r.hand)}/{self.camp.hand_size(r.council)}  КОЛОДА {len(r.draw)}  СБРОС {len(r.discard)}"
         keep = f"ПКМ ПО КАРТЕ - ОСТАВИТЬ ({len(r.keep)}/{n})" if n else ""
+        if len(r.council) < COUNCIL_SEATS:                    # an empty seat: say so where the eye is
+            keep = f"СВОБОДНО В СОВЕТЕ: {COUNCIL_SEATS - len(r.council)} - НАЗНАЧЬТЕ СОВЕТНИКА"
+            n = n or 1
         wide = max(text_width(info), text_width(keep)) + 6
         plate = pygame.Rect(er.right - wide, er.y - (18 if n else 10), wide, 18 if n else 10)
         s.blit(self.ms.r.panel(plate.w, plate.h, base="#181425", border="#3a4466"), plate.topleft)
         self.font.draw(s, info, er.right - 3, er.y - 8, "#8b9bb4", anchor="topright")
         if n:
-            self.font.draw(s, keep, er.right - 3, er.y - 16, "#63c74d", anchor="topright")
+            self.font.draw(s, keep, er.right - 3, er.y - 16,
+                           "#fee761" if len(r.council) < COUNCIL_SEATS else "#63c74d", anchor="topright")
         if self.play and not self.picker:
             self._prompt(s)
 
@@ -1169,14 +1186,18 @@ class CardTable:
         font.draw(s, "X", cr.centerx + 1, cr.centery, "#ffffff", anchor="center")
         font.draw(s, f"СОВЕТ - {f.name}", r.centerx, r.y + 4, "#fee761", anchor="midtop")
         council = self._council()
+        without = None                                    # the council minus the adviser under the mouse's X
+        xtip = None
         # seats
         for i in range(COUNCIL_SEATS):
             rect = self._seat_rect(i)
             sel = i == self.council_seat
             pygame.draw.rect(s, (58, 68, 102) if sel else (38, 43, 68), rect)
             pygame.draw.rect(s, _c("#fee761") if sel else (90, 105, 136), rect, 1)
-            if i >= len(council):
-                font.draw(s, "+ ПУСТОЕ МЕСТО: ВЫБЕРИТЕ СПРАВА", rect.centerx, rect.centery, "#3a4466", anchor="center")
+            if i >= len(council):                         # a free seat invites an adviser
+                pulse = int(abs(math.sin(self.ms.time * 3)) * 80)
+                font.draw(s, "+ СВОБОДНО: НАЗНАЧЬТЕ СОВЕТНИКА СПРАВА", rect.centerx, rect.centery,
+                          (120 + pulse, 120 + pulse, 60), anchor="center")
                 continue
             key = council[i]
             o = OFFICER[key]
@@ -1218,12 +1239,24 @@ class CardTable:
                 x += chip.get_width() + 4
             if i:
                 xr = pygame.Rect(rect.right - 11, rect.y + 2, 9, 9)
-                pygame.draw.rect(s, (162, 38, 51), xr)
+                xhot = xr.collidepoint(mouse)
+                pygame.draw.rect(s, (220, 70, 80) if xhot else (162, 38, 51), xr)
                 font.draw(s, "X", xr.centerx + 1, xr.centery, "#ffffff", anchor="center")
-        # competence
+                if xhot:
+                    without = [k for k in council if k != key]
+        # competence (and what it would be without the adviser under the X)
         comp = self.camp.competence(council)
         y = r.y + 18 + COUNCIL_SEATS * 31 + 2
-        font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} ПОРОГОВ ИЗ 12", r.x + 6, y, "#fee761")
+        if without is not None:
+            comp2 = self.camp.competence(without)
+            col = "#f6757a" if comp2 < comp else "#a7f070" if comp2 > comp else "#fee761"
+            font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} -> {comp2} ПОРОГОВ", r.x + 6, y, col)
+            lost = [k for k in self.camp.thresholds(council) if k not in self.camp.thresholds(without)]
+            gone = ", ".join(CARDS[k].name for k in lost) or "ничего"
+            xtip = f"БЕЗ НЕГО: РУКА {self.camp.hand_size(without)}, ОСТАВИТЬ {self.camp.reserve(without)}; " \
+                  f"УЙДУТ ПОРОГОВЫЕ КАРТЫ: {gone}"
+        else:
+            font.draw(s, f"КОМПЕТЕНТНОСТЬ: {comp} ПОРОГОВ ИЗ 12", r.x + 6, y, "#fee761")
         perks = [f"РУКА {self.camp.hand_size(council)} КАРТ"]
         n = self.camp.reserve(council)
         perks.append(f"МОЖНО ОСТАВИТЬ {n}" if n else "КАРТЫ НЕ ОСТАЮТСЯ")
@@ -1326,8 +1359,9 @@ class CardTable:
                 if hot:
                     self.hover_card = (key, origin_label(origin))
         text, colr, until = self.ms.toast
+        tip = tip or xtip
         if tip:
-            font.draw(s, tip, r.centerx, r.bottom - 10, "#c0cbdc", anchor="midtop")
+            font.draw(s, tip[:120], r.centerx, r.bottom - 10, "#c0cbdc", anchor="midtop")
         elif heir_tip:
             font.draw(s, heir_tip, r.centerx, r.bottom - 10, "#fee761", anchor="midtop")
         elif self.ms.time < until:

@@ -438,8 +438,8 @@ class World:
         shields (halberd hook)."""
         if dst.dead:
             return 0.0
-        if src is not None:
-            amount *= self.fury[src.team]
+        if src is not None:                   # spirit and buffs: harder blows dealt, and taken ones softened
+            amount *= self.fury[src.team] / self.fury[dst.team]
         if dst.has("divine") or dst.has("bats"):
             if not quiet:
                 self.text(dst, "ЩИТ" if dst.has("divine") else "МИМО", "#fee761" if dst.has("divine") else "#c0cbdc")

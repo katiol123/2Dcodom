@@ -1096,6 +1096,11 @@ def _thieves_guild(camp, f, t):
     return out
 
 
+@effect("pride")
+def _pride(camp, f, t):
+    return "гордого советника выслушали - и только"
+
+
 @effect("shiny_pile")
 def _shiny_pile(camp, f, t):
     from .horde import great

@@ -79,6 +79,11 @@ class HiRes:
         """Forget what was registered so far (a modal window now covers it)."""
         self.items = []
 
+    def drop_in(self, rect: pygame.Rect) -> None:
+        """Forget only the pictures a smaller overlay (a card preview) now covers; the rest stay sharp."""
+        rect = pygame.Rect(rect)
+        self.items = [it for it in self.items if not rect.colliderect(it[0])]
+
     def present(self, screen: pygame.Surface, ox: int, oy: int, k: int) -> None:
         items, self.items = self.items, []
         if k <= 1:
