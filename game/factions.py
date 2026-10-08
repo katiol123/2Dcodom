@@ -409,6 +409,20 @@ CITIES: Tuple[City, ...] = (
 )
 CITY: Dict[str, City] = {c.key: c for c in CITIES}
 
+# Starting prosperity of every city (1..10): what an economy card played there brings in.
+# It changes in play (fairs and reforms raise it, over-taxing, raids, sieges and plague lower it).
+PROSPERITY: Dict[str, int] = {
+    "skalvik": 5, "hjoldgard": 6, "wolfdale": 4, "snowbarrow": 2, "whitehorn": 5,
+    "durgheim": 7, "ironmaw": 6, "deepforge": 5, "stoneward": 3, "silvervein": 6,
+    "kronholm": 8, "st_alarius": 5, "ashford": 4, "hartwell": 7, "lumen": 6, "northford": 3, "westwatch": 3,
+    "sylvaen": 7, "moonglade": 5, "worldroots": 4, "stillwater": 5, "silverbrook": 3,
+    "morkhaar": 6, "plagueford": 3, "kingbarrow": 4, "ashharbor": 5, "greymonastery": 4,
+    "valmarra": 9, "corvina": 7, "aurelia": 7, "saltcape": 3, "tremont": 6,
+    "karak_or": 4, "karaordu": 5, "bloodford": 2, "skullmound": 3, "steppecamp": 4,
+    "zarkhad": 9, "bahri": 7, "safir": 5, "redsands": 3, "minaret": 5,
+    "rotheap": 2, "pirateshoal": 2, "shroomhole": 1, "rustdump": 2, "caves": 1, "stinkbog": 1, "redrock": 1,
+}
+
 # Roads (undirected).  Checked by tests: none crosses the sea or the lake.
 ROADS: Tuple[Tuple[str, str], ...] = (
     ("skalvik", "hjoldgard"), ("skalvik", "snowbarrow"), ("hjoldgard", "wolfdale"), ("wolfdale", "whitehorn"),

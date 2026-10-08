@@ -28,6 +28,7 @@ from .factions import (ALL_FACTIONS, CITIES, CITY, EMBLEMS, FACTION, FACTIONS, G
 from .render import INK, Renderer, _c
 from .sim import H, W
 from .campaign import Campaign
+from .cardui import CardTable
 from .officercard import OfficerCard
 from .officers import OFFICER, SQUAD_SLOTS, STAT_HELP, STATS
 from .units import ROSTER, TEAMS, TIER_NAMES
@@ -315,6 +316,8 @@ class WorldMapScreen:
         self.hover_rel: Optional[Tuple[str, str]] = None
         self.keys: Dict[int, bool] = {}
         self.buttons = [
+            Button((W - 236, 2, 34, 11), "СОВЕТ", "council", "#124e89"),
+            Button((W - 200, 2, 44, 11), "ХРОНИКА", "chronicle", "#5a4a1a"),
             Button((W - 154, 2, 74, 11), "ДИПЛОМАТИЯ", "diplomacy"),
             Button((W - 78, 2, 76, 11), "БЫСТРЫЙ БОЙ", "battle", "#a22633"),
         ]
@@ -334,6 +337,7 @@ class WorldMapScreen:
         self.dim = pygame.Surface((W, H), pygame.SRCALPHA)
         self.dim.fill((24, 20, 37, 150))
         self.bar = pygame.Surface((W, 1), pygame.SRCALPHA)
+        self.table = CardTable(self)                      # the hand, targeting, council, chronicle
         self._clamp()
 
     # --- helpers -----------------------------------------------------------------------------
@@ -406,6 +410,9 @@ class WorldMapScreen:
         mx, my = mouse
         if self.cards.handle(ev, mouse):                 # a face or a name anywhere opens the card
             return None
+        if self.window is None and not self.faction_panel and not self.diplomacy:
+            if self.table.handle(ev, mouse):               # cards: the hand, targets, council, chronicle
+                return None
         if self.window is not None:
             return self._window_handle(ev, mx, my)
         if ev.type == pygame.MOUSEWHEEL and not (self.diplomacy or self.faction_panel):
@@ -430,6 +437,13 @@ class WorldMapScreen:
                     if b.action == "diplomacy":
                         self.diplomacy = not self.diplomacy
                         self.faction_panel = None
+                        return None
+                    if b.action == "council":
+                        self.table.open_council()
+                        return None
+                    if b.action == "chronicle":
+                        self.table.chronicle_open = True
+                        self.table.chron_scroll = 0
                         return None
                     return b.action
             if self.diplomacy:
@@ -464,7 +478,7 @@ class WorldMapScreen:
             self.drag = (mx, my, self.cam[0], self.cam[1])
             self.dragged = False
         elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and self.drag:
-            if not self.dragged and self.drag[2] >= 0:
+            if not self.dragged and self.drag[2] >= 0 and not self.table.play:
                 self.selected = self._city_at(mx, my)
             self.drag = None
         elif ev.type == pygame.MOUSEMOTION and self.drag:
@@ -490,6 +504,7 @@ class WorldMapScreen:
         self.time += dt
         self.flash = max(0.0, self.flash - dt * 1.6)
         self._mouse = mouse
+        self.table.update(dt, mouse)
         if self.window is not None:
             self._window_update(mouse)
             return
@@ -519,11 +534,22 @@ class WorldMapScreen:
         s.blit(src, (ox, oy))
         self._landmarks(s)
         self._cities(s)
+        self.table.draw_targets(s)
         self._bars(s)
         self._minimap_draw(s)
+        free = self.window is None and not self.faction_panel and not self.diplomacy
+        if free:
+            self.table.draw_hand(s)
         if self.selected:
             self._city_panel(s, CITY[self.selected])
             self._city_buttons_draw(s)
+        if free:
+            text, col, until = self.toast
+            if self.time < until and not self.table.busy():
+                w = self.font.render(text, col).get_width() + 12
+                rect = pygame.Rect((W - w) // 2, TOP + 18, w, 13)
+                s.blit(self.r.panel(rect.w, rect.h, base="#181425", border=col), rect.topleft)
+                self.font.draw(s, text, rect.centerx, rect.centery, col, anchor="center")
         if self.window is not None or self.faction_panel or self.diplomacy:
             self.cards.cover()                           # a window covers the faces on the map panels
         if self.window is not None:
@@ -535,6 +561,7 @@ class WorldMapScreen:
         if self.diplomacy:
             s.blit(self.dim, (0, 0))
             self._diplo_window(s)
+        self.table.draw_windows(s)
         self.cards.draw(s)
         if self.flash > 0:
             veil = pygame.Surface((W, H))
@@ -624,19 +651,26 @@ class WorldMapScreen:
     def _bars(self, s: pygame.Surface) -> None:
         f = self.font
         s.blit(self.r.panel(W, TOP, base="#181425", border="#5a6988"), (0, 0))
-        f.draw(s, "КАРТА МИРА", 5, 4, "#fee761")
         p = self.camp.player
         if p is None:
-            f.draw(s, "РЕЖИМ ЗРИТЕЛЯ", 52, 4, "#c0cbdc")
-            x = 52 + text_width("РЕЖИМ ЗРИТЕЛЯ") + 10
+            f.draw(s, "РЕЖИМ ЗРИТЕЛЯ", 5, 4, "#c0cbdc")
+            x = 5 + text_width("РЕЖИМ ЗРИТЕЛЯ") + 10
         else:
             fac = FACTION[p]
-            s.blit(self.shields[p], (50, -1))
-            f.draw(s, fac.short, 67, 4, fac.light)
-            x = 67 + text_width(fac.short) + 8
+            s.blit(self.shields[p], (3, -1))
+            f.draw(s, fac.short, 20, 4, fac.light)
+            x = 20 + text_width(fac.short) + 8
             f.draw(s, f"ЗОЛОТО {self.camp.gold[p]}", x, 4, "#fee761")
             x += text_width(f"ЗОЛОТО {self.camp.gold[p]}") + 8
-        f.draw(s, "КОЛЕСО - МАСШТАБ", x, 4, "#5a6988")
+            r = self.camp.realms[p]
+            f.draw(s, "ОД", x, 4, "#41a6f6")
+            x += 13
+            for i in range(max(self.camp.ap_max(p), r.ap)):
+                pygame.draw.rect(s, INK, (x - 1, 3, 7, 9))
+                pygame.draw.rect(s, _c("#41a6f6") if i < r.ap else _c("#262b44"), (x, 4, 5, 7))
+                x += 7
+            x += 4
+        f.draw(s, f"ХОД {self.camp.turn}", x, 4, "#c0cbdc")
         for b in self.buttons:
             active = b.action == "diplomacy" and self.diplomacy
             s.blit(self.r.panel(b.rect.w, b.rect.h, base="#5a6988" if active else b.color, border="#8b9bb4"),
@@ -652,8 +686,9 @@ class WorldMapScreen:
                 pygame.draw.rect(s, _c(fac.color), (x, y + 2, cw - 3, BOTTOM - 4), 1)
             s.blit(self.shields[fac.key], (x + 2, y + 3))
             f.draw(s, fac.short, x + 19, y + 4, fac.light)
-            n = len(cities_of(fac.key))
-            f.draw(s, f"{n} ГОР." if fac.playable else f"{n} ЛОГОВ", x + 19, y + 12, "#8b9bb4")
+            n = len(self.camp.cities_of(fac.key))
+            label = (f"{n} ГОР." if fac.playable else f"{n} ЛОГОВ") if n else "ПАЛА"
+            f.draw(s, label, x + 19, y + 12, "#8b9bb4" if n else "#e43b44")
 
     def _bar_faction(self, mx: int) -> Optional[str]:
         i = mx // (W // len(ALL_FACTIONS))
@@ -678,7 +713,7 @@ class WorldMapScreen:
         c = CITY[self.selected]
         w = 166
         roads = wrap("ДОРОГИ: " + ", ".join(CITY[n].name for n in neighbors(c.key)), w - 10)
-        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 9 + 21
+        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 9 + 21 + 17
         return pygame.Rect(W - w - 4, TOP + 3, w, h)
 
     PANEL_FACES = 9
@@ -697,6 +732,22 @@ class WorldMapScreen:
             font.draw(s, line, r.x + 5, y, "#c0cbdc")
             y += 7
         y += 1
+        pros = self.camp.prosperity[c.key]
+        font.draw(s, "ПРОЦВЕТАНИЕ", r.x + 5, y, "#feae34")
+        for i in range(self.camp.max_prosperity(c.key)):
+            pygame.draw.rect(s, INK, (r.x + 62 + i * 6, y, 5, 6))
+            pygame.draw.rect(s, _c("#feae34") if i < pros else _c("#3a4466"), (r.x + 63 + i * 6, y + 1, 3, 4))
+        font.draw(s, f"ПОДАТЬ {self.camp.income_of(c.key, self.camp.owner[c.key])}", r.right - 5, y, "#fee761",
+                  anchor="topright")
+        y += 8
+        notes = []
+        if c.key in self.camp.siege:
+            notes.append(f"В ОСАДЕ ({FACTION[self.camp.siege[c.key][0]].short})")
+        if c.key in self.camp.defense:
+            notes.append(f"ОБОРОНА x{self.camp.defense[c.key][0]:.2g}")
+        notes.append(f"ЗАЩИТА {int(self.camp.defense_power(c.key))}")
+        font.draw(s, "  ".join(notes), r.x + 5, y, "#8b9bb4")
+        y += 9
         offs = self.camp.officers_in(c.key)
         font.draw(s, f"ОФИЦЕРОВ: {len(offs)}   СВОБОДНЫХ ВОИНОВ: {len(self.camp.free[c.key])}", r.x + 5, y, "#a7f070")
         y += 9

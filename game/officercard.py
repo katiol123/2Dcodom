@@ -44,6 +44,7 @@ class OfficerCard:
         """Start of a frame: forget last frame's clickable spots."""
         self._mouse = mouse
         self.hits = []
+        HIRES.drop()                                     # a new frame: forget last frame's pictures
 
     def cover(self) -> None:
         """A window now covers whatever was drawn so far: its faces are neither sharp nor clickable."""
@@ -176,6 +177,12 @@ class OfficerCard:
         if o.female:
             verdict = verdict[:-2] + "АЯ"
         font.draw(s, verdict, pr.centerx, pr.bottom + 14, trim, anchor="midtop")
+        loy = self.camp.loyalty.get(o.key, 100)
+        font.draw(s, f"ВЕРНОСТЬ {loy}", pr.centerx, pr.bottom + 23, "#63c74d" if loy >= 60 else "#feae34"
+                  if loy >= 35 else "#e43b44", anchor="midtop")
+        realm = self.camp.realms.get(serves.key)
+        if realm and o.key in realm.council:
+            font.draw(s, "СИДИТ В СОВЕТЕ", pr.centerx, pr.bottom + 31, "#fee761", anchor="midtop")
         # who he is
         x = r.x + 118
         name_w = self.font.render(o.name, "#fee761").get_width()
@@ -234,7 +241,27 @@ class OfficerCard:
             v = o.stats[i]
             vcol = "#63c74d" if v >= 15 else "#fee761" if v >= 9 else "#e43b44"
             font.draw(s, str(v), lx, ly + dy + 8, vcol, anchor=anchor)
-        tip = STAT_HELP[STATS[hot]] if hot is not None else "НАВЕДИ НА НАВЫК - ЧТО ОН ДАЁТ.  < > - ДРУГИЕ ОФИЦЕРЫ"
+        # the cards he brings into the council's deck
+        from .cardui import CardArt
+        from .cards import FACTION_CARD, PERSONAL
+        if not hasattr(self, "art"):
+            self.art = CardArt(self.r)
+        mine = [FACTION_CARD[o.faction]] if o.rank == 0 and o.faction == serves.key else list(PERSONAL[o.key])
+        x1, y1 = r.x + 278, r.y + 168
+        font.draw(s, "КАРТЫ В КОЛОДУ СОВЕТА:", x1, y1, "#fee761")
+        y1 += 9
+        hover = None
+        for k in mine:
+            chip = self.art.chip(k)
+            s.blit(chip, (x1, y1))
+            if pygame.Rect(x1, y1, chip.get_width(), 7).collidepoint(self._mouse):
+                hover = k
+            y1 += 8
+        if hover:
+            img = self.art.full(hover, o.name, serves.key)
+            self.cover()
+            s.blit(img, (r.x + 118, r.y + 40))
+        tip = STAT_HELP[STATS[hot]] if hot is not None else "НАВЕДИ НА НАВЫК ИЛИ КАРТУ.  < > - ДРУГИЕ ОФИЦЕРЫ"
         font.draw(s, tip.upper() if hot is not None else tip, r.centerx, r.bottom - 11,
                   "#41a6f6" if hot is not None else "#5a6988", anchor="midtop")
 

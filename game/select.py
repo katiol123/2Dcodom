@@ -207,7 +207,6 @@ class SelectScreen:
     # --- drawing -------------------------------------------------------------------------------
     def draw(self, s: pygame.Surface) -> None:
         self.cards.begin(self._mouse)
-        t = self.time
         cx, cy = int(self.cam[0]), int(self.cam[1])
         s.fill(self.sea)
         s.blit(self.bg, (-cx, -cy))
@@ -350,10 +349,21 @@ class SelectScreen:
                 vc = "#feae34" if label == "ЗОЛОТО" else "#a7f070" if label == "ДРУГ" else \
                     "#f6757a" if label == "ВРАГ" else "#ffffff"
                 font.draw(s, value, r.right - 8, yy, vc, anchor="topright")
-            y = r.y + 64
-            font.draw(s, "ОСОБЕННОСТИ:", col, y, "#fee761")
-            for k, (name, _) in enumerate(c.mechanics[:3]):
-                font.draw(s, name, col, y + 9 + k * 8, "#63c74d")
+            y = r.y + 60
+            from .cards import AP, AP_BONUS, CARDS, FACTION_CARD
+            ap = AP + AP_BONUS.get(c.key, 0)
+            font.draw(s, "ОД ЗА ХОД", col, y, "#8b9bb4")
+            font.draw(s, f"{ap}" + (" (ОРДА: +1)" if ap > AP else ""), r.right - 8, y, "#41a6f6", anchor="topright")
+            font.draw(s, "КАРТА ФРАКЦИИ:", col, y + 10, "#fee761")
+            card = CARDS[FACTION_CARD[c.key]]
+            chip = font.render(card.name, c.light)
+            s.blit(chip, (col, y + 19))
+            if pygame.Rect(col, y + 19, chip.get_width(), 8).collidepoint(self._mouse):
+                from .cardui import CARD_H, CARD_W, CardArt
+                if not hasattr(self, "art"):
+                    self.art = CardArt(self.r)
+                self.cards.cover()
+                s.blit(self.art.full(card.key, "ЛИДЕР", c.key), (col - CARD_W - 8, r.y - CARD_H + 60))
         blink = int(self.time * 2) % 2 == 0
         who = "ЗА " + f.short if c else "В РЕЖИМЕ ЗРИТЕЛЯ"
         hint = f"КЛИК ПО ЗНАМЕНИ ИЛИ ENTER - НАЧАТЬ {who}" if self.chosen is None else "В ПУТЬ!"

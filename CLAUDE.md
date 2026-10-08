@@ -11,6 +11,8 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   Every class has an intended `tier` (weak / below / average / above / boss) chosen *before* its stats; the
   report flags classes outside their tier's aim (`TIER_AIM` in balance.py: weak ~28-40%, average 43-57%,
   above 53-65%). Bosses (troll) are excluded. `python -m game.balance 40` — classic mirror (~50/50)
+- `python -m game.cardsim 64 40` — card/campaign balance: AI plays every realm; per-realm cities, income,
+  desertions and per-card draw/play rates. Run after any card, prosperity or campaign-rule change.
 - Hire price / upkeep (`PRICES` in units.py) come from those measured win rates (formula in the comment);
   re-derive them after big balance changes. Cheap weak units (militia, slinger, zombie, war dog, goblins) exist
   so realms short of gold can still hire.
@@ -45,6 +47,13 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   6 stats 1..20, `bio()` built from faction origin + best/worst stat + quirk (`{м|ж}` gender forms).
 - `campaign.py` (pygame-free): gold, troops standing in cities (`free`), officers' squads (max 7), hire/assign
   rules, `allegiance` (officers may defect). ARMY/HIRE buttons only for the player's own cities.
+- Action cards (docs/CARDS.md): everything on the map is a card played for ОД (5/turn, khanate 6). Data in
+  `cards.py` (catalogue, `PERSONAL` cards, `deck_for` = base set + faction card + council members' cards +
+  stat-threshold cards), effects/targets in `cardplay.py` (`EFFECTS`, `options` step by step), turn engine and
+  battles in `campaign.py`, AI values in `campaign_ai.py` (`VALUE`), UI in `cardui.py`. New card: `_c(...)` in
+  `_CARDS` + `@effect` + AI value + put it in a pool/unique list; then `python -m game.cardsim 64 40` and check
+  per-realm cities/income and the card's play rate; regenerate docs/CARDS.md tables.
+- City prosperity (`PROSPERITY` in factions.py, 1..10) sets tax income; AI realms must stay pygame-free.
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

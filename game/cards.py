@@ -1,0 +1,420 @@
+"""Action cards: the catalogue, officers' personal cards and how a realm's deck is built.
+
+Everything a realm does on the world map is a card played for action points (ОД):
+collecting taxes, marching, storming cities, hiring for free, diplomacy, intrigue.
+
+A realm's deck (see ``deck_for``) is made of
+* the five cards of state (``BASE_SET``: three taxes, a march and an assault);
+* ONE faction card (it belongs to the leader, who always sits in the council);
+* the personal cards of the officers sitting in the council (``personal``);
+* threshold cards: for each of the six stats, the council's total over ``THRESHOLDS[0]``
+  adds a moderate card and over ``THRESHOLDS[1]`` a strong one (12 at most).
+Rivals can slip curses into it (``CURSES``): dead cards that clog the hand for a few
+turns, or cards that go off with a bad effect the moment they are drawn.
+
+This module is data only; what the cards do lives in ``cardplay.py``.
+"""
+
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
+
+from .officers import OFFICER, OFFICERS, STATS, Officer
+
+TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse")
+TIER_NAMES = {"basic": "ОСНОВА", "junk": "ПУСТЯК", "moderate": "ДЕЛЬНАЯ", "strong": "СИЛЬНАЯ",
+              "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ"}
+KIND_NAMES = {"economy": "ХОЗЯЙСТВО", "military": "ВОЙНА", "intrigue": "ИНТРИГА", "diplomacy": "ДИПЛОМАТИЯ",
+              "council": "СОВЕТ", "recruit": "НАБОР", "curse": "БЕДА"}
+
+AP = 5                          # action points per turn
+AP_BONUS = {"khanate": 1}       # the Horde: one more action every turn
+HAND = 5                        # cards drawn at the end of every turn
+COUNCIL_SEATS = 5               # the leader + four advisers
+THRESHOLDS = (62, 80)           # council total of one stat: +1 moderate card, +1 strong card
+
+
+@dataclass(frozen=True)
+class Card:
+    key: str
+    name: str
+    cost: int                   # action points
+    tier: str
+    kind: str
+    text: str
+    targets: Tuple[str, ...] = ()
+    gold: int = 0               # gold paid on top of the action points
+    exhaust: bool = False       # burns after play (leaves the deck for good)
+    unplayable: bool = False    # a dead card in hand
+    on_draw: bool = False       # goes off the moment it is drawn
+    expires: int = 0            # curses: vanish after this many of the owner's turns
+
+
+def _c(key, name, cost, tier, kind, text, targets=(), **kw) -> Card:
+    return Card(key, name, cost, tier, kind, text, tuple(targets), **kw)
+
+
+_CARDS: List[Card] = [
+    # --- the state's own cards: in every deck --------------------------------------------------
+    _c("tax", "ПОДАТЬ", 1, "basic", "economy",
+       "Собрать налог в своём городе: процветание x20 золота. Два хода подряд в одном городе - процветание -1.",
+       ("own_city",)),
+    _c("march", "ПОХОД", 1, "basic", "military",
+       "До 3 офицеров с отрядами идут в соседний свой город.", ("own_city_officers", "officers_here", "dest_adj")),
+    _c("assault", "ШТУРМ", 2, "basic", "military",
+       "До 3 офицеров из соседних городов штурмуют вражеский город. Победа - город ваш.",
+       ("enemy_adj", "attackers")),
+    _c("levy", "НАБОР", 1, "basic", "recruit",
+       "Бесплатные новобранцы в своём городе на 60 мощи + 10 за вербовку лучшего офицера там.", ("own_city",)),
+
+    # --- junk: a little use in a special case, or too dear -------------------------------------
+    _c("feast", "ПИР", 1, "junk", "council", "Офицеры в своём городе: верность +12.", ("own_city_officers",)),
+    _c("hunt", "ОХОТА", 1, "junk", "economy", "Дичь на стол и шкуры на рынок: +30 золота."),
+    _c("omen", "ГАДАНИЕ", 0, "junk", "council", "Посмотреть 3 верхние карты колоды. Одну из них взять в руку, "
+       "если она стоит 0 ОД.", ()),
+    _c("tourney", "ТУРНИР", 2, "junk", "council", "Весь совет: верность +8. Столица: процветание +1."),
+    _c("denounce", "ДОНОС", 1, "junk", "intrigue", "Узнать руку соперника. Если в ней есть проклятие - его "
+       "владелец теряет 20 золота.", ("rival",)),
+    _c("parade", "ПАРАД", 2, "junk", "council", "Офицеры в столице: верность +10, их отряды +10% силы на 2 хода."),
+    _c("guard", "ЛИЧНАЯ ГВАРДИЯ", 1, "junk", "recruit", "Два ополченца в своём городе.", ("own_city",)),
+    _c("old_debt", "СТАРЫЙ ДОЛГ", 1, "junk", "economy", "Стрясти должок: +45 золота, но отношения с "
+       "соперником -8.", ("rival_diplo",)),
+    _c("pilgrimage", "ПАЛОМНИЧЕСТВО", 2, "junk", "council", "Свой офицер: верность 100, и он готов действовать "
+       "снова.", ("own_officer",)),
+
+    # --- moderate ---------------------------------------------------------------------------------
+    _c("fair", "ЯРМАРКА", 1, "moderate", "economy", "Свой город: процветание x10 золота и процветание +1. "
+       "Не считается налогом.", ("own_city",)),
+    _c("caravan", "КАРАВАН", 1, "moderate", "economy", "Два соседних своих города торгуют: (сумма их "
+       "процветания) x9 золота.", ("own_city_pair", "own_city_pair2")),
+    _c("tithe", "ДЕСЯТИНА", 2, "moderate", "economy", "Каждый свой город: процветание x6 золота. Без "
+       "штрафа за поборы."),
+    _c("build", "СТРОЙКА", 1, "moderate", "economy", "Заплатить 80 золота: процветание своего города +2.",
+       ("own_city",), gold=80),
+    _c("loan", "ЗАЙМ", 0, "moderate", "economy", "+220 золота сразу. В колоду ложится ДОЛГ: при каждом "
+       "вытягивании - проценты 40.", ()),
+    _c("militia_call", "ОПОЛЧЕНИЕ", 1, "moderate", "recruit", "Свой город: дешёвые бойцы на 100 мощи и "
+       "оборона x1.25 на 2 хода.", ("own_city",)),
+    _c("volunteers", "ДОБРОВОЛЬЦЫ", 1, "moderate", "recruit", "Свой город: новобранцы на процветание x25 мощи.",
+       ("own_city",)),
+    _c("fortify", "УКРЕПЛЕНИЯ", 1, "moderate", "military", "Свой город: оборона x1.4 на 3 хода.", ("own_city",)),
+    _c("raid", "НАБЕГ", 1, "moderate", "military", "Офицер грабит соседний вражеский город: процветание x12 "
+       "золота, процветание там -1. Город не берётся.", ("enemy_adj", "raider")),
+    _c("siege", "ОСАДА", 1, "moderate", "military", "Соседний вражеский город в осаде 3 хода: оборона x0.75, "
+       "каждый ход процветание -1.", ("enemy_adj",)),
+    _c("supplies", "ПРОВИАНТ", 0, "moderate", "military", "Свой офицер снова готов идти или штурмовать.",
+       ("own_officer_spent",)),
+    _c("morale", "БОЕВОЙ ДУХ", 1, "moderate", "military", "Отряд своего офицера +25% силы на 2 хода.",
+       ("own_officer",)),
+    _c("patrol", "ДОЗОР", 0, "moderate", "council", "Вытянуть 1 карту."),
+    _c("sabotage", "ДИВЕРСИЯ", 1, "moderate", "intrigue", "Вражеский город: процветание -2, гарнизон теряет "
+       "одного воина.", ("enemy_city",)),
+    _c("arson", "ПОДЖОГ", 1, "moderate", "intrigue", "Подбросить сопернику ПОЖАР: вытянув его, он потеряет "
+       "четверть казны.", ("rival",)),
+    _c("bribe", "ПОДКУП", 1, "moderate", "intrigue", "100 золота: верность вражеского офицера -30. Ниже 20 - "
+       "он переходит к вам с отрядом.", ("enemy_city_officers", "enemy_officer_there"), gold=100),
+    _c("agitators", "ПОДСТРЕКАТЕЛИ", 1, "moderate", "intrigue", "В колоду соперника ложатся 2 "
+       "ДЕЗЕРТИРСТВА: вытянув, он теряет воина из лучшего отряда.", ("rival",)),
+    _c("counterspy", "КОНТРРАЗВЕДКА", 1, "moderate", "intrigue", "Сжечь все проклятия в руке и в колоде."),
+    _c("embassy", "ПОСОЛЬСТВО", 1, "moderate", "diplomacy", "Отношения с соперником +15.", ("rival_diplo",)),
+    _c("trade_pact", "ТОРГОВЫЙ ДОГОВОР", 1, "moderate", "diplomacy", "С соперником при отношениях 50+: "
+       "6 ходов оба получают по 25 золота.", ("rival_diplo",)),
+    _c("buyout", "ВЫКУП ЗЕМЛИ", 2, "moderate", "diplomacy", "Купить соседний город державы, с которой мир "
+       "или отношения 50+, если там нет офицеров: процветание x100 золота.", ("city_buyable",)),
+    _c("mobilize", "МОБИЛИЗАЦИЯ", 0, "moderate", "council", "+2 ОД в этот ход. В колоду ложится УСТАЛОСТЬ "
+       "на 3 хода.", ()),
+
+    # --- threshold cards: moderate (first threshold) -------------------------------------------
+    _c("reform", "РЕФОРМА", 1, "moderate", "economy", "Свой город: процветание +2.", ("own_city",)),
+    _c("recruiters", "ВЕРБОВЩИКИ", 1, "moderate", "recruit", "Свой город: новобранцы на 140 мощи.",
+       ("own_city",)),
+    _c("forced_march", "ФОРСИРОВАННЫЙ МАРШ", 1, "moderate", "military", "До 3 офицеров идут на 2 дороги "
+       "по своим землям.", ("own_city_officers", "officers_here", "dest_2")),
+    _c("scouts", "ЛАЗУТЧИКИ", 1, "moderate", "council", "Вытянуть 2 карты и узнать руку соперника.",
+       ("rival",)),
+    _c("truce", "ПЕРЕМИРИЕ", 1, "moderate", "diplomacy", "С соперником при отношениях 30+: 4 хода никто "
+       "ни на кого не нападает.", ("rival_diplo",)),
+    _c("letters", "ПОДМЕТНЫЕ ПИСЬМА", 1, "moderate", "intrigue", "В колоду соперника ложатся 2 СМУТЫ: "
+       "мёртвые карты на 3 хода.", ("rival",)),
+
+    # --- threshold cards: strong (second threshold) ---------------------------------------------
+    _c("golden_age", "ЗОЛОТОЙ ВЕК", 2, "strong", "economy", "Каждый свой город: процветание +1 и "
+       "процветание x6 золота."),
+    _c("conscription", "ВСЕОБЩИЙ ПРИЗЫВ", 2, "strong", "recruit", "Каждый свой город: новобранцы на "
+       "40 + процветание x15 мощи."),
+    _c("blitz", "МОЛНИЕНОСНЫЙ ПОХОД", 2, "strong", "military", "Штурм силами из городов в 3 дорогах от цели, "
+       "+15% силы.", ("enemy_reach", "attackers_far")),
+    _c("all_seeing", "ВСЕВИДЯЩЕЕ ОКО", 1, "strong", "intrigue", "Увидеть руку соперника и сбросить из неё "
+       "2 лучшие карты.", ("rival",)),
+    _c("grand_embassy", "ВЕЛИКОЕ ПОСОЛЬСТВО", 2, "strong", "diplomacy", "С соперником при отношениях 40+: "
+       "мир на 8 ходов, оба получают по 30 золота каждый ход.", ("rival_diplo",)),
+    _c("plot", "ЗАГОВОР", 2, "strong", "intrigue", "Вражеский офицер может перейти к вам с отрядом. "
+       "Шанс выше, если он неверен, а у совета высокая интрига.", ("enemy_city_officers", "enemy_officer_there")),
+
+    # --- faction cards (one per realm, the leader's) ----------------------------------------------
+    _c("edict", "КОРОЛЕВСКИЙ ЭДИКТ", 1, "faction", "economy", "Каждый свой город: процветание x6 "
+       "золота. Без штрафа за поборы."),
+    _c("mother_tree", "ТРОПЫ ДРЕВА-МАТЕРИ", 0, "faction", "military", "До 3 офицеров переходят из своего "
+       "города в любой свой без дорог и остаются готовы. Там оборона x1.3 на 2 хода.",
+       ("own_city_officers", "officers_here", "dest_any")),
+    _c("harvest", "ЖАТВА", 1, "faction", "recruit", "Мёртвые встают: в каждом своём городе нежить на 40 "
+       "мощи, в столице - на 90."),
+    _c("great_raid", "ВЕЛИКИЙ НАБЕГ", 2, "faction", "military", "Все вражеские города у ваших границ "
+       "разграблены: процветание x8 золота с каждого, процветание там -1."),
+    _c("desert_caravans", "КАРАВАНЫ ПУСТЫНИ", 1, "faction", "economy", "+45 золота за каждую державу, с "
+       "которой мир или отношения 40+. Порт: процветание +1."),
+    _c("longships", "ДРАККАРЫ", 2, "faction", "military", "До 3 офицеров из своих портов "
+       "штурмуют любой вражеский порт по морю, без дорог.", ("enemy_port", "attackers_port")),
+    _c("golden_contract", "ЗОЛОТОЙ КОНТРАКТ", 1, "faction", "recruit", "Нанять в свой город до 3 воинов "
+       "из пула ЛЮБОГО города мира за 1.25 цены.", ("own_city",)),
+    _c("book_of_grudges", "КНИГА ОБИД", 1, "faction", "military", "Соперник вписан в Книгу: 6 ходов ваши "
+       "отряды против него +30% силы. Верность совета +10.", ("rival",)),
+    _c("brood", "ВЫВОДОК", 1, "faction", "recruit", "В каждом логове вылупляются гоблины на 110 мощи."),
+
+    # --- unique personal cards: one copy in the whole world --------------------------------------
+    _c("charter", "ГРАМОТА О ВОЛЬНОСТЯХ", 1, "unique", "economy", "Свой город: процветание +3. Сгорает.",
+       ("own_city",), exhaust=True),
+    _c("griffon_order", "ОРДЕН ГРИФОНА", 1, "unique", "military", "Свой офицер: +40% силы на 3 хода, и он "
+       "снова готов.", ("own_officer",)),
+    _c("peers_court", "СУД ПЭРОВ", 1, "unique", "council", "Совет: верность +15. Сжечь проклятия в руке, "
+       "вытянуть 1 карту."),
+    _c("forest_wrath", "ГНЕВ ЛЕСА", 2, "unique", "military", "Соседний вражеский город: все войска там "
+       "теряют 30%.", ("enemy_adj_any",)),
+    _c("thicket_spirits", "ДУХИ ЧАЩИ", 1, "unique", "military", "Свой город: оборона x1.8 на 4 хода.",
+       ("own_city",)),
+    _c("moon_rite", "ЛУННЫЙ ОБРЯД", 0, "unique", "council", "Вытянуть 2 карты."),
+    _c("plague_cauldron", "ЧУМНОЙ КОТЁЛ", 2, "unique", "intrigue", "В колоду соперника ложатся 2 ЧУМЫ: "
+       "вытянутая чума снижает процветание его города на 2.", ("rival",)),
+    _c("raise_dead", "ПОДНЯТЬ ПАВШИХ", 1, "unique", "recruit", "Свой город: нежить на 220 мощи.",
+       ("own_city",)),
+    _c("dead_whisper", "ШЁПОТ МЁРТВЫХ", 0, "unique", "intrigue", "Узнать руку соперника и вытянуть 1 карту.",
+       ("rival",)),
+    _c("wolf_hunt", "ВОЛЧЬЯ ОХОТА", 1, "unique", "military", "Офицер грабит до 2 соседних вражеских городов "
+       "(процветание x12 с каждого) и остаётся готов.", ("own_officer_ready",)),
+    _c("tribute", "ДАНЬ", 1, "unique", "economy", "Каждый сосед с отношениями ниже 30 платит вам 50 золота "
+       "из своей казны."),
+    _c("feigned_retreat", "ЛОЖНОЕ ОТСТУПЛЕНИЕ", 1, "unique", "military", "Свой офицер: +60% силы на 2 хода.",
+       ("own_officer",)),
+    _c("fire_rain", "ОГНЕННЫЙ ДОЖДЬ", 2, "unique", "military", "Соседний вражеский город: все войска там "
+       "теряют 35%.", ("enemy_adj_any",)),
+    _c("harem_intrigue", "ГАРЕМНЫЕ ИНТРИГИ", 1, "unique", "intrigue", "Из совета соперника изгнан самый "
+       "неверный советник (верность -20). Его карты уходят из колоды.", ("rival",)),
+    _c("genie_lamp", "ЛАМПА ДЖИННА", 0, "unique", "council", "+2 ОД и 1 карта. Сгорает.", exhaust=True),
+    _c("winter_storm", "ЗИМНЯЯ БУРЯ", 2, "unique", "military", "Все офицеры соперника скованы льдом: в "
+       "его следующий ход они не ходят и не штурмуют.", ("rival",)),
+    _c("hero_saga", "САГА О ГЕРОЕ", 1, "unique", "military", "Свой офицер: +50% силы на 4 хода, верность 100.",
+       ("own_officer",)),
+    _c("mead_feast", "МЕДОВЫЙ ПИР", 1, "unique", "council", "Офицеры в своём городе: верность +20, отряды "
+       "+15% силы на 2 хода.", ("own_city_officers",)),
+    _c("bill", "ВЕКСЕЛЬ БАНКА", 0, "unique", "economy", "+300 золота. Сгорает.", exhaust=True),
+    _c("mercenary_company", "НАЁМНАЯ РОТА", 1, "unique", "recruit", "150 золота: наёмники на 350 мощи в "
+       "свой город.", ("own_city",), gold=150),
+    _c("secret_auction", "ТАЙНЫЙ АУКЦИОН", 1, "unique", "intrigue", "Забрать случайную карту из руки "
+       "соперника себе в руку.", ("rival",)),
+    _c("rune_gates", "РУННЫЕ ВРАТА", 1, "unique", "military", "Свой город: оборона x2 на 5 ходов.",
+       ("own_city",)),
+    _c("deep_vein", "ГЛУБИННАЯ ЖИЛА", 1, "unique", "economy", "+35 золота за каждый свой город."),
+    _c("forge_golem", "ГОЛЕМ ИЗ ГОРНА", 2, "unique", "recruit", "Свой город: железный голем и жрец рун.",
+       ("own_city",)),
+    _c("mushroom_haze", "ГРИБНОЙ ДУРМАН", 1, "unique", "intrigue", "В колоду соперника ложатся 2 "
+       "ГАЛЛЮЦИНАЦИИ: вытянутая выбивает из руки другую карту.", ("rival",)),
+    _c("troll_wakes", "ТРОЛЛЬ ПРОСНУЛСЯ", 2, "unique", "recruit", "Свой город: тролль. Сгорает.",
+       ("own_city",), exhaust=True),
+    _c("thievery", "ВОРОВСТВО", 1, "unique", "economy", "Украсть до 80 золота у соседней державы.",
+       ("rival_neighbor",)),
+    _c("dragon_gold", "ЗОЛОТО ДРАКОНА", 0, "unique", "economy", "+400 золота. Сгорает.", exhaust=True),
+    _c("ancient_map", "ДРЕВНЯЯ КАРТА", 1, "unique", "military", "Свой офицер переходит в любой свой город "
+       "и остаётся готов.", ("own_officer_ready", "dest_any_one")),
+
+    # --- curses -----------------------------------------------------------------------------------
+    _c("unrest", "СМУТА", 0, "curse", "curse", "Мёртвая карта. Исчезнет через 3 хода.", unplayable=True,
+       expires=3),
+    _c("fire", "ПОЖАР", 0, "curse", "curse", "Вытянув - потерять четверть казны (до 150).", on_draw=True),
+    _c("plague", "ЧУМА", 0, "curse", "curse", "Вытянув - процветание случайного своего города -2. Может "
+       "перекинуться в колоду снова.", on_draw=True),
+    _c("desertion", "ДЕЗЕРТИРСТВО", 0, "curse", "curse", "Вытянув - самый сильный отряд теряет воина.",
+       on_draw=True),
+    _c("strife", "РАСПРИ В СОВЕТЕ", 0, "curse", "curse", "Слабый совет спорит. Мёртвая карта на 2 хода.",
+       unplayable=True, expires=2),
+    _c("fatigue", "УСТАЛОСТЬ", 0, "curse", "curse", "Мёртвая карта на 3 хода.", unplayable=True, expires=3),
+    _c("debt", "ДОЛГ", 0, "curse", "curse", "Вытянув - проценты 40 золота. Сыграть: вернуть 220 золота, "
+       "и долг сгорает.", gold=220, on_draw=True, exhaust=True),
+    _c("haze", "ГАЛЛЮЦИНАЦИИ", 0, "curse", "curse", "Вытянув - случайная другая карта уходит из руки в сброс.",
+       on_draw=True),
+]
+
+CARDS: Dict[str, Card] = {c.key: c for c in _CARDS}
+
+BASE_SET: Tuple[str, ...] = ("tax", "tax", "tax", "march", "assault")
+
+FACTION_CARD: Dict[str, str] = {
+    "aldern": "edict", "sylvan": "mother_tree", "ashen": "harvest", "khanate": "great_raid",
+    "sultanate": "desert_caravans", "north": "longships", "league": "golden_contract",
+    "highland": "book_of_grudges", "goblin": "brood",
+}
+
+# stat -> (card for the first threshold, card for the second)
+THRESHOLD_CARDS: Dict[str, Tuple[str, str]] = {
+    "УПРАВЛЕНИЕ": ("reform", "golden_age"),
+    "ВЕРБОВКА": ("recruiters", "conscription"),
+    "ЛОГИСТИКА": ("forced_march", "blitz"),
+    "РАЗВЕДКА": ("scouts", "all_seeing"),
+    "ДИПЛОМАТИЯ": ("truce", "grand_embassy"),
+    "ИНТРИГА": ("letters", "plot"),
+}
+
+# the faction's unique cards; each goes to one officer (``_holders`` picks who)
+UNIQUES: Dict[str, Tuple[str, ...]] = {
+    "aldern": ("charter", "griffon_order", "peers_court"),
+    "sylvan": ("forest_wrath", "thicket_spirits", "moon_rite"),
+    "ashen": ("plague_cauldron", "raise_dead", "dead_whisper"),
+    "khanate": ("wolf_hunt", "tribute", "feigned_retreat"),
+    "sultanate": ("fire_rain", "harem_intrigue", "genie_lamp"),
+    "north": ("winter_storm", "hero_saga", "mead_feast"),
+    "league": ("bill", "mercenary_company", "secret_auction"),
+    "highland": ("rune_gates", "deep_vein", "forge_golem"),
+    "goblin": ("mushroom_haze", "troll_wakes", "thievery"),
+}
+WANDERING_UNIQUES = {"dragon_gold": "highland", "ancient_map": "sylvan"}   # treasures found far from home
+
+# personal card pools by the officer's strongest stat
+_POOLS: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "УПРАВЛЕНИЕ": {"basic": ("tax",), "moderate": ("fair", "caravan", "tithe", "build", "loan"),
+                   "junk": ("hunt", "tourney", "parade")},
+    "ВЕРБОВКА": {"basic": ("levy",), "moderate": ("militia_call", "volunteers", "mobilize"),
+                 "junk": ("guard", "feast")},
+    "ЛОГИСТИКА": {"basic": ("march", "assault"), "moderate": ("supplies", "siege", "raid", "fortify"),
+                  "junk": ("pilgrimage", "hunt")},
+    "РАЗВЕДКА": {"basic": ("assault",), "moderate": ("patrol", "sabotage", "raid", "morale", "counterspy"),
+                 "junk": ("omen", "denounce")},
+    "ДИПЛОМАТИЯ": {"basic": ("tax",), "moderate": ("embassy", "trade_pact", "fair", "buyout"),
+                   "junk": ("old_debt", "feast")},
+    "ИНТРИГА": {"basic": ("levy",), "moderate": ("bribe", "arson", "counterspy", "agitators"),
+                "junk": ("denounce", "omen")},
+}
+
+
+def _holders() -> Dict[str, str]:
+    """card -> officer. Mostly the faction's *weakest* officers hold its unique cards (so taking
+    one into the council costs competence); one goes to a middling officer."""
+    from .faces import presence
+    out: Dict[str, str] = {}
+    for fk, cards in UNIQUES.items():
+        offs = sorted(OFFICERS[fk][1:], key=presence)
+        picks = [offs[0], offs[1], offs[len(offs) // 2]]
+        for card, o in zip(cards, picks):
+            out[card] = o.key
+    for card, fk in WANDERING_UNIQUES.items():
+        taken = set(out.values())
+        offs = [o for o in sorted(OFFICERS[fk][1:], key=presence) if o.key not in taken]
+        out[card] = offs[2].key
+    return out
+
+
+def _empty_heads() -> set:
+    """Two of each faction's most able officers who bring nothing but trifles to the table."""
+    from .faces import presence
+    out = set()
+    for fk, offs in OFFICERS.items():
+        best = sorted(offs[1:], key=presence, reverse=True)
+        out.update(o.key for o in best[:2])
+    return out
+
+
+def _personal() -> Dict[str, Tuple[str, ...]]:
+    holders = _holders()
+    by_officer: Dict[str, List[str]] = {}
+    for card, o in holders.items():
+        by_officer.setdefault(o, []).append(card)
+    empty = _empty_heads()
+    used: Dict[str, int] = {}
+    out: Dict[str, Tuple[str, ...]] = {}
+    for o in OFFICER.values():
+        if o.rank == 0:
+            out[o.key] = ()                      # the leader brings the faction card
+            continue
+        r = random.Random(f"cards:{o.key}")
+        cards = list(by_officer.get(o.key, ()))
+        n = 2 if o.rank <= 2 else 1 + (r.random() < 0.5)
+        while len(cards) < n:
+            weights = [o.stats[i] ** 2 for i in range(len(STATS))]
+            stat = r.choices(STATS, weights)[0]
+            pool = _POOLS[stat]
+            if o.key in empty or by_officer.get(o.key):
+                tier = r.choice(("junk", "junk", "basic"))
+            else:
+                tier = r.choices(("basic", "moderate", "junk"), (0.3, 0.55, 0.15))[0]
+            least = min(used.get(k, 0) for k in pool[tier])       # spread cards over the officers
+            pick = r.choice([k for k in pool[tier] if used.get(k, 0) == least])
+            used[pick] = used.get(pick, 0) + 1
+            cards.append(pick)
+        out[o.key] = tuple(cards)
+    return out
+
+
+PERSONAL: Dict[str, Tuple[str, ...]] = _personal()
+UNIQUE_HOLDER: Dict[str, str] = _holders()
+
+
+def personal(officer: str) -> Tuple[str, ...]:
+    return PERSONAL[officer]
+
+
+def council_totals(council: List[str]) -> Dict[str, int]:
+    return {st: sum(OFFICER[o].stats[i] for o in council) for i, st in enumerate(STATS)}
+
+
+def threshold_cards(council: List[str]) -> List[str]:
+    out = []
+    totals = council_totals(council)
+    for st in STATS:
+        mid, top = THRESHOLD_CARDS[st]
+        if totals[st] >= THRESHOLDS[0]:
+            out.append(mid)
+        if totals[st] >= THRESHOLDS[1]:
+            out.append(top)
+    return out
+
+
+def competence(council: List[str]) -> int:
+    """How many thresholds the council clears (0..12)."""
+    return len(threshold_cards(council))
+
+
+def hand_size(council: List[str]) -> int:
+    return HAND + (1 if competence(council) >= 6 else 0)
+
+
+def reserve(council: List[str]) -> int:
+    """Cards the realm may keep in hand from one turn to the next."""
+    c = competence(council)
+    return 2 if c >= 8 else 1 if c >= 3 else 0
+
+
+def intercepts(council: List[str]) -> bool:
+    """A council with a good eye for spies (first РАЗВЕДКА threshold) catches a third of the
+    curses rivals slip into its deck."""
+    return council_totals(council)["РАЗВЕДКА"] >= THRESHOLDS[0]
+
+
+def strife(council: List[str]) -> bool:
+    """A weak council quarrels: every third turn a dead card lands in its own deck."""
+    return competence(council) <= 1
+
+
+def deck_for(faction: str, council: List[str]) -> List[str]:
+    """Card keys of the realm's deck (curses come on top of this during play)."""
+    cards = list(BASE_SET) + [FACTION_CARD[faction]]
+    for o in council:
+        cards.extend(PERSONAL[o])
+    cards.extend(threshold_cards(council))
+    return cards
+
+
+def best_council(faction_officers: List[Officer], leader: Officer) -> List[str]:
+    """A default council: the leader and the four most able officers."""
+    from .faces import presence
+    rest = sorted((o for o in faction_officers if o.key != leader.key), key=presence, reverse=True)
+    return [leader.key] + [o.key for o in rest[:COUNCIL_SEATS - 1]]
