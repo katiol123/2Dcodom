@@ -148,6 +148,8 @@ class Campaign:
             self.order.insert(0, player)
         self.current = 0
         self._deploy()
+        for a, b in itertools.combinations([f.key for f in ALL_FACTIONS], 2):
+            self.rel[_pair(a, b)] = relation(a, b)[0]
         self.realms: Dict[str, Realm] = {}
         for f in ALL_FACTIONS:
             offs = OFFICERS[f.key]
@@ -158,8 +160,6 @@ class Campaign:
                 self.loyalty[o] = min(100, self.loyalty[o] + 8)
             self._build_deck(f.key)
             self._draw(f.key, hand_size(self.realms[f.key].council))
-        for a, b in itertools.combinations([f.key for f in ALL_FACTIONS], 2):
-            self.rel[_pair(a, b)] = relation(a, b)[0]
         self._start_turn(self.order[0])
 
     # --- setup ------------------------------------------------------------------------------

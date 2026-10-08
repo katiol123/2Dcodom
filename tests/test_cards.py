@@ -293,6 +293,10 @@ class CampaignCardsTest(unittest.TestCase):
         self.assertTrue(all(c.officer_city[o] == target for o in offs[:3]))
         self.assertTrue(all(o not in c.ready for o in offs[:3]))        # they acted this turn
 
+    def test_any_seed_starts(self):
+        for seed in range(1, 41):                                       # vices may go off in the first hand
+            Campaign(None, seed=seed)
+
     def test_ai_campaign_runs_and_stays_consistent(self):
         for seed in (1, 2):
             c = Campaign(None, seed=seed)
