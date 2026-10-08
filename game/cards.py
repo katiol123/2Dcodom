@@ -75,6 +75,9 @@ _CARDS: List[Card] = [
     _c("levy", "НАБОР", 1, "basic", "recruit",
        "Бесплатные новобранцы в своём городе на 60 мощи + 10 за вербовку лучшего офицера там.", ("own_city",)),
 
+    _c("buy_off", "ОТКУП ОТ ОРДЫ", 1, "basic", "diplomacy", "Заплатить гоблинам 60 золота + 30 за каждый свой "
+       "город у логов: 4 хода орда не штурмует и не грабит вас (а вы не трогаете её). Золото уходит орде. Если "
+       "орды рядом нет - собранное серебро остаётся: +15 золота за каждый свой город."),
     _c("muster", "СБОР ВОЙСК", 1, "basic", "recruit", "Открыть найм в своём городе на этот ход. Вербовка "
        "совета 62+: ещё на 1 ход, 80+: ещё на 2.", ("own_city",)),
 
@@ -171,6 +174,18 @@ _CARDS: List[Card] = [
     _c("letters", "ПОДМЕТНЫЕ ПИСЬМА", 1, "moderate", "intrigue", "В колоду соперника ложатся 2 СМУТЫ: "
        "мёртвые карты на 3 хода.", ("rival",)),
 
+    # --- the horde's own versions of cards that do not suit goblins (``GOBLIN_SWAP``) -------------
+    _c("intimidate", "ЗАПУГИВАНИЕ", 1, "moderate", "intrigue", "Соседняя держава платит орде 60 золота, а нет "
+       "золота - её приграничный город теряет 1 процветания.", ("rival_neighbor",)),
+    _c("great_fear", "ВЕЛИКИЙ СТРАХ", 2, "strong", "intrigue", "Каждая соседняя держава платит орде 50 золота, "
+       "а нет золота - её приграничный город теряет 1 процветания."),
+    _c("dirty_tricks", "ПАКОСТИ", 1, "moderate", "intrigue", "Гоблины гадят сопернику: в его колоду ложатся "
+       "2 СМУТЫ - мёртвые карты на 3 хода.", ("rival",)),
+    _c("flea_market", "БАРАХОЛКА", 1, "moderate", "economy", "Своё логово: процветание x10 золота за краденое "
+       "и процветание +1.", ("own_city",)),
+    _c("fat_year", "ЖИРНЫЙ ГОД", 2, "strong", "economy", "Каждое своё логово: процветание +1 и процветание x6 "
+       "золота."),
+
     # --- threshold cards: strong (second threshold) ---------------------------------------------
     _c("purge", "ЧИСТКА КАНЦЕЛЯРИИ", 1, "strong", "council", "Сжечь навсегда одну карту из руки (хоть "
        "проклятие) и вытянуть новую.", ("hand_card",)),
@@ -260,6 +275,13 @@ _CARDS: List[Card] = [
     _c("thievery", "ВОРОВСТВО", 1, "unique", "economy", "Украсть до 80 золота у соседней державы.",
        ("rival_neighbor",)),
     _c("dragon_gold", "ЗОЛОТО ДРАКОНА", 0, "unique", "economy", "+400 золота. Сгорает.", exhaust=True),
+    _c("head_hunters", "ОХОТНИКИ ЗА ГОЛОВАМИ", 1, "moderate", "military", "Соседнее гоблинское логово: "
+       "войска там теряют 25%, за головы +40 золота.", ("enemy_lair",)),
+    _c("goblin_tongue", "ГОБЛИНСКИЙ ТОЛМАЧ", 1, "moderate", "diplomacy", "Уговорить вожака без золота: 4 хода "
+       "орда не трогает вас (а вы её), и ватага гоблинов на 100 мощи переходит к вам в свой город.",
+       ("own_city",)),
+    _c("shiny_pile", "КУЧА БЛЕСТЯШЕК", 1, "moderate", "economy", "+20 золота за каждое своё логово; пока "
+       "великой постройки орды нет - +30."),
     _c("ancient_map", "ДРЕВНЯЯ КАРТА", 1, "unique", "military", "Свой офицер переходит в любой свой город "
        "и остаётся готов.", ("own_officer_ready", "dest_any_one")),
 
@@ -352,6 +374,25 @@ COURSES: Dict[str, Course] = {c.key: c for c in (
            "ПАРАНОЙЯ: верность всех своих офицеров падает на 1 каждый ход."),
 )}
 COURSE_BASE_CD, COURSE_MIN_CD = 10, 3
+
+# cards that do not suit the horde (it has no diplomacy, writes no letters, holds no fairs) and what
+# goblins get in their place
+GOBLIN_SWAP: Dict[str, str] = {"truce": "intimidate", "grand_embassy": "great_fear", "letters": "dirty_tricks",
+                               "fair": "flea_market", "golden_age": "fat_year"}
+
+
+def localize(faction: Optional[str], key: str) -> str:
+    return GOBLIN_SWAP.get(key, key) if faction == "goblin" else key
+
+
+def course_base(faction: Optional[str], course: str) -> Tuple[str, ...]:
+    """The cards of state of a course for this realm: goblins get their own versions; every human
+    realm buys the horde off with one card instead of a tax (instead of an assault on the war course)."""
+    base = [localize(faction, k) for k in COURSES[course].base]
+    if faction and faction != "goblin":
+        drop = "tax" if base.count("tax") >= 2 else "assault"
+        base[len(base) - 1 - base[::-1].index(drop)] = "buy_off"
+    return tuple(base)
 
 
 def course_cooldown(council: List[str], stats: Stats = None) -> int:
@@ -521,6 +562,11 @@ _TRADES = {"master_builder": ("УПРАВЛЕНИЕ", ("highland", "sultanate", 
            "sappers": ("РАЗВЕДКА", ("khanate", "north", "highland", "league"))}
 
 
+_TRADES.update({"head_hunters": ("РАЗВЕДКА", ("aldern", "league", "highland", "khanate")),
+                "goblin_tongue": ("ДИПЛОМАТИЯ", ("sultanate", "ashen", "north")),
+                "shiny_pile": ("УПРАВЛЕНИЕ", ("goblin", "goblin"))})
+
+
 def _give_trades() -> None:
     for card, (stat, realms) in _TRADES.items():
         i = STATS.index(stat)
@@ -552,15 +598,15 @@ def council_totals(council: List[str], stats: Stats = None) -> Dict[str, int]:
     return {st: sum(get(o)[i] for o in council) for i, st in enumerate(STATS)}
 
 
-def threshold_cards(council: List[str], stats: Stats = None) -> List[str]:
+def threshold_cards(council: List[str], stats: Stats = None, faction: Optional[str] = None) -> List[str]:
     out = []
     totals = council_totals(council, stats)
     for st in STATS:
         mid, top = THRESHOLD_CARDS[st]
         if totals[st] >= THRESHOLDS[0]:
-            out.append(mid)
+            out.append(localize(faction, mid))
         if totals[st] >= THRESHOLDS[1]:
-            out.append(top)
+            out.append(localize(faction, top))
     return out
 
 
@@ -599,10 +645,10 @@ def muster_turns(council: List[str], stats: Stats = None) -> int:
 
 def deck_for(faction: str, council: List[str], course: str = "balance") -> List[str]:
     """Card keys of the realm's deck (curses come on top of this during play)."""
-    cards = list(COURSES[course].base) + [FACTION_CARD[faction], "sickness"]
+    cards = list(course_base(faction, course)) + [FACTION_CARD[faction], "sickness"]
     for o in council:
         cards.extend(PERSONAL.get(o, ()))
-    cards.extend(threshold_cards(council))
+    cards.extend(threshold_cards(council, faction=faction))
     return cards
 
 

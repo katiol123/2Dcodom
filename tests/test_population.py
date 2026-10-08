@@ -170,8 +170,8 @@ class BuildingTest(unittest.TestCase):
             self.assertGreaterEqual(sum(1 for v in PERSONAL.values() if k in v), 3, k)
             self.assertIn(k, CARDS)
 
-    def test_twenty_four_reigns(self):
-        self.assertEqual(len(reign.REIGNS), 24)
+    def test_twenty_eight_reigns(self):
+        self.assertEqual(len(reign.REIGNS), 28)
         used = {t for _, tr in reign.REIGNS.values() for t in tr}
         self.assertEqual(used, set(reign.TRAITS))
 

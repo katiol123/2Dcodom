@@ -1216,7 +1216,9 @@ class CardTable:
         for i, st in enumerate(STATS):
             yy = r.y + 27 + i * 29
             v = totals[st]
-            mid, top = THRESHOLD_CARDS[st]
+            from .cards import localize
+            fk = self.camp.allegiance.get(council[0]) if council else None
+            mid, top = (localize(fk, k) for k in THRESHOLD_CARDS[st])
             font.draw(s, st, x0, yy, "#c0cbdc")
             font.draw(s, str(v), x0 + 116, yy, "#ffffff", anchor="topright")
             bar = pygame.Rect(x0, yy + 8, 116, 4)
@@ -1366,7 +1368,8 @@ class CardTable:
             font.draw(s, c.name + (" (СЕЙЧАС)" if cur else ""), row.x + 5, row.y + 3, "#fee761" if cur else "#ffffff")
             x = row.x + 110
             from collections import Counter
-            for k, n in Counter(c.base).items():
+            from .cards import course_base
+            for k, n in Counter(course_base(realm.key, key)).items():
                 chip = self.art.chip(k)
                 s.blit(chip, (x, row.y + 3))
                 if pygame.Rect(x, row.y + 3, chip.get_width(), 7).collidepoint(mouse):

@@ -39,8 +39,9 @@ class CardDataTest(unittest.TestCase):
         for f, offs in OFFICERS.items():
             council = [o.key for o in offs[:COUNCIL_SEATS]]
             deck = deck_for(f, council)
-            expect = list(BASE_SET) + ["muster", FACTION_CARD[f], "sickness"] + [k for o in council for k in PERSONAL[o]] + \
-                threshold_cards(council)
+            from game.cards import course_base
+            expect = list(course_base(f, "balance")) + [FACTION_CARD[f], "sickness"] + \
+                [k for o in council for k in PERSONAL[o]] + threshold_cards(council, faction=f)
             self.assertEqual(sorted(deck), sorted(expect))
             self.assertEqual(PERSONAL[offs[0].key], ())                 # the leader brings the faction card
 
@@ -176,7 +177,8 @@ class CampaignCardsTest(unittest.TestCase):
         self.assertEqual(r.course, "balance")
         self.assertTrue(c.change_course("aldern", "war"))
         base = Counter(x.key for x in r.all_cards() if x.origin == "base")
-        self.assertEqual(base, Counter(COURSES["war"].base))
+        from game.cards import course_base
+        self.assertEqual(base, Counter(course_base("aldern", "war")))
         cd = course_cooldown(r.council)
         self.assertEqual(r.course_cd, cd)
         self.assertFalse(c.can_change_course("aldern", "economy")[0])     # locked for a while

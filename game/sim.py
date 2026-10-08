@@ -288,8 +288,9 @@ class World:
 
     def __init__(self, slots: Sequence[Slot], anims: Dict[str, Dict[str, AnimInfo]], seed: int = 1,
                  summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS,
-                 towers: Sequence[int] = ()):
+                 towers: Sequence[int] = (), fury: Tuple[float, float] = (1.0, 1.0)):
         self.rng = random.Random(seed)
+        self.fury = fury              # damage multiplier of each team (the goblin horde's war totem)
         self._order_rng = random.Random(seed * 7919 + 1)   # who acts first this frame: no side always wins ties
         self.seed = seed
         self.teams = teams
@@ -415,6 +416,8 @@ class World:
         shields (halberd hook)."""
         if dst.dead:
             return 0.0
+        if src is not None:
+            amount *= self.fury[src.team]
         if dst.has("divine") or dst.has("bats"):
             if not quiet:
                 self.text(dst, "ЩИТ" if dst.has("divine") else "МИМО", "#fee761" if dst.has("divine") else "#c0cbdc")

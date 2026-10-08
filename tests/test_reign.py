@@ -8,8 +8,8 @@ from game.officers import OFFICER
 
 
 class ReignTest(unittest.TestCase):
-    def test_thirty_traits_all_used(self):
-        self.assertEqual(len(reign.TRAITS), 30)
+    def test_thirty_three_traits_all_used(self):
+        self.assertEqual(len(reign.TRAITS), 33)
         used = {t for _, traits in reign.REIGNS.values() for t in traits}
         self.assertEqual(used, set(reign.TRAITS))
         for name, desc in reign.TRAITS.values():

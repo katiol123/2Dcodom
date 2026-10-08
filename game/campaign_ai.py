@@ -110,7 +110,8 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
     best = (-1.0, [])
     h = hegemon(camp)
     foes = set(enemy_of_alliance(camp, f)) | ({h} if h and h != f else set())
-    need = reign.min_odds(camp, f)
+    from .horde import odds_bonus
+    need = reign.min_odds(camp, f) - odds_bonus(camp, f)
     ruler = camp.leader.get(f)
     for target in options(camp, f, key, []):
         cands = options(camp, f, key, [target])
@@ -215,6 +216,12 @@ def _enemy_officer(camp, f: str, key: str, score: Callable[[str], float]) -> Tup
     return best
 
 
+def _goblin_target(camp, f: str) -> bool:
+    """Our best storm would hit a goblin lair (buying the horde off would forbid it)."""
+    v, plan = _attack_plan(camp, f, "assault")
+    return bool(plan) and camp.owner[plan[0]] == "goblin"
+
+
 def _frontline_officer(camp, f: str) -> float:
     front = set(frontier(camp, f))
     return max((camp.power(o.key) for o in camp.officers_of(f) if camp.officer_city[o.key] in front), default=0)
@@ -224,9 +231,24 @@ def _hand_has_more(camp, f: str, exclude) -> bool:
     return any(c is not exclude and not c.card.unplayable and c.card.cost > 0 for c in camp.realms[f].hand)
 
 
+def _horde_danger(camp, f: str) -> float:
+    """What the horde's armies at our border may cost us while it is not bought off."""
+    from .horde import border
+    danger = 0.0
+    for c in border(camp, f):
+        g = max((sum(camp.power(o.key) * camp.officer_mult(o.key) for o in camp.officers_in(n))
+                 for n in neighbors(c) if camp.owner[n] == "goblin"), default=0.0)
+        danger += camp.win_chance(g, camp.defense_power(c)) * _city_worth(camp, c) * 0.5
+    return danger
+
+
+# the horde's versions of cards are valued as the originals
+ALIAS = {"dirty_tricks": "letters", "flea_market": "fair", "fat_year": "golden_age"}
+
+
 # --- card values: (value in gold, targets) ----------------------------------------------------
 def _v(camp, f, inst) -> Tuple[float, list]:
-    k = inst.key
+    k = ALIAS.get(inst.key, inst.key)
     gold = camp.gold[f]
     econ = _econ_factor(camp, f)
     from . import reign
@@ -276,6 +298,39 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         payers = [x for x in camp.alive() if x not in (f, "goblin") and camp.relation(f, x) < 30
                   and any(camp.owner[n] == x for c in own for n in neighbors(c))]
         return sum(min(50, camp.gold[x]) for x in payers), []
+    if k in ("buy_off", "goblin_tongue"):
+        from .horde import BUY_OFF_SILVER, buy_off_price, threatened
+        if not threatened(camp, f):
+            if k == "goblin_tongue":
+                score, city = _recruit_city(camp, f, camp.cities_of(f))
+                return 100 * POWER_VALUE * econ, [city]
+            return BUY_OFF_SILVER * len(camp.cities_of(f)), []
+        if camp.paid.get(f, 0) > 1 or reign.has(camp, f, "hunter"):
+            return -1, []
+        v = _horde_danger(camp, f) * (2.0 if reign.has(camp, f, "appeaser") else 1.0)
+        v -= max(0.0, _attack_plan(camp, f, "assault")[0]) * 0.6 if _goblin_target(camp, f) else 0
+        if k == "goblin_tongue":
+            score, city = _recruit_city(camp, f, camp.cities_of(f))
+            return v + 100 * POWER_VALUE * econ, [city]
+        price = buy_off_price(camp, f)
+        if gold - price < camp.upkeep(f):
+            return -1, []
+        return v - price, []
+    if k == "head_hunters":
+        def s(c):
+            troops = sum(camp.power(o.key) for o in camp.officers_in(c)) + sum(t.power for t in camp.free[c])
+            return (troops * 0.25 * POWER_VALUE + 40) * (1.5 if reign.has(camp, f, "hunter") else 1.0)
+        return _best_city(camp, f, k, s)
+    if k == "shiny_pile":
+        from .horde import great
+        return (20 if great(camp) else 30) * len(camp.cities_of(f)), []
+    if k == "intimidate":
+        return _best_rival(camp, f, k, lambda r: 60 if camp.gold[r] >= 60 else PROSPERITY_VALUE * 0.5)
+    if k == "great_fear":
+        own = set(camp.cities_of(f))
+        near = [x for x in camp.alive() if x != f and not camp.at_peace(f, x)
+                and any(camp.owner[n] == x for c in own for n in neighbors(c))]
+        return sum(50 if camp.gold[x] >= 50 else PROSPERITY_VALUE * 0.5 for x in near), []
     if k == "desert_caravans":
         friends = [x for x in camp.alive() if x not in (f, "goblin")
                    and (camp.at_peace(f, x) or camp.relation(f, x) >= 40)]
@@ -327,11 +382,12 @@ def _v(camp, f, inst) -> Tuple[float, list]:
                         best = (v, [o, c])
         return best
     if k == "raid":
+        from .horde import raid_mult
         best = (-1.0, [])
         for c in options(camp, f, k, []):
             for o in options(camp, f, k, [c]):
                 risk = 20 if camp.defense_power(c) > camp.power(o) * 1.5 else 0
-                v = camp.prosperity[c] * 12 + 25 - risk
+                v = (camp.prosperity[c] * 12 + 25) * raid_mult(camp, f) - risk
                 if v > best[0]:
                     best = (v, [c, o])
         return best
@@ -603,19 +659,24 @@ def manage(camp, f: str) -> None:
     if margin < 0:
         reserve = 4 * up                                # cannot afford a bigger army
     from . import reign
-    reserve = reign.reserve(camp, f, reserve)
-    front = [c for c in camp.cities_of(f) if camp.muster.get(c, 0) > 0]      # recruiting is open only there
+    from .horde import pen_hire, saving
+    reserve = reign.reserve(camp, f, reserve) + saving(camp, f)          # the horde hoards for its great building
+    pen = [c for c in camp.cities_of(f) if pen_hire(camp, c, "wolf_rider")]
+    front = [c for c in camp.cities_of(f) if camp.muster.get(c, 0) > 0 or c in pen]   # recruiting is open only there
     for c in sorted(front, key=lambda c: -threat(camp, f, c)):
+        pool = (camp._pool(c) if camp.muster.get(c, 0) > 0 else []) + (["wolf_rider"] if c in pen else [])
         for o in camp.officers_in(c):
             while camp.gold[f] > reserve:
                 room = camp.leadership(o.key) - camp.power(o.key)
-                cands = [k for k in camp._pool(c) if ROSTER[k].cost <= room and ROSTER[k].cost <= camp.gold[f] - reserve
+                cands = [k for k in pool if ROSTER[k].cost <= room and camp.hire_price(c, k) <= camp.gold[f] - reserve
                          and not ROSTER[k].boss and camp.troop_upkeep(f, k) <= max(0, margin - 0.1 * up)
                          and reign.hire_ok(camp, f, k)]
                 if not cands or len(camp.squads[o.key]) >= 7:
                     break
-                k = max(cands, key=lambda k: ROSTER[k].cost)
+                k = max(cands, key=lambda k: ROSTER[k].cost / camp.hire_price(c, k) + ROSTER[k].cost / 1000)
                 t = camp.hire(c, k)
+                if t is None:
+                    break
                 camp.assign(o.key, t.id)
                 margin -= camp.troop_upkeep(f, k)
 
@@ -746,6 +807,8 @@ def play_turn(camp, f: str) -> None:
     if not camp.realms[f].alive:
         return
     manage(camp, f)
+    from . import horde
+    horde.ai_build(camp, f)                  # the horde's great building, once it has hoarded enough
     pick_course(camp, f)
     fill_council(camp, f)
     from .diplomacy import ai_turn

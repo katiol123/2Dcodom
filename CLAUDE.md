@@ -81,7 +81,8 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   ruler's cards become the ruler's cards, the dead ruler's stay as `Realm.legacy` (one ruler only); then
   political instability (`Realm.unrest`). Use `camp.is_leader(o)`, never `rank == 0`, for "the ruler".
   Dead officers stay in `camp.dead` (excluded from `officers_of/officers_in`).
-- Reign types (`reign.py`): every officer has a reign type of 3 traits (30 traits, 12 types); it acts only
+- Reign types (`reign.py`): every officer has a reign type of 3 traits (33 traits, 28 types; `GOBLIN_ONLY` /
+  `HUMAN_ONLY` types); it acts only
   while he rules a computer realm (`ruler_traits` is empty for the player's realm) and is shown only then.
   Traits hook card values, attack odds, leader risk, hiring, council, course, diplomacy, prisoners, loyalty.
   The AI risks its ruler in a storm only above `leader_odds` or when desperate (`campaign_ai._attack_plan`).
@@ -91,6 +92,13 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   them. Iterate the starting cast with `OFFICERS`, not `OFFICER` (newcomers are added to it at runtime).
 - Buildings (`buildings.py`): 7 kinds, slots per city, built for gold + 1 AP (city window СТРОЙКА, AI
   `ai_build`), ruined by raids/storms/capture. The tower is a `sim.Tower` shooting in real battles.
+- The horde (`horde.py`): goblins build no buildings; they hoard (`saving`) for ONE great building (totem /
+  pit / warg pen, `GREAT`) that sets their manner; it is shown to the player as a big card (`world_events`
+  key `great:<kind>`). Check that the three stay equally useful with a paired run (same seeds forced to each
+  kind vs none, compare goblin lairs/captures) and that ~half the campaigns see one built. Human decks
+  carry ОТКУП ОТ ОРДЫ instead of one tax (`cards.course_base`); a paid realm and the horde are `at_peace`.
+  Cards unfit for goblins are swapped (`GOBLIN_SWAP`, `cards.localize`) - use `camp.thresholds(council,
+  faction)` / `course_base(faction, course)`, never `COURSES[..].base` or `THRESHOLD_CARDS` directly.
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

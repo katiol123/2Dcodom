@@ -93,12 +93,13 @@ def _goblin_horde(camp):
     taken = []
     for city in lost[:3]:
         old = camp.owner[city]
-        for o in camp.officers_in(city):                       # the garrison's officers flee
-            home = camp.nearest_city(city, old) if len(camp.cities_of(old)) > 1 else None
-            if home and home != city:
-                camp.officer_city[o.key] = home
+        garrison = camp.officers_in(city)
         camp.free[city] = []
         camp.owner[city] = "goblin"
+        for o in garrison:                                     # the garrison's officers flee
+            home = camp.nearest_city(city, old)
+            if home:
+                camp.officer_city[o.key] = home
         camp.losses.append((camp.turn, old, "goblin", city))
         camp.siege.pop(city, None)
         taken.append(city)

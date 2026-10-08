@@ -1,7 +1,7 @@
 """Reign types (pure Python, no pygame): how a ruler governs when the computer plays his realm.
 
 Every officer has a reign type (``reign_of``) - a name such as ТИРАН made of three behaviour
-traits (``TRAITS``, 30 of them). It only matters - and is only shown - while he rules a realm that
+traits (``TRAITS``, 33 of them; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
 the computer plays: the player's own ruler governs as the player does, and officers who do not
 rule keep their type hidden. A new ruler brings his own way of governing (succession.py).
 
@@ -51,7 +51,13 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "traditionalist": ("ТРАДИЦИОНАЛИСТ", "меняет курс державы лишь при большой выгоде"),
     "reformer": ("РЕФОРМАТОР", "меняет курс, как только это выгоднее"),
     "ambitious": ("ЧЕСТОЛЮБИВЫЙ", "союзов не ищет, метит в сильнейших (+30% к штурмам их городов)"),
+    # the horde
+    "hunter": ("ГРОЗА ГОБЛИНОВ", "логова штурмует охотнее (+50%), от орды не откупается"),
+    "appeaser": ("ДАННИК ОРДЫ", "откуп от орды ценит вдвое: лучше платить, чем воевать с гоблинами"),
+    "hoarder": ("ЖАДНЫЙ ДО БЛЕСТЯШЕК", "вождь орды: копит всё золото на великую постройку"),
 }
+GOBLIN_ONLY = {"warchief", "hoard_king"}          # reign types only goblins have
+HUMAN_ONLY = {"slayer", "tributary"}              # ... and only people
 
 # key: (name, traits)
 REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
@@ -79,6 +85,10 @@ REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
     "upstart": ("ВЫСКОЧКА", ("ambitious", "reckless", "meritocrat")),
     "benefactor": ("ОТЕЦ НАРОДА", ("generous", "builder", "merciful")),
     "mercenary": ("НАЁМНЫЙ КНЯЗЬ", ("greedy", "treacherous", "elitist")),
+    "slayer": ("ИСТРЕБИТЕЛЬ ОРД", ("hunter", "brave", "conqueror")),
+    "tributary": ("ОТКУПЩИК", ("appeaser", "cautious", "trader")),
+    "warchief": ("ВЕЛИКИЙ ВОЖАК", ("hoarder", "aggressive", "reckless")),
+    "hoard_king": ("КОРОЛЬ КУЧИ", ("hoarder", "greedy", "cruel")),
 }
 
 # which skills make each reign likely (weights over STATS order: УПР, ВЕРБ, ЛОГ, РАЗВ, ДИП, ИНТР)
@@ -107,6 +117,10 @@ _LEAN: Dict[str, Tuple[float, ...]] = {
     "upstart": (0.3, 0.6, 0, 0, -0.3, 0.6),
     "benefactor": (0.8, 0, 0, 0, 0.8, -0.6),
     "mercenary": (0.4, 0.4, 0, 0, 0, 0.8),
+    "slayer": (0, 0.8, 0.6, 0.4, -0.4, 0),
+    "tributary": (0.6, 0, 0, 0, 0.8, 0),
+    "warchief": (0, 1.0, 0.4, 0, 0, 0),
+    "hoard_king": (0.8, 0, 0, 0, 0, 0.6),
 }
 _VICE_LEAN = {"cruelty": "tyrant", "embezzle": "merchant", "greed": "merchant", "pride": "despot",
               "cowardice": "keeper", "blabber": "patron"}
@@ -123,8 +137,10 @@ def reign_of(officer: str) -> str:
     if o.rank == 0 and o.faction in LEADER_REIGN:
         return LEADER_REIGN[o.faction]
     r = random.Random(f"reign:{officer}")
+    goblin = o.faction == "goblin"
     score = {k: sum(w * (o.stats[i] - 10) for i, w in enumerate(lean)) / 10 + r.uniform(0, 1.6)
-             for k, lean in _LEAN.items()}
+             + (1.0 if goblin and k in GOBLIN_ONLY else 0)
+             for k, lean in _LEAN.items() if k not in (HUMAN_ONLY if goblin else GOBLIN_ONLY)}
     from .cards import VICE_OF
     for v in VICE_OF.get(officer, ()):
         if v in _VICE_LEAN:
@@ -209,6 +225,8 @@ def worth_mult(camp, faction: str) -> float:
 
 def hostility(camp, faction: str, target: str) -> float:
     t = ruler_traits(camp, faction)
+    if t and target == "goblin" and "hunter" in t:
+        return 1.5
     if not t or target in (faction, "goblin"):
         return 1.0
     m = 1.0

@@ -257,6 +257,14 @@ def wrap(text: str, width_px: int) -> List[str]:
     return lines
 
 
+def _great_card(key: str):
+    """The horde's great building shown as a big card (like a world event)."""
+    from types import SimpleNamespace
+    from .horde import GREAT
+    g = GREAT[key.split(":", 1)[1]]
+    return SimpleNamespace(name=g.name, text=f"{g.manner}. {g.text}", color=g.color, header="ОРДА УСИЛИЛАСЬ")
+
+
 def load_map(progress=None) -> pygame.Surface:
     """The world map surface, generated once and cached as PNG."""
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -712,7 +720,7 @@ class WorldMapScreen:
         from .events import EVENT
         from .fx import ease_back
         turn, key, text = self.event_show
-        e = EVENT[key]
+        e = EVENT[key] if key in EVENT else _great_card(key)
         s.blit(self.dim, (0, 0))
         k = min(1.0, (self.time - self.event_t) / 0.45)
         final = pygame.Rect(W // 2 - 110, TOP + 18, 220, 190)
@@ -731,7 +739,7 @@ class WorldMapScreen:
     def _event_face(self, s: pygame.Surface, r: pygame.Rect, e, turn: int, text: str) -> None:
         s.blit(self.r.panel(r.w, r.h, base="#1c1830", border=e.color), r.topleft)
         pygame.draw.rect(s, _c(e.color), r.inflate(-4, -4), 1)
-        self.font.draw(s, "СОБЫТИЕ МИРА", r.centerx, r.y + 7, "#8b9bb4", anchor="midtop")
+        self.font.draw(s, getattr(e, "header", "СОБЫТИЕ МИРА"), r.centerx, r.y + 7, "#8b9bb4", anchor="midtop")
         self.font.draw(s, e.name, r.centerx, r.y + 17, e.color, scale=2 if text_width(e.name) * 2 < r.w - 16 else 1,
                        anchor="midtop")
         band = pygame.Rect(r.x + 10, r.y + 38, r.w - 20, 3)
@@ -741,6 +749,8 @@ class WorldMapScreen:
             self.font.draw(s, line, r.x + 12, y, "#c0cbdc")
             y += 7
         y += 6
+        if getattr(e, "header", None):                     # the horde's great building: the text says it all
+            text = text.split(". ", 1)[0] + "."
         self.font.draw(s, f"ХОД {turn}:", r.x + 12, y, "#fee761")
         y += 9
         for line in wrap(text, r.w - 24):
@@ -963,9 +973,14 @@ class WorldMapScreen:
         font.draw(s, "  ".join(notes), r.x + 5, y, "#8b9bb4")
         y += 9
         from .buildings import BUILDINGS, slots
+        from .horde import GREAT, great_in
         have = self.camp.buildings.get(c.key, [])
-        font.draw(s, "ЗДАНИЯ: " + (", ".join(BUILDINGS[k].name for k in have) or "НЕТ") + f" ({len(have)}/{slots(c.key)})",
-                  r.x + 5, y, "#feae34" if have else "#5a6988")
+        big = great_in(self.camp, c.key)
+        if big:                                          # the horde's great building outshines the rest
+            font.draw(s, f"ВЕЛИКАЯ ПОСТРОЙКА: {GREAT[big].name}", r.x + 5, y, GREAT[big].color)
+        else:
+            font.draw(s, "ЗДАНИЯ: " + (", ".join(BUILDINGS[k].name for k in have) or "НЕТ")
+                      + f" ({len(have)}/{slots(c.key)})", r.x + 5, y, "#feae34" if have else "#5a6988")
         y += 9
         offs = self.camp.officers_in(c.key)
         font.draw(s, f"ОФИЦЕРОВ: {len(offs)}   СВОБОДНЫХ ВОИНОВ: {len(self.camp.free[c.key])}", r.x + 5, y, "#a7f070")

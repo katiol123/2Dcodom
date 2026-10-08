@@ -100,6 +100,7 @@ class Battle:
     militia: int = 0
     aux: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))   # allied detachments
     towers: int = 0             # archer towers of the stormed city (buildings.py)
+    fury: Tuple[float, float] = (1.0, 1.0)    # damage multipliers of the sides (the horde's totem)
     helpers: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))
     a: float = 0.0
     d: float = 0.0
@@ -150,6 +151,11 @@ class Campaign:
         self.immune: Dict[str, int] = {}                      # city -> turns a physician keeps it healthy
         self.buildings: Dict[str, List[str]] = {}             # city -> building keys (buildings.py)
         self.newcomers: Dict[str, int] = {}                   # faction -> young talents so far
+        self.great: Dict[str, Tuple[str, str]] = {}           # the horde's great building: (kind, lair) (horde.py)
+        self.manner: Dict[str, str] = {}                      # the horde's chosen way (kept after a loss)
+        self.force_great: Optional[str] = None                # tests/cardsim: force the horde's choice
+        self.pit: List[Tuple[str, int]] = []                  # captives in the pit: (their realm, power)
+        self.paid: Dict[str, int] = {}                        # realm -> own turns the horde stays bought off
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
         self.alliance: Dict[frozenset, List] = {}             # pair -> [turns left, common enemy]
@@ -180,7 +186,10 @@ class Campaign:
                                           "deaths": Counter(), "successions": Counter(),
                                           "unrest_turns": Counter(), "outbreaks": Counter(),
                                           "outbreaks_stopped": Counter(), "sick_deaths": Counter(),
-                                          "newcomers": Counter(), "built": Counter(), "ruined": Counter()}
+                                          "newcomers": Counter(), "built": Counter(), "ruined": Counter(),
+                                          "great": Counter(), "great_lost": Counter(), "captives": Counter(),
+                                          "ransom": Counter(), "sacrificed": Counter(), "bred": Counter(),
+                                          "bought_off": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
@@ -276,8 +285,11 @@ class Campaign:
     def totals(self, council) -> Dict[str, int]:
         return _cards.council_totals(list(council), self.ostats)
 
-    def thresholds(self, council) -> List[str]:
-        return _cards.threshold_cards(list(council), self.ostats)
+    def thresholds(self, council, faction: Optional[str] = None) -> List[str]:
+        council = list(council)
+        if faction is None and council:
+            faction = self.allegiance.get(council[0])
+        return _cards.threshold_cards(council, self.ostats, faction)
 
     def competence(self, council) -> int:
         return _cards.competence(list(council), self.ostats)
@@ -332,7 +344,8 @@ class Campaign:
         return sum(t.power for t in self.squads[officer])
 
     def troop_upkeep(self, faction: str, key: str) -> float:
-        u = ROSTER[key].upkeep
+        from .horde import upkeep_mult
+        u = ROSTER[key].upkeep * upkeep_mult(self, faction, key)
         if "frost" in self.active and faction not in ("north", "highland"):
             u *= 1.3
         if faction == "ashen" and ROSTER[key].undead:
@@ -379,7 +392,8 @@ class Campaign:
             self.rel[k] = max(1, min(100, self.rel[k] + d))
 
     def at_peace(self, a: str, b: str) -> bool:
-        return self.truce.get(_pair(a, b), 0) > 0 or _pair(a, b) in self.alliance
+        from .horde import bought
+        return self.truce.get(_pair(a, b), 0) > 0 or _pair(a, b) in self.alliance or bought(self, a, b)
 
     def max_prosperity(self, city: str) -> int:
         return min(MAX_PROSPERITY, PROSPERITY[city] + PROSPERITY_ROOM)
@@ -413,9 +427,11 @@ class Campaign:
     # --- hiring ----------------------------------------------------------------------------
     def can_hire(self, city: str, key: str) -> Tuple[bool, str]:
         faction = self.owner[city]
-        if key not in CITY[city].pool:
+        from .horde import pen_hire
+        pen = pen_hire(self, city, key)
+        if key not in CITY[city].pool and not pen:
             return False, "ЭТИХ ВОИНОВ ЗДЕСЬ НЕ НАНЯТЬ"
-        if self.muster.get(city, 0) <= 0:
+        if self.muster.get(city, 0) <= 0 and not pen:
             return False, "НАЙМ ЗАКРЫТ: НУЖНА КАРТА СБОР ВОЙСК"
         if self.hire_price(city, key) > self.gold[faction]:
             return False, "НЕ ХВАТАЕТ ЗОЛОТА"
@@ -423,7 +439,8 @@ class Campaign:
 
     def hire_price(self, city: str, key: str) -> int:
         from .buildings import hire_price
-        return hire_price(self, city, ROSTER[key].cost)
+        from .horde import hire_mult
+        return hire_price(self, city, int(round(ROSTER[key].cost * hire_mult(self, city, key))))
 
     def hire(self, city: str, key: str) -> Optional[Troop]:
         ok, _ = self.can_hire(city, key)
@@ -564,7 +581,7 @@ class Campaign:
 
     def _build_deck(self, faction: str) -> None:
         r = self.realms[faction]
-        r.draw = [self._inst(k, "base") for k in COURSES[r.course].base]
+        r.draw = [self._inst(k, "base") for k in _cards.course_base(faction, r.course)]
         lead = self.leader.get(faction)
         if lead and OFFICER[lead].rank == 0 and OFFICER[lead].faction == faction:
             r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
@@ -572,7 +589,7 @@ class Campaign:
         r.draw.append(self._inst("sickness", "fate"))
         for o in r.council:
             r.draw.extend(self._inst(k, o) for k in self.personal(o))
-        r.draw.extend(self._inst(k, "threshold") for k in self.thresholds(r.council))
+        r.draw.extend(self._inst(k, "threshold") for k in self.thresholds(r.council, faction))
         self.rng.shuffle(r.draw)
 
     def council_options(self, faction: str) -> List[Officer]:
@@ -634,7 +651,7 @@ class Campaign:
         r = self.realms[faction]
         for pile in (r.draw, r.hand, r.discard):
             pile[:] = [c for c in pile if c.origin != "base"]
-        for k in COURSES[course].base:
+        for k in _cards.course_base(faction, course):
             r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "base"))
         r.course = course
         r.course_cd = self.course_cooldown(r.council)
@@ -646,7 +663,7 @@ class Campaign:
         """Threshold cards follow the council's current totals (wherever the cards are)."""
         r = self.realms[faction]
         piles = (r.draw, r.hand, r.discard)
-        want = Counter(self.thresholds(r.council))
+        want = Counter(self.thresholds(r.council, faction))
         have = Counter(c.key for pile in piles for c in pile if c.origin == "threshold")
         for k in have:
             extra = have[k] - want.get(k, 0)
@@ -755,6 +772,8 @@ class Campaign:
         from . import population, succession
         succession.turn(self, faction)
         population.turn(self, faction)
+        from . import horde
+        horde.turn(self, faction)
         from .buildings import count
         for city in self.cities_of(faction):
             if count(self, city, "temple"):
@@ -893,6 +912,9 @@ class Campaign:
             return False, "НЕ ХВАТАЕТ ЗОЛОТА"
         if card.targets and not self.options(faction, card.key, []):
             return False, "НЕТ ПОДХОДЯЩЕЙ ЦЕЛИ"
+        if card.key == "buy_off":
+            from .horde import can_buy_off
+            return can_buy_off(self, faction)
         return True, ""
 
     def options(self, faction: str, card_key: str, chosen: Sequence) -> list:
@@ -939,10 +961,12 @@ class Campaign:
             d *= 1.25
         if owner == "sylvan" and CITY[city].faction == "sylvan":
             d *= 1.2                                      # the forest hides its own
-        return d
+        from .horde import side_mult
+        return d * side_mult(self, owner)
 
     def attack_power(self, faction: str, officers: Sequence[str], city: str, mult: float = 1.0) -> float:
-        a = sum(self.power(o) * self.officer_mult(o) for o in officers) * mult
+        from .horde import side_mult
+        a = sum(self.power(o) * self.officer_mult(o) for o in officers) * mult * side_mult(self, faction)
         if (faction, self.owner[city]) in self.grudge:
             a *= 1.3
         if self.owner[city] != "goblin" and self.relation(faction, self.owner[city]) <= 14:
@@ -978,6 +1002,8 @@ class Campaign:
         city = b.city
         from .buildings import count
         b.towers = count(self, city, "tower")
+        from .horde import fury
+        b.fury = fury(self, b.attacker, b.defender)
         b.att = [(o, t) for o in b.officers for t in self.squads[o]]
         b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
         b.a = self.attack_power(b.attacker, b.officers, city, b.mult)
@@ -1065,6 +1091,9 @@ class Campaign:
         dead = wounded = fled = 0
         refuge = [n for n in neighbors(city) if self.owner[n] == defender]
         escapees: List[Tuple[Optional[str], Troop]] = []
+        gob_won = (faction if won else defender) == "goblin"
+        loser = defender if won else faction
+        pit = [(loser, t.power) for _, t in (b.deff if won else b.att) if t.id in b.fallen] if gob_won else []
         for side, troops in (("att", b.att), ("def", b.deff)):
             side_won = won if side == "att" else not won
             for o, t in troops:
@@ -1082,6 +1111,9 @@ class Campaign:
                 self._remove(o, city, t)
                 dead += 1
         tail = f"; павших {dead}, раненых {wounded}" + (f", бежали {fled}" if fled else "") + answer
+        if pit:
+            from .horde import on_battle as pit_battle
+            pit_battle(self, b, pit)
         from . import growth
         if not won:
             from .buildings import RUIN_FAILED_STORM, ruin
@@ -1187,6 +1219,9 @@ class Campaign:
         from .buildings import RUIN_CAPTURE, ruin
         ruin(self, city, RUIN_CAPTURE, "город взят штурмом", all_of_them=True)
         self.sick.pop(city, None)
+        if old == "goblin":
+            from .horde import on_city_lost
+            on_city_lost(self, city)
         self.owner[city] = faction
         self.losses.append((self.turn, old, faction, city))
         self.prosperity[city] = max(1, self.prosperity[city] - 1)

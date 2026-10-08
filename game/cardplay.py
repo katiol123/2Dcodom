@@ -102,6 +102,9 @@ def options(camp, f: str, key: str, chosen: list) -> list:
     if step == "building":                               # what a master builder can put up (half price)
         from .buildings import BUILDINGS, ORDER, can_build
         return [k for k in ORDER if can_build(camp, f, chosen[0], k, BUILDINGS[k].cost // 2)[0]]
+    if step == "enemy_lair":
+        return [c for c in camp.owner if camp.owner[c] == "goblin" and _hostile(camp, f, c)
+                and any(camp.owner[n] == f for n in neighbors(c))]
     if step == "enemy_built":
         return [c for c in camp.owner if camp.owner[c] != f and camp.buildings.get(c)
                 and any(camp.owner[n] == f for n in neighbors(c))]
@@ -168,6 +171,8 @@ def _cut(camp, city, frac) -> int:
 
 
 def _raid(camp, f, city) -> int:
+    from .horde import on_raid
+    on_raid(camp, f, city)
     g = _gold(camp, f, camp.prosperity[city] * 12, "raids")
     _prosper(camp, city, -1)
     camp.change_relation(f, camp.owner[city], -10)
@@ -327,6 +332,7 @@ def _pilgrimage(camp, f, t):
 
 
 @effect("fair")
+@effect("flea_market")
 def _fair(camp, f, t):
     g = _gold(camp, f, camp.prosperity[t[0]] * 10, "trade")
     _prosper(camp, t[0], 1)
@@ -564,6 +570,7 @@ def _agitators(camp, f, t):
 
 
 @effect("letters")
+@effect("dirty_tricks")
 def _letters(camp, f, t):
     camp.add_curse(t[0], "unrest", 2, source=f)
     camp.change_relation(f, t[0], -4)
@@ -699,6 +706,7 @@ def _lamp(camp, f, t):
 
 
 @effect("golden_age")
+@effect("fat_year")
 def _golden_age(camp, f, t):
     g = 0
     for c in camp.cities_of(f):
@@ -991,6 +999,64 @@ def _giant_slayer(camp, f, t):
 @effect("war_legend")
 def _war_legend(camp, f, t):
     return camp.attack(f, t[1], t[0], mult=1.4)
+
+
+# --- the horde -------------------------------------------------------------------------------------
+@effect("buy_off")
+def _buy_off(camp, f, t):
+    from .horde import buy_off
+    return buy_off(camp, f)
+
+
+@effect("goblin_tongue")
+def _goblin_tongue(camp, f, t):
+    from .horde import buy_off
+    out = buy_off(camp, f, turns=4, free=True)
+    got = camp.recruit(t[0], 100, ("goblin", "goblin_bomber"))
+    return f"{out}; гоблины на {got} мощи пришли в {CITY[t[0]].name}"
+
+
+def _scare(camp, f, x, amount) -> str:
+    """A neighbour pays the horde, or a border city of his suffers."""
+    if camp.gold[x] >= amount:
+        camp.gold[x] -= amount
+        _gold(camp, f, amount, "tribute")
+        camp.log_event(x, f"Орда стрясла с нас {amount} золота")
+        return f"{FACTION[x].short} платит {amount}"
+    own = set(camp.cities_of(f))
+    border = [c for c in camp.cities_of(x) if any(n in own for n in neighbors(c))]
+    if border:
+        c = max(border, key=lambda c: camp.prosperity[c])
+        _prosper(camp, c, -1)
+        return f"{CITY[c].name} разорён"
+    return f"{FACTION[x].short}: взять нечего"
+
+
+@effect("intimidate")
+def _intimidate(camp, f, t):
+    return _scare(camp, f, t[0], 60)
+
+
+@effect("great_fear")
+def _great_fear(camp, f, t):
+    own = set(camp.cities_of(f))
+    near = [x for x in camp.alive() if x != f and any(camp.owner[n] == x for c in own for n in neighbors(c))
+            and not camp.at_peace(f, x)]
+    return "; ".join(_scare(camp, f, x, 50) for x in near) or "соседей нет"
+
+
+@effect("head_hunters")
+def _head_hunters(camp, f, t):
+    before = _cut(camp, t[0], 0.25)
+    g = _gold(camp, f, 40, "raids")
+    return f"{CITY[t[0]].name}: гоблины потеряли четверть ({before} мощи было), +{g} золота за головы"
+
+
+@effect("shiny_pile")
+def _shiny_pile(camp, f, t):
+    from .horde import great
+    per = 20 if great(camp) else 30
+    return f"+{_gold(camp, f, per * len(camp.cities_of(f)), 'tax')} золота в кучу"
 
 
 EFFECTS = E
