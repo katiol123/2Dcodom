@@ -209,7 +209,7 @@ class Campaign:
     def troop_upkeep(self, faction: str, key: str) -> float:
         u = ROSTER[key].upkeep
         if faction == "ashen" and ROSTER[key].undead:
-            return u * 0.4                                # the dead ask for little pay, only for bones
+            return u * 0.3                                # the dead ask for little pay, only for bones
         return u
 
     def upkeep(self, faction: str) -> int:
