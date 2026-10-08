@@ -49,6 +49,8 @@ def present(logical, screen):
     if (ox, oy) != (0, 0):
         screen.fill((0, 0, 0))
     screen.blit(pygame.transform.scale(logical, (W * k, H * k)), (ox, oy))
+    from game.hires import HIRES
+    HIRES.present(screen, ox, oy, k)          # painted portraits stay sharp at any scale
     return ox, oy, k
 
 
@@ -164,6 +166,8 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
     view = (0, 0, scale)
     worldmap = None
     on_map = not (args.auto or args.blue or args.red)
+    select = None                                     # faction choice comes first, then the world map
+    picking = on_map
     if args.auto:
         world = start(seed)
     while True:
@@ -171,7 +175,8 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         real += dt
         if args.quit_after and real > args.quit_after:
             pygame.quit()
-            where = f"battle t={world.time:.1f}s" if world else ("map" if on_map else "menu")
+            where = (f"battle t={world.time:.1f}s" if world else "select" if picking
+                     else "map" if on_map else "menu")
             print(f"ok: {where} seed={seed} sfx={'on' if sfx.ok else 'off'}")
             return 0
         mx, my = pygame.mouse.get_pos()
@@ -185,6 +190,11 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                 # fullscreen at the desktop resolution; present() keeps whole-number scaling
                 screen = (pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if fullscreen
                           else pygame.display.set_mode((W * scale, H * scale)))
+                continue
+            if picking:
+                if select and select.handle(ev, mouse) == "quit":
+                    pygame.quit()
+                    return 0
                 continue
             if on_map:
                 action = worldmap.handle(ev, mouse) if worldmap else None
@@ -214,7 +224,19 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                     world = None
                 elif ev.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
                     speed = {pygame.K_1: 0.5, pygame.K_2: 1.0, pygame.K_3: 2.0, pygame.K_4: 4.0}[ev.key]
-        if on_map:
+        if picking:
+            if select is None:
+                from game.select import SelectScreen
+                select = SelectScreen(renderer, lambda: loading("", 0, 1, title="РИСУЕМ КАРТУ МИРА..."))
+            select.update(dt, mouse)
+            select.draw(logical)
+            if select.result:
+                from game.campaign import Campaign
+                from game.mapview import WorldMapScreen
+                worldmap = WorldMapScreen(renderer, campaign=Campaign(select.result[1]))
+                worldmap.flash = 1.0                      # the select screen's white flash fades into the map
+                picking, select = False, None
+        elif on_map:
             if worldmap is None:
                 from game.mapview import WorldMapScreen
                 worldmap = WorldMapScreen(renderer, lambda: loading("", 0, 1, title="РИСУЕМ КАРТУ МИРА..."))

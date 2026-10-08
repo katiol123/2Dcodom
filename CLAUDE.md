@@ -39,7 +39,15 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Inspect visually: record with `--record`, then `ffmpeg ... -vf "fps=6,tile=3x3"` to look at frame sequences.
 
 ## World map (game/factions.py, worldgen.py, mapview.py)
-- `battle.py` starts on the world map; "БЫСТРЫЙ БОЙ" opens the squad builder, ESC there returns to the map.
+- `battle.py` starts on the faction select (`select.py`: banners, spectator = Chronicler), then the world map;
+  "БЫСТРЫЙ БОЙ" opens the squad builder, ESC there returns to the map. Wheel zooms the map out only (`ZOOMS`).
+- Officers (`officers.py`): 12-22 per faction, first = leader; leadership caps squad power (sum of unit `cost`),
+  6 stats 1..20, `bio()` built from faction origin + best/worst stat + quirk (`{м|ж}` gender forms).
+- `campaign.py` (pygame-free): gold, troops standing in cities (`free`), officers' squads (max 7), hire/assign
+  rules, `allegiance` (officers may defect). ARMY/HIRE buttons only for the player's own cities.
+- Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
+  charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
+  `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.
 - 8 playable *human* factions (`FACTIONS`) + non-playable goblins (`GOBLINS`: no diplomacy, always war,
   lairs all over the map). Relations 1..100 with a reason for every pair (`_REL`); keep reasons true to the lore.
 - Recruit pools belong to cities (3-6 units); keys not in `ROSTER` must be in `NEW_UNITS` (planned units).

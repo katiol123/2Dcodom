@@ -27,7 +27,10 @@ from .factions import (ALL_FACTIONS, CITIES, CITY, EMBLEMS, FACTION, FACTIONS, G
                        unit_name, unit_role)
 from .render import INK, Renderer, _c
 from .sim import H, W
-from .units import TEAMS
+from .campaign import Campaign
+from .officercard import OfficerCard
+from .officers import OFFICER, SQUAD_SLOTS, STAT_HELP, STATS
+from .units import ROSTER, TEAMS, TIER_NAMES
 
 TOP, BOTTOM = 15, 23                 # UI bars
 MINI_K = 16                          # minimap = map / 16
@@ -280,13 +283,28 @@ class Button:
         self.color = color
 
 
+ZOOMS = (1.0, 0.5, 0.25)        # mouse wheel: the map can be pulled back (never closer than 1:1)
+
+
 class WorldMapScreen:
-    def __init__(self, renderer: Renderer, progress=None):
+    def __init__(self, renderer: Renderer, progress=None, campaign: Optional[Campaign] = None):
         self.r = renderer
         self.font = renderer.font
+        self.camp = campaign or Campaign(None)
         self.map = load_map(progress)
         self.mini = self._minimap()
-        self.cam = [float(CITY["kronholm"].x - W // 2), float(CITY["kronholm"].y - H // 2)]
+        self.maps = {1.0: self.map, 0.5: self._shrunk(2), 0.25: self._shrunk(4)}
+        self.zoom = 1.0
+        home = CITY[FACTION[self.camp.player].capital] if self.camp.player else CITY["kronholm"]
+        self.cam = [float(home.x - W // 2), float(home.y - H // 2)]
+        self.window: Optional[Tuple[str, str]] = None      # ("army" | "hire", city)
+        self.win_officer = 0
+        self.win_scroll = 0
+        self.win_hover: Optional[Tuple[str, int]] = None
+        self.toast: Tuple[str, str, float] = ("", "#ffffff", 0.0)
+        self.flash = 0.0                                  # white fade-in after the faction choice
+        self.cards = OfficerCard(renderer, self.camp)    # clickable faces/names and the officer card
+        self._mouse = (0, 0)
         self.time = 0.0
         self.drag: Optional[Tuple[int, int, float, float]] = None
         self.dragged = False
@@ -325,9 +343,40 @@ class WorldMapScreen:
         a = arr[:w * MINI_K, :h * MINI_K].reshape(w, MINI_K, h, MINI_K, 3).mean(axis=(1, 3))
         return pygame.surfarray.make_surface(a.astype(np.uint8))
 
+    def _art(self, kind: str, faction: str) -> Tuple[pygame.Surface, int]:
+        key = (kind, faction)
+        if key not in self.city_art:
+            f = FACTION[faction]
+            grid, pole = city_grid(kind)
+            self.city_art[key] = (_outlined(grid_surface(grid, dict(STONE, r=f.color, R=f.dark))), pole + 1)
+        return self.city_art[key]
+
+    def _shrunk(self, k: int) -> pygame.Surface:
+        """The map pulled back k times: k x k pixel blocks averaged (clean, no dropped pixels)."""
+        arr = pygame.surfarray.array3d(self.map)
+        w, h = MAP_W // k, MAP_H // k
+        a = arr[:w * k, :h * k].reshape(w, k, h, k, 3).mean(axis=(1, 3))
+        return pygame.surfarray.make_surface(a.astype(np.uint8)).convert()
+
     def _clamp(self) -> None:
-        self.cam[0] = max(0.0, min(MAP_W - W, self.cam[0]))
-        self.cam[1] = max(-TOP, min(MAP_H - H + BOTTOM, self.cam[1]))
+        z = self.zoom
+        vw, vh = W / z, (H - TOP - BOTTOM) / z
+        for i, (size, view, pad) in enumerate(((MAP_W, vw, 0.0), (MAP_H, vh, TOP / z))):
+            lo, hi = -pad, size - view - pad
+            self.cam[i] = (lo + hi) / 2 if hi < lo else max(lo, min(hi, self.cam[i]))
+
+    def _to_screen(self, x: float, y: float) -> Tuple[int, int]:
+        return round((x - self.cam[0]) * self.zoom), round((y - self.cam[1]) * self.zoom)
+
+    def _zoom_at(self, step: int, mx: int, my: int) -> None:
+        i = ZOOMS.index(self.zoom)
+        j = max(0, min(len(ZOOMS) - 1, i + step))
+        if j == i:
+            return
+        wx, wy = self.cam[0] + mx / self.zoom, self.cam[1] + my / self.zoom
+        self.zoom = ZOOMS[j]
+        self.cam = [wx - mx / self.zoom, wy - my / self.zoom]
+        self._clamp()
 
     def _mini_rect(self) -> pygame.Rect:
         w, h = self.mini.get_size()
@@ -335,8 +384,10 @@ class WorldMapScreen:
 
     def _city_rects(self, c: City) -> Tuple[pygame.Rect, pygame.Rect]:
         """Screen rects of a city's sprite (incl. flag) and its name ribbon."""
-        art, _ = self.city_art[(c.kind, c.faction)]
-        sx, sy = round(c.x - self.cam[0]), round(c.y - self.cam[1])
+        art, _ = self._art(c.kind, self.camp.owner[c.key])
+        sx, sy = self._to_screen(c.x, c.y)
+        if self.zoom < 1:                              # pulled back: a flag marker, the ribbon on hover only
+            return pygame.Rect(sx - 7, sy - 16, 14, 18), pygame.Rect(sx - 1, sy - 1, 2, 2)
         aw, ah = art.get_size()
         sprite = pygame.Rect(sx - aw // 2, sy - ah - 10, aw, ah + 10)
         tw = text_width(c.name) + 12 + (6 if c.key == FACTION[c.faction].capital else 0)
@@ -353,6 +404,13 @@ class WorldMapScreen:
     # --- input -------------------------------------------------------------------------------
     def handle(self, ev, mouse: Tuple[int, int]) -> Optional[str]:
         mx, my = mouse
+        if self.cards.handle(ev, mouse):                 # a face or a name anywhere opens the card
+            return None
+        if self.window is not None:
+            return self._window_handle(ev, mx, my)
+        if ev.type == pygame.MOUSEWHEEL and not (self.diplomacy or self.faction_panel):
+            self._zoom_at(1 if ev.y < 0 else -1, mx, my)
+            return None
         if ev.type == pygame.KEYDOWN:
             self.keys[ev.key] = True
             if ev.key == pygame.K_ESCAPE:
@@ -390,12 +448,17 @@ class WorldMapScreen:
                 return None
             if my < TOP:
                 return None
-            if self.selected and self._city_panel_rect().collidepoint(mx, my):
-                return None
+            if self.selected:
+                for rect, action in self._city_buttons():
+                    if rect.collidepoint(mx, my):
+                        self.window = (action, self.selected)
+                        self.win_officer, self.win_scroll = 0, 0
+                        return None
+                if self._city_panel_rect().collidepoint(mx, my):
+                    return None
             mini = self._mini_rect()
             if mini.collidepoint(mx, my):
-                self.cam = [(mx - mini.x) * MINI_K - W / 2, (my - mini.y) * MINI_K - H / 2]
-                self._clamp()
+                self._mini_jump(mx, my)
                 self.drag = (mx, my, -1.0, -1.0)
                 return None
             self.drag = (mx, my, self.cam[0], self.cam[1])
@@ -409,24 +472,33 @@ class WorldMapScreen:
             mini = self._mini_rect()
             if cx < 0:                                   # dragging inside the minimap
                 if mini.collidepoint(mx, my):
-                    self.cam = [(mx - mini.x) * MINI_K - W / 2, (my - mini.y) * MINI_K - H / 2]
-                    self._clamp()
+                    self._mini_jump(mx, my)
                 return None
             if abs(mx - x0) + abs(my - y0) > 2:
                 self.dragged = True
             if self.dragged:
-                self.cam = [cx - (mx - x0), cy - (my - y0)]
+                self.cam = [cx - (mx - x0) / self.zoom, cy - (my - y0) / self.zoom]
                 self._clamp()
         return None
 
+    def _mini_jump(self, mx: int, my: int) -> None:
+        mini = self._mini_rect()
+        self.cam = [(mx - mini.x) * MINI_K - W / 2 / self.zoom, (my - mini.y) * MINI_K - H / 2 / self.zoom]
+        self._clamp()
+
     def update(self, dt: float, mouse: Tuple[int, int]) -> None:
         self.time += dt
+        self.flash = max(0.0, self.flash - dt * 1.6)
+        self._mouse = mouse
+        if self.window is not None:
+            self._window_update(mouse)
+            return
         k = self.keys
         vx = (k.get(pygame.K_RIGHT) or k.get(pygame.K_d) or 0) - (k.get(pygame.K_LEFT) or k.get(pygame.K_a) or 0)
         vy = (k.get(pygame.K_DOWN) or k.get(pygame.K_s) or 0) - (k.get(pygame.K_UP) or k.get(pygame.K_w) or 0)
         if vx or vy:
-            self.cam[0] += vx * 260 * dt
-            self.cam[1] += vy * 260 * dt
+            self.cam[0] += vx * 260 * dt / self.zoom
+            self.cam[1] += vy * 260 * dt / self.zoom
             self._clamp()
         mx, my = mouse
         busy = self.diplomacy or self.faction_panel or my < TOP or my >= H - BOTTOM
@@ -439,27 +511,40 @@ class WorldMapScreen:
 
     # --- drawing ------------------------------------------------------------------------------
     def draw(self, s: pygame.Surface) -> None:
+        self.cards.begin(self._mouse)
         s.fill(INK)
-        cx, cy = int(round(self.cam[0])), int(round(self.cam[1]))
-        s.blit(self.map, (0, 0), pygame.Rect(cx, cy, W, H))
-        if cy < 0:
-            s.blit(self.map, (0, -cy), pygame.Rect(cx, 0, W, H + cy))
+        z = self.zoom
+        src = self.maps[z]
+        ox, oy = self._to_screen(0, 0)
+        s.blit(src, (ox, oy))
         self._landmarks(s)
         self._cities(s)
         self._bars(s)
         self._minimap_draw(s)
         if self.selected:
             self._city_panel(s, CITY[self.selected])
+            self._city_buttons_draw(s)
+        if self.window is not None or self.faction_panel or self.diplomacy:
+            self.cards.cover()                           # a window covers the faces on the map panels
+        if self.window is not None:
+            s.blit(self.dim, (0, 0))
+            self._window_draw(s)
         if self.faction_panel:
             s.blit(self.dim, (0, 0))
             self._faction_window(s, FACTION[self.faction_panel])
         if self.diplomacy:
             s.blit(self.dim, (0, 0))
             self._diplo_window(s)
+        self.cards.draw(s)
+        if self.flash > 0:
+            veil = pygame.Surface((W, H))
+            veil.fill((255, 244, 214))
+            veil.set_alpha(int(255 * self.flash))
+            s.blit(veil, (0, 0))
 
     def _landmarks(self, s: pygame.Surface) -> None:
         for name, x, y in worldgen.LANDMARKS:
-            sx, sy = x - self.cam[0], y - self.cam[1]
+            sx, sy = self._to_screen(x, y)
             if -120 < sx < W + 120 and -10 < sy < H + 10:
                 col = "#d8e8f8" if "МОРЕ" in name or "ОКЕАН" in name or "ОЗЕРО" in name else "#f4ead0"
                 if "ОКЕАН" in name:
@@ -472,11 +557,14 @@ class WorldMapScreen:
     def _cities(self, s: pygame.Surface) -> None:
         phase = int(self.time * 8) % 8
         for c in sorted(CITIES, key=lambda c: c.y):
-            sx, sy = round(c.x - self.cam[0]), round(c.y - self.cam[1])
+            sx, sy = self._to_screen(c.x, c.y)
             if not (-60 < sx < W + 60 and -50 < sy < H + 30):
                 continue
-            f = FACTION[c.faction]
-            art, pole = self.city_art[(c.kind, c.faction)]
+            f = FACTION[self.camp.owner[c.key]]
+            if self.zoom < 1:
+                self._city_marker(s, c, f, sx, sy, phase)
+                continue
+            art, pole = self._art(c.kind, f.key)
             aw, ah = art.get_size()
             top = sy - ah + 1
             hot = c.key in (self.hover_city, self.selected)
@@ -495,6 +583,22 @@ class WorldMapScreen:
             s.blit(ban, (px - ban.get_width() // 2, pole_top + 1))
             s.blit(art, (sx - aw // 2, top))
             self._ribbon(s, c, f, sx, sy, hot)
+
+    def _city_marker(self, s: pygame.Surface, c: City, f: Faction, sx: int, sy: int, phase: int) -> None:
+        """Pulled-back view: a banner on a pole (half zoom) or a small shield (quarter zoom)."""
+        hot = c.key in (self.hover_city, self.selected)
+        if self.zoom >= 0.5:
+            pygame.draw.line(s, INK, (sx, sy - 16), (sx, sy))
+            ban = self.banners[f.key][(phase + c.x) % 8]
+            s.blit(ban, (sx - ban.get_width() // 2, sy - 16))
+            if c.key == f.capital:
+                s.blit(self.crown, (sx - 2, sy - 21))
+        else:
+            sh = self.shields[f.key]
+            s.blit(sh, (sx - sh.get_width() // 2, sy - sh.get_height()))
+        if hot:
+            pygame.draw.ellipse(s, _c("#fee761"), (sx - 9, sy - 3, 18, 6), 1)
+            self.font.draw(s, c.name, sx, sy + 2, "#fee761", anchor="midtop")
 
     def _ribbon(self, s: pygame.Surface, c: City, f: Faction, sx: int, sy: int, hot: bool) -> None:
         _, r = self._city_rects(c)
@@ -521,7 +625,18 @@ class WorldMapScreen:
         f = self.font
         s.blit(self.r.panel(W, TOP, base="#181425", border="#5a6988"), (0, 0))
         f.draw(s, "КАРТА МИРА", 5, 4, "#fee761")
-        f.draw(s, "ЛКМ: ТЯНИ КАРТУ, КЛИК ПО ГОРОДУ ИЛИ ФРАКЦИИ - СВЕДЕНИЯ", 52, 4, "#8b9bb4")
+        p = self.camp.player
+        if p is None:
+            f.draw(s, "РЕЖИМ ЗРИТЕЛЯ", 52, 4, "#c0cbdc")
+            x = 52 + text_width("РЕЖИМ ЗРИТЕЛЯ") + 10
+        else:
+            fac = FACTION[p]
+            s.blit(self.shields[p], (50, -1))
+            f.draw(s, fac.short, 67, 4, fac.light)
+            x = 67 + text_width(fac.short) + 8
+            f.draw(s, f"ЗОЛОТО {self.camp.gold[p]}", x, 4, "#fee761")
+            x += text_width(f"ЗОЛОТО {self.camp.gold[p]}") + 8
+        f.draw(s, "КОЛЕСО - МАСШТАБ", x, 4, "#5a6988")
         for b in self.buttons:
             active = b.action == "diplomacy" and self.diplomacy
             s.blit(self.r.panel(b.rect.w, b.rect.h, base="#5a6988" if active else b.color, border="#8b9bb4"),
@@ -550,11 +665,12 @@ class WorldMapScreen:
         pygame.draw.rect(s, _c("#c9a24a"), r.inflate(2, 2), 1)
         s.blit(self.mini, r.topleft)
         for c in CITIES:
-            col = _c(FACTION[c.faction].color)
+            col = _c(FACTION[self.camp.owner[c.key]].color)
             px, py = r.x + c.x // MINI_K, r.y + c.y // MINI_K
             pygame.draw.rect(s, INK, (px - 1, py - 1, 3, 3))
             s.set_at((px, py), col)
-        vr = pygame.Rect(r.x + int(self.cam[0]) // MINI_K, r.y + int(self.cam[1]) // MINI_K, W // MINI_K, H // MINI_K)
+        vr = pygame.Rect(r.x + int(self.cam[0]) // MINI_K, r.y + int(self.cam[1]) // MINI_K,
+                         int(W / self.zoom) // MINI_K, int(H / self.zoom) // MINI_K)
         pygame.draw.rect(s, _c("#ffffff"), vr.clip(r), 1)
 
     # --- city panel ----------------------------------------------------------------------------
@@ -562,12 +678,14 @@ class WorldMapScreen:
         c = CITY[self.selected]
         w = 166
         roads = wrap("ДОРОГИ: " + ", ".join(CITY[n].name for n in neighbors(c.key)), w - 10)
-        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4
+        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 9 + 21
         return pygame.Rect(W - w - 4, TOP + 3, w, h)
+
+    PANEL_FACES = 9
 
     def _city_panel(self, s: pygame.Surface, c: City) -> None:
         r = self._city_panel_rect()
-        f = FACTION[c.faction]
+        f = FACTION[self.camp.owner[c.key]]
         font = self.font
         s.blit(self.r.panel(r.w, r.h, base="#181425", border=f.color), r.topleft)
         s.blit(self.shields[f.key], (r.x + 5, r.y + 5))
@@ -578,7 +696,16 @@ class WorldMapScreen:
         for line in wrap(c.desc, r.w - 10):
             font.draw(s, line, r.x + 5, y, "#c0cbdc")
             y += 7
-        y += 2
+        y += 1
+        offs = self.camp.officers_in(c.key)
+        font.draw(s, f"ОФИЦЕРОВ: {len(offs)}   СВОБОДНЫХ ВОИНОВ: {len(self.camp.free[c.key])}", r.x + 5, y, "#a7f070")
+        y += 9
+        for i, o in enumerate(offs[:self.PANEL_FACES]):
+            self.cards.face(s, pygame.Rect(r.x + 6 + i * 17, y, 15, 18), o.key)
+        hot = next((k for rect, k in self.cards.hits if rect.collidepoint(self._mouse)), None)
+        if hot:
+            font.draw(s, OFFICER[hot].name, r.right - 5, y + 5, "#ffffff", anchor="topright")
+        y += 22
         font.draw(s, "НАЙМ В ГОРОДЕ:", r.x + 5, y, "#fee761")
         y += 8
         team = TEAMS[0]
@@ -654,6 +781,20 @@ class WorldMapScreen:
                 font.draw(s, "  " + line, r.x + 6, y, "#63c74d")
                 y += 7
             y += 1
+        # every officer serving the faction: click a face for the card
+        offs = self.camp.officers_of(f.key)
+        per = 12
+        rows = (len(offs) + per - 1) // per
+        y = r.bottom - 6 - rows * 23
+        font.draw(s, f"ОФИЦЕРЫ: {len(offs)}", r.x + 6, y - 9, "#fee761")
+        hot = None
+        for i, o in enumerate(offs):
+            rect = pygame.Rect(r.x + 7 + (i % per) * 20, y + (i // per) * 23, 18, 21)
+            self.cards.face(s, rect, o.key)
+            if rect.collidepoint(self._mouse):
+                hot = o
+        if hot:
+            font.draw(s, f"{hot.name} - {hot.title}", r.x + 62, y - 9, "#ffffff")
         # relations
         x0 = r.x + 262
         pygame.draw.line(s, _c("#3a4466"), (x0 - 6, r.y + 6), (x0 - 6, r.bottom - 6))
@@ -746,3 +887,261 @@ class WorldMapScreen:
                                ("80+ СОЮЗ", "#63c74d"), ("X ГОБЛИНЫ: ТОЛЬКО ВОЙНА", "#e43b44")):
                 x = font.draw(s, label, x, y, col).right + 8
             font.draw(s, "НАВЕДИ НА КЛЕТКУ, ЧТОБЫ УЗНАТЬ ПРИЧИНУ", r.centerx, y + 10, "#5a6988", anchor="midtop")
+
+    # --- city buttons: ARMY / HIRE (own cities only) ----------------------------------------------
+    def _city_buttons(self) -> List[Tuple[pygame.Rect, str]]:
+        if self.selected is None or not self.camp.controls(self.selected):
+            return []
+        r = self._city_panel_rect()
+        return [(pygame.Rect(r.x - 50, r.y + 4, 47, 15), "army"), (pygame.Rect(r.x - 50, r.y + 22, 47, 15), "hire")]
+
+    def _city_buttons_draw(self, s: pygame.Surface) -> None:
+        mx, my = self._mouse
+        for rect, action in self._city_buttons():
+            hot = rect.collidepoint(mx, my)
+            base = "#3e8948" if action == "hire" else "#124e89"
+            s.blit(self.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
+            self.font.draw(s, "АРМИЯ" if action == "army" else "НАЙМ", rect.centerx, rect.centery, "#ffffff",
+                           anchor="center")
+
+    # --- portraits ---------------------------------------------------------------------------------
+    # --- army / hire windows -----------------------------------------------------------------------
+    WIN = pygame.Rect(8, TOP + 3, W - 16, H - TOP - BOTTOM - 6)
+
+    def _win_close_rect(self) -> pygame.Rect:
+        return pygame.Rect(self.WIN.right - 16, self.WIN.y + 3, 12, 11)
+
+    def _say(self, text: str, color: str = "#e43b44") -> None:
+        self.toast = (text, color, self.time + 2.0)
+
+    def _win_officers(self) -> list:
+        return self.camp.officers_in(self.window[1])
+
+    def _slot_rect(self, i: int) -> pygame.Rect:
+        x0, y0 = self.WIN.x + 6, self.WIN.y + 118
+        return pygame.Rect(x0 + (i % 2) * 113, y0 + (i // 2) * 21, 110, 19)
+
+    def _free_rect(self, i: int) -> pygame.Rect:
+        return pygame.Rect(self.WIN.x + 238, self.WIN.y + 30 + i * 21, self.WIN.w - 244, 19)
+
+    def _hire_rect(self, i: int) -> pygame.Rect:
+        return pygame.Rect(self.WIN.x + 6, self.WIN.y + 30 + i * 30, 220, 28)
+
+    def _hire_button(self, i: int) -> pygame.Rect:
+        r = self._hire_rect(i)
+        return pygame.Rect(r.right - 46, r.y + 7, 42, 14)
+
+    FREE_ROWS = 8
+
+    def _window_handle(self, ev, mx: int, my: int) -> Optional[str]:
+        kind, city = self.window
+        if ev.type == pygame.KEYDOWN:
+            if ev.key in (pygame.K_ESCAPE, pygame.K_a if kind == "army" else pygame.K_h):
+                self.window = None
+            elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT) and kind == "army":
+                self._cycle(1 if ev.key == pygame.K_RIGHT else -1)
+            return None
+        if ev.type == pygame.MOUSEWHEEL:
+            self.win_scroll = max(0, self.win_scroll - ev.y)
+            return None
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
+            self.window = None
+            return None
+        if ev.type != pygame.MOUSEBUTTONDOWN or ev.button != 1:
+            return None
+        if self._win_close_rect().collidepoint(mx, my) or not self.WIN.collidepoint(mx, my):
+            self.window = None
+            return None
+        free = self.camp.free[city]
+        rows = free[self.win_scroll:self.win_scroll + self.FREE_ROWS]
+        if kind == "army":
+            offs = self._win_officers()
+            for d, rect in ((-1, self._arrow(-1)), (1, self._arrow(1))):
+                if rect.collidepoint(mx, my):
+                    self._cycle(d)
+                    return None
+            if not offs:
+                return None
+            off = offs[self.win_officer % len(offs)]
+            squad = self.camp.squads[off.key]
+            for i in range(SQUAD_SLOTS):
+                if self._slot_rect(i).collidepoint(mx, my) and i < len(squad):
+                    t = squad[i]
+                    self.camp.unassign(off.key, t.id)
+                    self._say(f"{ROSTER[t.key].name} - В ГОРОД", "#c0cbdc")
+                    return None
+            for i, t in enumerate(rows):
+                if self._free_rect(i).collidepoint(mx, my):
+                    ok, why = self.camp.can_assign(off.key, t.id)
+                    if ok:
+                        self.camp.assign(off.key, t.id)
+                        self._say(f"{ROSTER[t.key].name} - К {off.name}", "#a7f070")
+                    else:
+                        self._say(why)
+                    return None
+        else:
+            for i, key in enumerate(CITY[city].pool):
+                if self._hire_button(i).collidepoint(mx, my):
+                    ok, why = self.camp.can_hire(city, key)
+                    if ok:
+                        self.camp.hire(city, key)
+                        self._say(f"НАНЯТ: {ROSTER[key].name}", "#a7f070")
+                    else:
+                        self._say(why)
+                    return None
+        return None
+
+    def _cycle(self, d: int) -> None:
+        n = len(self._win_officers())
+        if n:
+            self.win_officer = (self.win_officer + d) % n
+
+    def _arrow(self, d: int) -> pygame.Rect:
+        return pygame.Rect(self.WIN.x + (6 if d < 0 else 212), self.WIN.y + 17, 14, 11)
+
+    def _window_update(self, mouse) -> None:
+        mx, my = mouse
+        self._mouse = mouse
+        self.win_hover = None
+        kind, city = self.window
+        if kind == "army":
+            for i in range(SQUAD_SLOTS):
+                if self._slot_rect(i).collidepoint(mx, my):
+                    self.win_hover = ("slot", i)
+        for i in range(self.FREE_ROWS):
+            if self._free_rect(i).collidepoint(mx, my):
+                self.win_hover = ("free", i)
+        if kind == "hire":
+            for i in range(len(CITY[city].pool)):
+                if self._hire_rect(i).collidepoint(mx, my):
+                    self.win_hover = ("hire", i)
+
+    def _troop_row(self, s: pygame.Surface, rect: pygame.Rect, key: Optional[str], hot: bool, bad: bool = False,
+                   empty_label: str = "+ ПУСТО") -> None:
+        pygame.draw.rect(s, (58, 68, 102) if hot else (38, 43, 68), rect)
+        pygame.draw.rect(s, _c("#e43b44") if bad else ((139, 155, 180) if hot else (90, 105, 136)), rect, 1)
+        if key is None:
+            self.font.draw(s, empty_label, rect.centerx, rect.centery, "#3a4466" if not hot else "#8b9bb4",
+                           anchor="center")
+            return
+        u = ROSTER[key]
+        por = self.r.portrait(f"{key}_{TEAMS[0].key}")
+        s.blit(por, (rect.x + 1, rect.y + 2), area=pygame.Rect(0, 0, 18, 13))
+        name = u.short if len(u.name) > 16 and u.short else u.name
+        self.font.draw(s, name, rect.x + 22, rect.y + 2, "#ffffff")
+        self.font.draw(s, f"МОЩЬ {u.cost}", rect.x + 22, rect.y + 10, "#feae34")
+
+    def _window_draw(self, s: pygame.Surface) -> None:
+        kind, city = self.window
+        c = CITY[city]
+        f = FACTION[self.camp.owner[city]]
+        r = self.WIN
+        font = self.font
+        s.blit(self.r.panel(r.w, r.h, base="#181425", border=f.color), r.topleft)
+        cr = self._win_close_rect()
+        pygame.draw.rect(s, (162, 38, 51), cr)
+        font.draw(s, "X", cr.centerx + 1, cr.centery, "#ffffff", anchor="center")
+        title = ("АРМИЯ" if kind == "army" else "НАЙМ") + f" - {c.name}"
+        font.draw(s, title, r.centerx, r.y + 4, "#fee761", anchor="midtop")
+        font.draw(s, f"ЗОЛОТО {self.camp.gold[f.key]}", r.x + 8, r.y + 4, "#feae34")
+        if kind == "army":
+            self._army_left(s, f)
+        else:
+            self._hire_left(s, c, f)
+        # right column: unassigned troops in the city
+        free = self.camp.free[city]
+        self.win_scroll = max(0, min(self.win_scroll, max(0, len(free) - self.FREE_ROWS)))
+        x = r.x + 238
+        pygame.draw.line(s, (58, 68, 102), (x - 5, r.y + 16), (x - 5, r.bottom - 14))
+        font.draw(s, f"СВОБОДНЫЕ ВОИНЫ В ГОРОДЕ: {len(free)}", x, r.y + 18, "#a7f070")
+        if self.win_scroll or len(free) > self.FREE_ROWS:
+            font.draw(s, f"{self.win_scroll + 1}-{min(len(free), self.win_scroll + self.FREE_ROWS)}", r.right - 6,
+                      r.y + 18, "#5a6988", anchor="topright")
+        off = None
+        if kind == "army" and self._win_officers():
+            offs = self._win_officers()
+            off = offs[self.win_officer % len(offs)]
+        for i, t in enumerate(free[self.win_scroll:self.win_scroll + self.FREE_ROWS]):
+            hot = self.win_hover == ("free", i)
+            bad = hot and off is not None and not self.camp.can_assign(off.key, t.id)[0]
+            self._troop_row(s, self._free_rect(i), t.key, hot, bad)
+        if not free:
+            font.draw(s, "НИКОГО - НАЙМИТЕ ВОИНОВ", x + (r.right - x) // 2, r.y + 60, "#3a4466", anchor="midtop")
+        # hint / toast
+        text, col, until = self.toast
+        if self.time < until:
+            font.draw(s, text, r.centerx, r.bottom - 10, col, anchor="midtop")
+        else:
+            hint = ("КЛИК ПО СВОБОДНОМУ ВОИНУ - В ОТРЯД ОФИЦЕРА, ПО СЛОТУ - ВЕРНУТЬ В ГОРОД   < > - ОФИЦЕР"
+                    if kind == "army" else "НАНЯТЫЕ ВОИНЫ ВСТАЮТ В ГОРОДЕ. В ОТРЯД ИХ БЕРЁТ ОФИЦЕР В ОКНЕ АРМИИ")
+            font.draw(s, hint, r.centerx, r.bottom - 10, "#5a6988", anchor="midtop")
+
+    def _army_left(self, s: pygame.Surface, f: Faction) -> None:
+        r = self.WIN
+        font = self.font
+        offs = self._win_officers()
+        for d in (-1, 1):
+            a = self._arrow(d)
+            pygame.draw.rect(s, (58, 68, 102) if len(offs) > 1 else (38, 43, 68), a)
+            font.draw(s, "<" if d < 0 else ">", a.centerx, a.centery, "#ffffff", anchor="center")
+        if not offs:
+            font.draw(s, "В ГОРОДЕ НЕТ ОФИЦЕРОВ", r.x + 116, r.y + 60, "#8b9bb4", anchor="midtop")
+            return
+        i = self.win_officer % len(offs)
+        o = offs[i]
+        font.draw(s, f"ОФИЦЕР {i + 1} ИЗ {len(offs)}", r.x + 116, r.y + 19, "#c0cbdc", anchor="midtop")
+        # card
+        card = pygame.Rect(r.x + 6, r.y + 31, 220, 46)
+        pygame.draw.rect(s, (38, 43, 68), card)
+        pygame.draw.rect(s, _c(f.color), card, 1)
+        self.cards.face(s, pygame.Rect(card.x + 3, card.y + 3, 34, 40), o.key)
+        self.cards.name(s, o.key, card.x + 48, card.y + 4)
+        font.draw(s, o.title, card.x + 48, card.y + 12, f.light)
+        font.draw(s, f"ЛИДЕРСТВО {o.leadership}", card.x + 48, card.y + 22, "#ffffff")
+        power = self.camp.power(o.key)
+        bar = pygame.Rect(card.x + 48, card.y + 31, 166, 5)
+        pygame.draw.rect(s, INK, bar.inflate(2, 2))
+        pygame.draw.rect(s, (38, 43, 68), bar)
+        frac = power / max(1, o.leadership)
+        pygame.draw.rect(s, _c("#63c74d" if frac < 0.95 else "#feae34"), (bar.x, bar.y, int(bar.w * min(1, frac)), bar.h))
+        font.draw(s, f"МОЩЬ ОТРЯДА {power} / {o.leadership}", card.x + 48, card.y + 37, "#a7f070")
+        # six non-combat stats (1..20)
+        mx, my = getattr(self, "_mouse", (0, 0))
+        for k, st in enumerate(STATS):
+            x = r.x + 6 + (k % 2) * 113
+            y = r.y + 82 + (k // 2) * 11
+            v = o.stats[k]
+            hot = pygame.Rect(x, y, 110, 10).collidepoint(mx, my)
+            font.draw(s, st, x, y, "#fee761" if hot else "#c0cbdc")
+            font.draw(s, str(v), x + 108, y, "#ffffff", anchor="topright")
+            pygame.draw.rect(s, (38, 43, 68), (x, y + 7, 92, 2))
+            pygame.draw.rect(s, _c("#41a6f6"), (x, y + 7, int(92 * v / 20), 2))
+            if hot:
+                font.draw(s, STAT_HELP[st], r.centerx, r.bottom - 10, "#41a6f6", anchor="midtop")
+                self.toast = ("", "#ffffff", 0.0)
+        squad = self.camp.squads[o.key]
+        for k in range(SQUAD_SLOTS):
+            key = squad[k].key if k < len(squad) else None
+            self._troop_row(s, self._slot_rect(k), key, self.win_hover == ("slot", k))
+
+    def _hire_left(self, s: pygame.Surface, c: City, f: Faction) -> None:
+        font = self.font
+        gold = self.camp.gold[f.key]
+        font.draw(s, "ВОИНЫ ЭТОГО ГОРОДА", self.WIN.x + 116, self.WIN.y + 18, "#c0cbdc", anchor="midtop")
+        for i, key in enumerate(c.pool):
+            u = ROSTER[key]
+            r = self._hire_rect(i)
+            hot = self.win_hover == ("hire", i)
+            pygame.draw.rect(s, (58, 68, 102) if hot else (38, 43, 68), r)
+            pygame.draw.rect(s, (90, 105, 136), r, 1)
+            por = self.r.portrait(f"{key}_{TEAMS[0].key}")
+            s.blit(por, (r.x + 2, r.y + 2), area=pygame.Rect(0, 0, 18, 13))
+            name = u.short if len(u.name) > 18 and u.short else u.name
+            font.draw(s, name, r.x + 23, r.y + 2, "#ffffff")
+            font.draw(s, f"{u.role}, {TIER_NAMES[u.tier]}", r.x + 23, r.y + 10, "#8b9bb4")
+            font.draw(s, f"ЦЕНА {u.cost}   СОДЕРЖ. {u.upkeep}/ХОД", r.x + 23, r.y + 18, "#feae34")
+            b = self._hire_button(i)
+            ok = u.cost <= gold
+            s.blit(self.r.panel(b.w, b.h, base="#3e8948" if ok else "#3a4466", border="#a7f070" if ok else "#5a6988"),
+                   b.topleft)
+            font.draw(s, "НАНЯТЬ", b.centerx, b.centery, "#ffffff" if ok else "#5a6988", anchor="center")
