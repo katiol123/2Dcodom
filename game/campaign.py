@@ -35,8 +35,12 @@ GUARD = {"capital": 260, "castle": 220, "fort": 170, "town": 110, "port": 120, "
 WALLS = {"capital": 1.25, "castle": 1.3, "fort": 1.2, "town": 1.0, "port": 1.05, "lair": 1.1}
 BATTLE_K = 2.5                  # how decisive a power advantage is
 MAX_PROSPERITY = 10
-PROSPERITY_ROOM = 3             # a city can grow this far above its starting prosperity
+PROSPERITY_ROOM = 2             # a city can grow this far above its starting prosperity
 GROWTH_TURNS = 4                # an untaxed city grows +1 prosperity after this many turns
+# battles scar a city: -1 prosperity with this chance - less when the owner's council is good at ЛОГИСТИКА
+# (carts, evacuation, the wounded taken care of): SCAR_MAX at a council total of 40 or less, SCAR_MIN at 80+
+SCAR_MAX, SCAR_MIN = 1.0, 0.5
+RAVAGE_BATTLES, RAVAGE_WINDOW, RAVAGE_TURNS = 2, 5, 4    # 2 battles in 5 rounds: no growth for 4 own turns
 
 
 @dataclass
@@ -156,6 +160,10 @@ class Campaign:
         self.force_great: Optional[str] = None                # tests/cardsim: force the horde's choice
         self.pit: List[Tuple[str, int]] = []                  # captives in the pit: (their realm, power)
         self.paid: Dict[str, int] = {}                        # realm -> own turns the horde stays bought off
+        self.fought: Dict[str, List[int]] = {}                # city -> rounds of the battles fought there lately
+        self.ravaged: Dict[str, int] = {}                     # city -> own turns it cannot grow
+        self.law: Dict[str, int] = {c.key: 6 for c in CITIES if c.faction != "goblin"}   # ПОРЯДОК (order.py)
+        self.dens: set = set()                                # cities with a thieves' den
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
         self.alliance: Dict[frozenset, List] = {}             # pair -> [turns left, common enemy]
@@ -189,7 +197,8 @@ class Campaign:
                                           "newcomers": Counter(), "built": Counter(), "ruined": Counter(),
                                           "great": Counter(), "great_lost": Counter(), "captives": Counter(),
                                           "ransom": Counter(), "sacrificed": Counter(), "bred": Counter(),
-                                          "bought_off": Counter()}
+                                          "bought_off": Counter(), "scarred": Counter(), "crime": Counter(),
+                                          "ravaged": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
@@ -402,7 +411,8 @@ class Campaign:
         """What a tax card brings in this city now."""
         best = max((self.stat(o.key, "УПРАВЛЕНИЕ") for o in self.officers_in(city) if self.allegiance[o.key] == faction),
                    default=0)
-        g = self.prosperity[city] * TAX + 2 * best
+        from .order import tax_mult
+        g = int((self.prosperity[city] * TAX + 2 * best) * tax_mult(self, city))   # a thieves' den skims it
         return g * 2 // 5 if "drought" in self.active else g
 
     def army(self, faction: str) -> int:
@@ -772,8 +782,9 @@ class Campaign:
         from . import population, succession
         succession.turn(self, faction)
         population.turn(self, faction)
-        from . import horde
+        from . import horde, order
         horde.turn(self, faction)
+        order.turn(self, faction)
         from .buildings import count
         for city in self.cities_of(faction):
             if count(self, city, "temple"):
@@ -783,6 +794,10 @@ class Campaign:
                 self.immune[city] -= 1
                 if self.immune[city] <= 0:
                     del self.immune[city]
+            if city in self.ravaged:
+                self.ravaged[city] -= 1
+                if self.ravaged[city] <= 0:
+                    del self.ravaged[city]
         if r.course == "intrigue":                            # paranoia: nobody trusts anybody
             for o in self.officers_of(faction):
                 self.change_loyalty(o.key, -1)
@@ -804,7 +819,8 @@ class Campaign:
                     del self.siege[city]
         # untaxed cities grow
         for city in self.cities_of(f):
-            if self.taxed.get(city) == self.turn or r.course == "war" or "frost" in self.active:
+            if self.taxed.get(city) == self.turn or r.course == "war" or "frost" in self.active \
+                    or self.ravaged.get(city):
                 self.untaxed[city] = 0
             else:
                 self.untaxed[city] += 1
@@ -812,6 +828,8 @@ class Campaign:
                 from .diplomacy import growth_blocked
                 if growth_blocked(self, city):
                     need += 1                                 # a restless border
+                if self.prosperity[city] >= PROSPERITY[city]:
+                    need *= 3                                 # above its old self a city grows only slowly
                 if self.untaxed[city] >= need:
                     self.untaxed[city] = 0
                     self.prosperity[city] = min(self.max_prosperity(city), self.prosperity[city] + 1)
@@ -996,7 +1014,9 @@ class Campaign:
         self._forces(b)
         if not (self.battle_hook and self.battle_hook(self, b)):
             self._formula(b)
-        return self._settle(b, answer)
+        line = self._settle(b, answer)
+        self._scar(city, self.owner[city])             # whoever holds the city after the battle answers for it
+        return line
 
     def _forces(self, b: "Battle") -> None:
         city = b.city
@@ -1064,6 +1084,27 @@ class Campaign:
         if won:
             return min(0.6, 0.2 + 0.015 * log)
         return min(0.5, (0.1 + 0.015 * log) * (0.5 + 0.5 * ratio))
+
+    def scar_chance(self, owner: str) -> float:
+        """Chance that a battle in a city costs it 1 prosperity - checked against the council ЛОГИСТИКА of
+        the side that holds the city after the battle."""
+        r = self.realms.get(owner)
+        log = self.totals(r.council)["ЛОГИСТИКА"] if r and r.council else 0
+        return SCAR_MAX - (SCAR_MAX - SCAR_MIN) * max(0.0, min(1.0, (log - 40) / 40))
+
+    def _scar(self, city: str, owner: str) -> None:
+        """Every battle may scar the city; three in a few rounds leave it ravaged."""
+        recent = [t for t in self.fought.get(city, []) if t > self.turn - RAVAGE_WINDOW] + [self.turn]
+        self.fought[city] = recent
+        from .order import BATTLE, hit
+        hit(self, city, BATTLE)
+        if self.rng.random() < self.scar_chance(owner):
+            self.prosperity[city] = max(1, self.prosperity[city] - 1)
+            self.stats["scarred"][owner] += 1
+        if len(recent) >= RAVAGE_BATTLES and not self.ravaged.get(city):
+            self.ravaged[city] = RAVAGE_TURNS
+            self.stats["ravaged"][owner] += 1
+            self.log_event(owner, f"{CITY[city].name} РАЗОРЁН боями: {RAVAGE_TURNS} х. не растёт")
 
     def _settle(self, b: "Battle", answer: str) -> str:
         city, name = b.city, CITY[b.city].name
@@ -1223,6 +1264,8 @@ class Campaign:
             from .horde import on_city_lost
             on_city_lost(self, city)
         self.owner[city] = faction
+        from .order import taken
+        taken(self, city)
         self.losses.append((self.turn, old, faction, city))
         self.prosperity[city] = max(1, self.prosperity[city] - 1)
         self.siege.pop(city, None)

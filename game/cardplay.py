@@ -172,7 +172,9 @@ def _cut(camp, city, frac) -> int:
 
 def _raid(camp, f, city) -> int:
     from .horde import on_raid
+    from .order import RAID, hit
     on_raid(camp, f, city)
+    hit(camp, city, RAID)
     g = _gold(camp, f, camp.prosperity[city] * 12, "raids")
     _prosper(camp, city, -1)
     camp.change_relation(f, camp.owner[city], -10)
@@ -214,6 +216,8 @@ def _tax(camp, f, t):
     g = _gold(camp, f, int(camp.income_of(city, f) * (1.5 if count(camp, city, "market") else 1)), "tax")
     if camp.taxed.get(city, -9) >= camp.turn - 1 and camp.realms[f].course != "economy":
         _prosper(camp, city, -1)
+        from .order import OVERTAX, hit
+        hit(camp, city, OVERTAX)
         note = " (поборы: процветание -1)"
     else:
         note = ""
@@ -708,10 +712,10 @@ def _lamp(camp, f, t):
 @effect("golden_age")
 @effect("fat_year")
 def _golden_age(camp, f, t):
-    g = 0
-    for c in camp.cities_of(f):
+    cities = camp.cities_of(f)
+    for c in sorted(cities, key=lambda c: camp.prosperity[c])[:2]:
         _prosper(camp, c, 1)
-        g += camp.prosperity[c] * 6
+    g = sum(camp.prosperity[c] * 6 for c in cities)
     return f"+{_gold(camp, f, g, 'tax')} золота, процветание растёт"
 
 

@@ -222,6 +222,17 @@ def _goblin_target(camp, f: str) -> bool:
     return bool(plan) and camp.owner[plan[0]] == "goblin"
 
 
+def arrives(camp, f: str, rival: str) -> float:
+    """Chance that a curse we slip into the rival's deck gets there: a council with a good eye for
+    spies (РАЗВЕДКА 62+) catches a third, a realm on the course of secret policy half; a ПЕРЕХВАТ
+    ГОНЦА in his hand stops it all - but we know of it only if we have seen his hand this round."""
+    r = camp.realms[rival]
+    caught = max(0.35 if camp.intercepts(r.council) else 0.0, 0.5 if r.course == "intrigue" else 0.0)
+    if camp.realms[f].revealed.get(rival, -99) >= camp.turn and any(c.card.reaction == "cursed" for c in r.hand):
+        return 0.0
+    return 1.0 - caught
+
+
 def _frontline_officer(camp, f: str) -> float:
     front = set(frontier(camp, f))
     return max((camp.power(o.key) for o in camp.officers_of(f) if camp.officer_city[o.key] in front), default=0)
@@ -273,7 +284,9 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         m = 6
         return sum(camp.prosperity[c] * m for c in camp.cities_of(f)), []
     if k == "golden_age":
-        return sum((camp.prosperity[c] + 1) * 6 + PV for c in camp.cities_of(f)), []
+        poor = sorted(camp.cities_of(f), key=lambda c: camp.prosperity[c])[:2]
+        return sum(camp.prosperity[c] * 6 for c in camp.cities_of(f)) + sum(
+            PV + 6 for c in poor if camp.prosperity[c] < camp.max_prosperity(c)), []
     if k in ("build", "reform", "charter"):
         n = {"build": 2, "reform": 2, "charter": 3}[k]
         cost = 80 if k == "build" else 0
@@ -479,19 +492,20 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         return (90 if _hand_has_more(camp, f, inst) else -1), []
     if k == "genie_lamp":
         return 130, []
-    # --- intrigue against rivals
+    # --- intrigue against rivals: the worse we stand with them, the more it is worth - and a curse
+    # is worth only as much as the chance it gets through their watch (``arrives``)
     def hostile(r):
         return 1.0 + (50 - min(50, camp.relation(f, r))) / 50 + _rival_threat(camp, f, r) / 1500
     if k == "arson":
-        return _best_rival(camp, f, k, lambda r: min(150, camp.gold[r] // 4) * 0.7 * hostile(r))
+        return _best_rival(camp, f, k, lambda r: min(150, camp.gold[r] // 4) * 0.7 * hostile(r) * arrives(camp, f, r))
     if k == "agitators":
-        return _best_rival(camp, f, k, lambda r: 55 * hostile(r))
+        return _best_rival(camp, f, k, lambda r: 55 * hostile(r) * arrives(camp, f, r))
     if k == "letters":
-        return _best_rival(camp, f, k, lambda r: 45 * hostile(r))
+        return _best_rival(camp, f, k, lambda r: 45 * hostile(r) * arrives(camp, f, r))
     if k == "plague_cauldron":
-        return _best_rival(camp, f, k, lambda r: 90 * hostile(r))
+        return _best_rival(camp, f, k, lambda r: 90 * hostile(r) * arrives(camp, f, r))
     if k == "mushroom_haze":
-        return _best_rival(camp, f, k, lambda r: 60 * hostile(r))
+        return _best_rival(camp, f, k, lambda r: 60 * hostile(r) * arrives(camp, f, r))
     if k == "all_seeing":
         return _best_rival(camp, f, k, lambda r: sum(sorted((card_value(camp, r, c) for c in camp.realms[r].hand),
                                                             reverse=True)[:2]) * 0.6 * hostile(r))

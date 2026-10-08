@@ -970,6 +970,10 @@ class WorldMapScreen:
         notes.append(f"ЗАЩИТА {int(self.camp.defense_power(c.key))}")
         if c.key in self.camp.sick:
             notes.append(f"БОЛЕЗНЬ {self.camp.sick[c.key]} Х.")
+        if self.camp.ravaged.get(c.key):
+            notes.append(f"РАЗОРЁН {self.camp.ravaged[c.key]} Х.")
+        if c.key in self.camp.law and self.camp.owner[c.key] != "goblin":
+            notes.append(f"ПОРЯДОК {self.camp.law[c.key]}" + (" ПРИТОН" if c.key in self.camp.dens else ""))
         font.draw(s, "  ".join(notes), r.x + 5, y, "#8b9bb4")
         y += 9
         from .buildings import BUILDINGS, slots

@@ -54,6 +54,10 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   `_CARDS` + `@effect` + AI value + put it in a pool/unique list; then `python -m game.cardsim 64 40` and check
   per-realm cities/income and the card's play rate; regenerate docs/CARDS.md tables.
 - City prosperity (`PROSPERITY` in factions.py, 1..10) sets tax income; AI realms must stay pygame-free.
+  Battles scar cities (`Campaign._scar`: chance by the council ЛОГИСТИКА of whoever holds the city after the
+  battle; 2 battles in 5 rounds = ravaged). Cities of men have ПОРЯДОК (`order.py`, `camp.law` - `camp.order`
+  is the turn order!): low order breeds crime that eats prosperity. Aim (cardsim line ПРОЦВЕТАНИЕ): the
+  campaign ends near the starting total (~+10%), often within +5%. AI curse cards weigh `arrives` (interception).
 - Hiring is open only in cities with an active СБОР ВОЙСК (`camp.muster`, turns from council ВЕРБОВКА).
 - Officers change during a campaign (`growth.py`): XP/levels (weak officers learn faster, by *starting*
   presence), wounds/complacency, feats (one of each per campaign, `cards.FEATS`), loyalty events and

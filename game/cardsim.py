@@ -17,7 +17,7 @@ from typing import Dict
 
 from .campaign import Campaign
 from .cards import CARDS, TIER_NAMES
-from .factions import ALL_FACTIONS, FACTION
+from .factions import ALL_FACTIONS, CITIES, FACTION, PROSPERITY
 
 
 
@@ -83,6 +83,10 @@ def one_game(args) -> Dict:
         "alive": {f: c.realms[f].alive for f in c.order},
         "army": {f: c.army(f) for f in c.order},
         "gold": {f: c.gold[f] for f in c.order},
+        "pros_total": (sum(PROSPERITY[x.key] for x in CITIES if x.faction != "goblin"),
+                       sum(c.prosperity[x.key] for x in CITIES if x.faction != "goblin")),
+        "scars": (sum(c.stats["scarred"].values()), sum(c.stats["ravaged"].values())),
+        "crime": c.stats["crime"], "order": sum(c.law.values()) / max(1, len(c.law)),
         "prosperity": {f: (sum(c.prosperity[x] for x in c.cities_of(f)) / max(1, len(c.cities_of(f))))
                        for f in c.order},
         "played": c.stats["played"], "drawn": c.stats["drawn"], "income": c.stats["gold"],
@@ -114,6 +118,18 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> s
         paid = sum(r["paid"][f] for r in results) / n / rounds
         out.append(f"{fac.short:12s} {mid:9.1f} {end:9.1f} {dead:5.0%} {army:6.0f} {gold:6.0f} {pros:5.1f} {des:7.1f}"
                    f" {inc:9.0f} {paid:9.0f}")
+    st = sum(r["pros_total"][0] for r in results) / len(results)
+    en = sum(r["pros_total"][1] for r in results) / len(results)
+    out.append(f"ПРОЦВЕТАНИЕ городов людей (сумма): старт {st:.0f} -> конец {en:.0f} ({en / st - 1:+.0%}); "
+               f"бои отняли {sum(r['scars'][0] for r in results) / len(results):.1f} раз, "
+               f"разорено {sum(r['scars'][1] for r in results) / len(results):.1f} раз за кампанию; "
+               f"к концу не выше старта +5%: "
+               f"{sum(1 for r in results if r['pros_total'][1] <= r['pros_total'][0] * 1.05) / len(results):.0%} кампаний")
+    crime = Counter()
+    for r in results:
+        crime.update(r["crime"])
+    out.append(f"ПОРЯДОК в конце {sum(r['order'] for r in results) / len(results):.1f}; преступность за кампанию: "
+               + ", ".join(f"{k} {v / len(results):.1f}" for k, v in crime.items()))
     courses = Counter()
     for r in results:
         courses.update(r["courses"])
