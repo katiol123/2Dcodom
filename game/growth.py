@@ -97,6 +97,7 @@ def award(camp, o: str, feat: str) -> None:
         return
     camp.feats[feat] = o
     camp.extra.setdefault(o, []).append(feat)
+    camp.claim[o] = camp.claim.get(o, 0) + 15
     camp.stats["feats"][feat] += 1
     f = camp.allegiance[o]
     camp.log_event(f, f"ПОДВИГ: {OFFICER[o].name} - {CARDS[feat].name}")
@@ -111,6 +112,7 @@ def on_card_used(camp, f: str, inst) -> None:
     o = inst.origin
     if o in OFFICER and camp.allegiance.get(o) == f:
         camp.last_used[o] = camp.turn
+        camp.claim[o] = camp.claim.get(o, 0) + 1
         gain_xp(camp, o, XP_CARD)
         camp.change_loyalty(o, 2)
 
@@ -125,6 +127,7 @@ def on_battle(camp, b) -> None:
             if o not in camp.xp:
                 continue
             gain_xp(camp, o, XP_WIN if side_won else XP_LOSS)
+            camp.claim[o] = camp.claim.get(o, 0) + (4 if side_won else -1)
             if side_won:
                 camp.streak[o] = camp.streak.get(o, 0) + 1
                 if camp.streak[o] >= 8:
@@ -172,7 +175,7 @@ def turn(camp, faction: str) -> None:
     """Start of a realm's turn: seats, grudges, defections, complacency, feats of peace."""
     r = camp.realms[faction]
     for o in list(r.council):
-        if OFFICER[o].rank == 0 and OFFICER[o].faction == faction:
+        if camp.is_leader(o):
             continue
         gain_xp(camp, o, XP_SEAT)
         if camp.turn - camp.last_used.get(o, camp.turn) >= 5:
@@ -185,7 +188,7 @@ def turn(camp, faction: str) -> None:
         gain_xp(camp, o, XP_DRILL, deed=False)               # drill and garrison duty
         if camp.presence(o) > 0.6 and camp.idle[o] > 4 and camp.rng.random() < 0.015:
             degrade(camp, o, "почивает на лаврах")
-        if camp.loyalty[o] < 20 and not (OFFICER[o].rank == 0 and OFFICER[o].faction == faction) \
+        if camp.loyalty[o] < 20 and not camp.is_leader(o) \
                 and camp.rng.random() < 0.2:
             desert(camp, o)
     # feats of peace and plenty

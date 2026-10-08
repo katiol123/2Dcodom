@@ -17,7 +17,6 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from .cardplay import MAX_GROUP, options
 from .cards import CARDS, COUNCIL_SEATS
 from .factions import CITY, FACTION, neighbors
-from .officers import OFFICER
 from .units import ROSTER
 
 AP_PRICE = 35                   # what one action point is worth, in gold
@@ -108,6 +107,8 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
             hostility *= 1.4                     # a rich realm that does not arm itself is tempting prey
         if camp.owner[target] in foes:
             hostility *= 1.35                    # the alliance's common enemy / the hegemon
+        if camp.realms[camp.owner[target]].unrest:
+            hostility *= 1.25                    # a throne that shakes invites the sword
         v = p * _city_worth(camp, target) * hostility - (1 - p) * a * 0.5 - p * 0.3 * min(a, d) * POWER_VALUE
         if v > best[0]:
             best = (v, [target, tuple(cands)])
@@ -416,12 +417,12 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         if gold < 100 + camp.upkeep(f):
             return -1, []
         return _enemy_officer(camp, f, k, lambda o: (camp.power(o) * POWER_VALUE + 120 - 100)
-                              if camp.loyalty[o] - 30 < 20 and OFFICER[o].rank > 0 else -1)
+                              if camp.loyalty[o] - 30 < 20 and not camp.is_leader(o) else -1)
     if k == "plot":
         intrigue = camp.totals(camp.realms[f].council)["ИНТРИГА"]
 
         def s(o):
-            if OFFICER[o].rank == 0 and OFFICER[o].faction == camp.allegiance[o]:
+            if camp.is_leader(o):
                 return -1
             ch = max(0, min(0.95, 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400
                             + (0.15 if camp.realms[f].course == "intrigue" else 0)))
@@ -564,17 +565,17 @@ def council_score(camp, members: Sequence[str], taste: Optional[Dict[str, float]
 
 def choose_council(camp, f: str) -> List[str]:
     """Leader + four advisers, improved seat by seat while any swap helps."""
-    from .officers import OFFICERS
-    leader = OFFICERS[f][0].key
+    leader = camp.leader.get(f)
     cands = [o.key for o in camp.officers_of(f) if o.key != leader]
-    members = [leader] + sorted(cands, key=lambda k: -camp.presence(k))[:COUNCIL_SEATS - 1]
+    head = [leader] if leader else []
+    members = head + sorted(cands, key=lambda k: -camp.presence(k))[:COUNCIL_SEATS - len(head)]
     import random as _r
     rr = _r.Random(f"taste:{camp.seed}:{f}")
     taste = {"unique": rr.uniform(0.6, 1.8), "threshold": rr.uniform(0.8, 1.2), "moderate": rr.uniform(0.8, 1.2)}
     best = council_score(camp, members, taste)
     for _ in range(6):
         improved = False
-        for i in range(1, len(members)):
+        for i in range(len(head), len(members)):
             for c in cands:
                 if c in members:
                     continue

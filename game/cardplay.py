@@ -581,7 +581,7 @@ def _bribe(camp, f, t):
     if camp.loyalty[o] >= 90:                                    # the devoted send the bribe back
         return f"{OFFICER[o].name} с презрением вернул{'а' if OFFICER[o].female else ''} золото"
     camp.change_loyalty(o, -30)
-    if camp.loyalty[o] < 20 and OFFICER[o].rank > 0:
+    if camp.loyalty[o] < 20 and not camp.is_leader(o):
         camp.defect(o, f)
         return f"{OFFICER[o].name} перешёл{'а' if OFFICER[o].female else ''} на нашу сторону"
     return f"{OFFICER[o].name}: верность {camp.loyalty[o]}"
@@ -593,7 +593,7 @@ def _plot(camp, f, t):
     victim = camp.allegiance[o]
     intrigue = camp.totals(camp.realms[f].council)["ИНТРИГА"]
     chance = 0.35 + (60 - camp.loyalty[o]) / 100 + intrigue / 400 + (0.15 if camp.realms[f].course == "intrigue" else 0)
-    if OFFICER[o].rank == 0 and OFFICER[o].faction == victim:
+    if camp.is_leader(o):
         chance = 0.0
     if camp.loyalty[o] >= 90:
         chance -= 0.3                                            # the devoted are hard to turn
@@ -724,7 +724,7 @@ def _auction(camp, f, t):
 @effect("harem_intrigue")
 def _harem(camp, f, t):
     r = camp.realms[t[0]]
-    advisers = [o for o in r.council if OFFICER[o].rank > 0 or OFFICER[o].faction != t[0]]
+    advisers = [o for o in r.council if not camp.is_leader(o)]
     if not advisers:
         return "совет пуст"
     o = min(advisers, key=lambda x: camp.loyalty[x])
@@ -963,7 +963,7 @@ def _vice(camp, f: str, inst) -> None:
             camp.change_relation(f, x, -10)
             camp.log_event(f, f"ГРУБОСТЬ: {who} оскорбил посла, отношения с {FACTION[x].short} -10")
     elif key == "envy":
-        others = [o for o in r.council if o != inst.origin and OFFICER[o].rank > 0]
+        others = [o for o in r.council if o != inst.origin and not camp.is_leader(o)]
         if others:
             o = camp.rng.choice(others)
             camp.change_loyalty(o, -10)

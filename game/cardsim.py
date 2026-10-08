@@ -70,6 +70,7 @@ def one_game(args) -> Dict:
     return {
         "snap": snap, "standing": {f: standing(c, f) for f in c.order},
         "army_end": {f: c.army(f) for f in c.order},
+        "successions": c.stats["successions"], "unrest_turns": c.stats["unrest_turns"],
         "diplomacy": c.stats["diplomacy"], "hegemon": c.stats["hegemon"], "events": c.stats["events"],
         "alliances": len(c.alliance), "growth": growth, "levels": c.stats["levels"], "declines": c.stats["declines"],
         "feats": c.stats["feats"], "turncoats": c.stats["deserted_officers"], "reshuffles": c.stats["reshuffles"],
@@ -139,6 +140,9 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> s
         ev.update(r["events"])
     out.append("ДИПЛОМАТИЯ за кампанию: " + ", ".join(f"{k} {v / n:.1f}" for k, v in sorted(dip.items()))
                + f"; союзов в конце {sum(r['alliances'] for r in results) / n:.1f}")
+    out.append("СМЕНЫ ПРАВИТЕЛЯ за кампанию: " + ", ".join(
+        f"{fac.short} {sum(r['successions'][fac.key] for r in results) / n:.2f}" for fac in ALL_FACTIONS)
+        + f"; ходов нестабильности на державу {sum(sum(r['unrest_turns'].values()) for r in results) / n / 9:.1f}")
     out.append("ГЕГЕМОН (ходов): " + ", ".join(f"{FACTION[k].short} {v / n:.1f}" for k, v in heg.most_common()))
     out.append(f"СОБЫТИЯ МИРА: {sum(ev.values()) / n:.2f} за кампанию: " +
                ", ".join(f"{k} {v / n:.2f}" for k, v in ev.most_common()))

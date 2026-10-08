@@ -328,6 +328,7 @@ class WorldMapScreen:
         self.seen_levels = self.camp.stats["levels"][p] if p else 0
         self.seen_feats = sum(1 for o in self.camp.feats.values() if self.camp.allegiance.get(o) == p)
         self.event_t = 0.0
+        self.seen_leader = self.camp.leader.get(p) if p else None
         self.event_show: Optional[Tuple[int, str, str]] = None     # a world event shown as a big card
         self.hover_rel: Optional[Tuple[str, str]] = None
         self.keys: Dict[int, bool] = {}
@@ -880,6 +881,8 @@ class WorldMapScreen:
         for key, left in self.camp.active.items():         # running world events
             e = EVENT[key]
             x = f.draw(s, f"{e.name} {left}Х.", x, 4, e.color).right + 6
+        if p and self.camp.realms[p].unrest:
+            x = f.draw(s, f"ШАТКИЙ ТРОН {self.camp.realms[p].unrest}Х.", x, 4, "#e43b44").right + 6
         for b in self.buttons:
             active = b.action == "diplomacy" and self.diplomacy
             s.blit(self.r.panel(b.rect.w, b.rect.h, base="#5a6988" if active else b.color, border="#8b9bb4"),
@@ -1138,6 +1141,14 @@ class WorldMapScreen:
             self.fx.add(Banner(self.font, "ВАШ ХОД", f"ХОД {self.camp.turn} - {FACTION[p].name}", FACTION[p].light,
                                H // 2 - 40, W))
         self.was_my_turn = mine
+        ruler = self.camp.leader.get(p)
+        if ruler != self.seen_leader:
+            from .officers import OFFICER
+            self.seen_leader = ruler
+            ui("gong")
+            self.fx.add(Banner(self.font, "ПРАВИТЕЛЬ МЁРТВ", (f"НА ТРОН ВСХОДИТ {OFFICER[ruler].name}. "
+                                                              "ПОЛИТИЧЕСКАЯ НЕСТАБИЛЬНОСТЬ") if ruler else
+                               "ТРОН ПУСТ", "#e43b44", H // 2 - 70, W, cue="", dur=2.6))
         lv = self.camp.stats["levels"][p]
         if lv > self.seen_levels:
             self.seen_levels = lv

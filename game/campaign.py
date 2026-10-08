@@ -75,6 +75,8 @@ class Realm:
     course_cd: int = 0          # own turns before the course may change again
     storms: int = 0             # storms since the last war fatigue
     revealed: Dict[str, int] = field(default_factory=dict)   # rival -> turn their hand was seen
+    legacy: List[str] = field(default_factory=list)  # cards left by the ruler who died last
+    unrest: int = 0             # own turns of political instability left (succession.py)
 
     def all_cards(self) -> List[CardInst]:
         return self.draw + self.hand + self.discard
@@ -138,6 +140,9 @@ class Campaign:
         self.feats: Dict[str, str] = {}                       # feat card -> officer who earned it
         self.extra: Dict[str, List[str]] = {}                 # officer -> cards earned in play
         self.muster: Dict[str, int] = {}                      # city -> own turns its recruiting stays open
+        self.leader: Dict[str, Optional[str]] = {f: offs[0].key for f, offs in OFFICERS.items()}
+        self.dead: set = set()                                # officers who died (succession.py)
+        self.claim: Dict[str, float] = {}                     # merit at court: who would inherit the throne
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
         self.alliance: Dict[frozenset, List] = {}             # pair -> [turns left, common enemy]
@@ -164,7 +169,9 @@ class Campaign:
                                           "paid": Counter(), "courses": Counter(), "levels": Counter(),
                                           "declines": Counter(), "feats": Counter(),
                                           "deserted_officers": Counter(), "reshuffles": Counter(),
-                                          "diplomacy": Counter(), "hegemon": Counter(), "events": Counter()}
+                                          "diplomacy": Counter(), "hegemon": Counter(), "events": Counter(),
+                                          "deaths": Counter(), "successions": Counter(),
+                                          "unrest_turns": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
@@ -277,8 +284,11 @@ class Campaign:
         return cost
 
     def devoted(self, officer: str) -> bool:
-        return self.loyalty.get(officer, 0) >= 100 and not (OFFICER[officer].rank == 0
-                                                          and OFFICER[officer].faction == self.allegiance[officer])
+        return self.loyalty.get(officer, 0) >= 100 and not self.is_leader(officer)
+
+    def is_leader(self, officer: str) -> bool:
+        """The ruler of the realm the officer serves (rulers change: succession.py)."""
+        return self.leader.get(self.allegiance.get(officer)) == officer
 
     def refresh_council_of(self, officer: str) -> None:
         """An adviser's stats changed: the council's threshold cards follow."""
@@ -290,8 +300,8 @@ class Campaign:
     # --- queries ----------------------------------------------------------------------------
     def officers_in(self, city: str) -> List[Officer]:
         return sorted((OFFICER[k] for k, c in self.officer_city.items()
-                       if c == city and self.allegiance[k] == self.owner[city]),
-                      key=lambda o: (o.rank, -self.olead[o.key]))
+                       if c == city and self.allegiance[k] == self.owner[city] and k not in self.dead),
+                      key=lambda o: (not self.is_leader(o.key), o.rank, -self.olead[o.key]))
 
     def power(self, officer: str) -> int:
         return sum(t.power for t in self.squads[officer])
@@ -314,8 +324,9 @@ class Campaign:
 
     def officers_of(self, faction: str) -> List[Officer]:
         """Everyone serving the faction now (defectors included), leader first."""
-        return sorted((OFFICER[k] for k, f in self.allegiance.items() if f == faction),
-                      key=lambda o: (o.faction != faction, o.rank, -self.olead[o.key]))
+        return sorted((OFFICER[k] for k, f in self.allegiance.items() if f == faction and k not in self.dead),
+                      key=lambda o: (self.leader.get(faction) != o.key, o.faction != faction, o.rank,
+                                     -self.olead[o.key]))
 
     def cities_of(self, faction: str) -> List[str]:
         return [c for c, f in self.owner.items() if f == faction]
@@ -446,8 +457,8 @@ class Campaign:
 
     # --- officers: loyalty, defection, moves ------------------------------------------------
     def change_loyalty(self, officer: str, d: int) -> None:
-        if OFFICER[officer].rank == 0 and self.allegiance[officer] == OFFICER[officer].faction:
-            return                                       # a leader never wavers
+        if self.is_leader(officer):
+            return                                       # a ruler never wavers
         self.loyalty[officer] = max(0, min(100, self.loyalty[officer] + d))
 
     def nearest_city(self, start: str, faction: str) -> Optional[str]:
@@ -469,8 +480,8 @@ class Campaign:
     def defect(self, officer: str, faction: str) -> None:
         """The officer changes sides together with his squad (treason, bribery, capture...)."""
         old = self.allegiance[officer]
-        if old == faction:
-            return
+        if old == faction or self.is_leader(officer) or officer in self.dead:
+            return                                       # a ruler never changes sides
         if old in self.realms and officer in self.realms[old].council:
             members = [o for o in self.realms[old].council if o != officer]
             self.set_council(old, members, quiet=True)
@@ -525,7 +536,10 @@ class Campaign:
     def _build_deck(self, faction: str) -> None:
         r = self.realms[faction]
         r.draw = [self._inst(k, "base") for k in COURSES[r.course].base]
-        r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
+        lead = self.leader.get(faction)
+        if lead and OFFICER[lead].rank == 0 and OFFICER[lead].faction == faction:
+            r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
+        r.draw.extend(self._inst(k, "legacy") for k in r.legacy)
         for o in r.council:
             r.draw.extend(self._inst(k, o) for k in self.personal(o))
         r.draw.extend(self._inst(k, "threshold") for k in self.thresholds(r.council))
@@ -535,8 +549,8 @@ class Campaign:
         return [o for o in self.officers_of(faction)]
 
     def can_set_council(self, faction: str, members: Sequence[str]) -> Tuple[bool, str]:
-        leader = OFFICERS[faction][0].key
-        if leader not in members:
+        leader = self.leader.get(faction)
+        if leader and leader not in members:
             return False, "ГЛАВА ФРАКЦИИ ВСЕГДА В СОВЕТЕ"
         if len(members) > COUNCIL_SEATS or len(set(members)) != len(members):
             return False, f"В СОВЕТЕ {COUNCIL_SEATS} МЕСТ"
@@ -708,6 +722,8 @@ class Campaign:
                 del self.muster[city]
         from . import growth
         growth.turn(self, faction)
+        from . import succession
+        succession.turn(self, faction)
         if r.course == "intrigue":                            # paranoia: nobody trusts anybody
             for o in self.officers_of(faction):
                 self.change_loyalty(o.key, -1)
@@ -1027,6 +1043,8 @@ class Campaign:
             for o in b.officers:
                 self.change_loyalty(o, -5)
             growth.on_battle(self, b)
+            from .succession import on_battle
+            on_battle(self, b)
             return f"штурм {name} отбит ({int(b.a)} против {int(b.d)}){tail}"
         for t in list(self.free[city]):                       # the rest of the garrison runs if it can
             self.free[city].remove(t)
@@ -1042,6 +1060,8 @@ class Campaign:
         for o in b.officers:
             self.change_loyalty(o, 3)
         growth.on_battle(self, b)
+        from .succession import on_battle
+        on_battle(self, b)
         return f"{name} взят ({int(b.a)} против {int(b.d)}){tail}"
 
     def _remove(self, officer: Optional[str], city: str, t: Troop) -> None:
@@ -1130,7 +1150,16 @@ class Campaign:
                 self.officer_city[o] = self.rng.choice(back)
                 self.change_loyalty(o, -5)
                 continue
-            leader = OFFICER[o].rank == 0 and OFFICER[o].faction == old
+            if self.is_leader(o):                          # a ruler is never taken: he flees far or dies
+                home = self.nearest_city(city, old)
+                if home and home != city and self.rng.random() < 0.5:
+                    self.officer_city[o] = home
+                    self.squads[o] = []
+                    continue
+                from .succession import die
+                die(self, o, "погиб" + ("ла" if OFFICER[o].female else "") + f" при падении {CITY[city].name}")
+                continue
+            leader = False
             feud = old != "goblin" and self.relation(old, faction) <= 14      # blood feud: no oaths
             if not leader and not feud and (self.rng.random() < (100 - self.loyalty[o]) / 100 + 0.15
                                or not self.cities_of(old)):
@@ -1153,7 +1182,12 @@ class Campaign:
         """A realm without cities falls; its officers go over to the conqueror."""
         if not self.cities_of(old) and old in self.realms and self.realms[old].alive:
             self.realms[old].alive = False
+            ruler = self.leader.get(old)
             for o in [x.key for x in self.officers_of(old)]:
                 self.squads[o] = []
+                if o == ruler:
+                    self.dead.add(o)                     # the last ruler does not survive his realm
+                    self.officer_city.pop(o, None)
+                    continue
                 self.defect(o, faction)
             self.log_event(faction, f"{FACTION[old].name} пала")

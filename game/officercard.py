@@ -172,17 +172,36 @@ class OfficerCard:
         pygame.draw.rect(s, INK, pr.inflate(6, 6), 1)
         pygame.draw.rect(s, INK, pr.inflate(2, 2), 1)
         self.face(s, pr, o.key, frame=trim, click=False)
-        font.draw(s, self.RANKS[min(o.rank, 3)], pr.centerx, pr.bottom + 6, "#c0cbdc", anchor="midtop")
+        dead = o.key in self.camp.dead
+        if dead:
+            rank, rcol = ("ПОГИБЛА" if o.female else "ПОГИБ"), "#e43b44"
+        elif self.camp.is_leader(o.key):
+            rank, rcol = ("ПРАВИТЕЛЬНИЦА" if o.female else "ПРАВИТЕЛЬ"), "#fee761"
+        else:
+            rank, rcol = self.RANKS[max(1, min(o.rank, 3))], "#c0cbdc"
+        font.draw(s, rank, pr.centerx, pr.bottom + 6, rcol, anchor="midtop")
         k = 0 if p >= 0.6 else 1 if p >= 0.36 else 2
         verdict = (("ВЫДАЮЩАЯСЯ", "ДОСТОЙНАЯ", "ЗАУРЯДНАЯ") if o.female else
                    ("ВЫДАЮЩИЙСЯ", "ДОСТОЙНЫЙ", "ЗАУРЯДНЫЙ"))[k]
         font.draw(s, verdict, pr.centerx, pr.bottom + 14, trim, anchor="midtop")
         loy = self.camp.loyalty.get(o.key, 100)
-        font.draw(s, f"ВЕРНОСТЬ {loy}", pr.centerx, pr.bottom + 23, "#63c74d" if loy >= 60 else "#feae34"
-                  if loy >= 35 else "#e43b44", anchor="midtop")
+        if dead:
+            pass
+        elif self.camp.is_leader(o.key):
+            font.draw(s, "ВЛАСТЬ НЕ ОСПАРИВАЕТ", pr.centerx, pr.bottom + 23, "#8b9bb4", anchor="midtop")
+        else:
+            font.draw(s, f"ВЕРНОСТЬ {loy}", pr.centerx, pr.bottom + 23, "#63c74d" if loy >= 60 else "#feae34"
+                      if loy >= 35 else "#e43b44", anchor="midtop")
         realm = self.camp.realms.get(serves.key)
-        if realm and o.key in realm.council:
-            font.draw(s, "СИДИТ В СОВЕТЕ", pr.centerx, pr.bottom + 31, "#fee761", anchor="midtop")
+        from .succession import contenders, heir_score
+        if realm and not dead and not self.camp.is_leader(o.key):
+            heirs = contenders(self.camp, serves.key)
+            seat = "В СОВЕТЕ, " if o.key in realm.council else ""
+            if heirs and heirs[0] == o.key:
+                font.draw(s, f"{seat}ПРЕЕМНИК ТРОНА", pr.centerx, pr.bottom + 31, "#fee761", anchor="midtop")
+            elif o.key in heirs:
+                font.draw(s, f"{seat}ЗАСЛУГИ {int(heir_score(self.camp, o.key))}", pr.centerx, pr.bottom + 31,
+                          "#fee761" if seat else "#8b9bb4", anchor="midtop")
         # who he is
         x = r.x + 118
         name_w = self.font.render(o.name, "#fee761").get_width()
@@ -256,11 +275,12 @@ class OfficerCard:
                       anchor=anchor)
         # the cards he brings into the council's deck
         from .cardui import CardArt
-        from .cards import FACTION_CARD, PERSONAL
+        from .cards import PERSONAL
         if not hasattr(self, "art"):
             self.art = CardArt(self.r)
-        mine = [FACTION_CARD[o.faction]] if o.rank == 0 and o.faction == serves.key else list(PERSONAL[o.key])
-        mine += self.camp.extra.get(o.key, [])
+        from .succession import leader_cards
+        mine = leader_cards(self.camp, serves.key, o.key) if self.camp.is_leader(o.key) else \
+            list(PERSONAL[o.key]) + self.camp.extra.get(o.key, [])
         x1, y1 = r.x + 278, r.y + 168
         font.draw(s, "КАРТЫ В КОЛОДУ СОВЕТА:", x1, y1, "#fee761")
         y1 += 9

@@ -76,6 +76,11 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Map overlays: city badges (officers, garrison), storm arrows since the player's last turn
   (`camp.attacks`), В ОСАДЕ plaque. The camera may slide half a screen past the map edge; zooming back in
   restores the view left when zooming out (`zoom_back`).
+- Rulers (`camp.leader`, `succession.py`): never defect; may die (battle, fallen city, illness, realm's fall).
+  Heir = best `heir_score` (court merit `camp.claim` + presence/level/loyalty), never chosen directly. New
+  ruler's cards become the ruler's cards, the dead ruler's stay as `Realm.legacy` (one ruler only); then
+  political instability (`Realm.unrest`). Use `camp.is_leader(o)`, never `rank == 0`, for "the ruler".
+  Dead officers stay in `camp.dead` (excluded from `officers_of/officers_in`).
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

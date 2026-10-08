@@ -168,7 +168,7 @@ def origin_label(origin: str) -> str:
     if origin in OFFICER:
         return OFFICER[origin].name
     return {"base": "ДЕРЖАВА", "faction": "ЛИДЕР", "threshold": "СОВЕТ", "curse": "ПРОКЛЯТИЕ",
-            "stolen": "ДОБЫЧА"}.get(origin, "")
+            "stolen": "ДОБЫЧА", "legacy": "НАСЛЕДИЕ"}.get(origin, "")
 
 
 # --- the card table on the map ---------------------------------------------------------------------
@@ -1138,22 +1138,39 @@ class CardTable:
             o = OFFICER[key]
             self.ms.cards.face(s, pygame.Rect(rect.x + 2, rect.y + 2, 21, 25), key)
             self.ms.cards.name(s, key, rect.x + 27, rect.y + 2)
-            loy = self.camp.loyalty[key]
-            col = "#fee761" if self.camp.devoted(key) else "#f6757a" if loy < 35 else "#8b9bb4"
-            font.draw(s, f"УР.{self.camp.level[key]} ВЕРН. {loy}", rect.right - (14 if i else 4), rect.y + 2, col,
-                      anchor="topright")
+            if i == 0:                                    # the ruler: no loyalty, but an heir
+                from .succession import contenders
+                heirs = contenders(self.camp, self.player)
+                if heirs:
+                    font.draw(s, "ПРЕЕМНИК: " + OFFICER[heirs[0]].name.split()[0], rect.right - 4, rect.y + 2,
+                              "#c0cbdc", anchor="topright")
+            else:
+                loy = self.camp.loyalty[key]
+                col = "#fee761" if self.camp.devoted(key) else "#f6757a" if loy < 35 else "#8b9bb4"
+                font.draw(s, f"УР.{self.camp.level[key]} ВЕРН. {loy}", rect.right - 14, rect.y + 2, col,
+                          anchor="topright")
             cards = self.camp.personal(key)
             if i == 0:
-                from .cards import FACTION_CARD
-                cards = [FACTION_CARD[self.player]] + self.camp.extra.get(key, [])
+                from .succession import leader_cards
+                legacy = self.camp.realms[self.player].legacy
+                cards = leader_cards(self.camp, self.player) + ([None] + legacy if legacy else [])
             x, y = rect.x + 27, rect.y + 11
+            label = o.name
             for k in cards:
+                if k is None:                             # the dead ruler's cards follow
+                    label = "НАСЛЕДИЕ"
+                    chip = self.font.render("НАСЛЕДИЕ:", "#8b9bb4")
+                    if x + chip.get_width() > rect.right - 4:
+                        x, y = rect.x + 27, y + 8
+                    s.blit(chip, (x, y))
+                    x += chip.get_width() + 3
+                    continue
                 chip = self.art.chip(k)
                 if x + chip.get_width() > rect.right - 4:
                     x, y = rect.x + 27, y + 8
                 s.blit(chip, (x, y))
                 if pygame.Rect(x, y, chip.get_width(), 7).collidepoint(mouse):
-                    self.hover_card = (k, o.name)
+                    self.hover_card = (k, label)
                 x += chip.get_width() + 4
             if i:
                 xr = pygame.Rect(rect.right - 11, rect.y + 2, 9, 9)
@@ -1180,6 +1197,12 @@ class CardTable:
         s.blit(self.ms.r.panel(cb.w, cb.h, base="#5a6988" if hot else "#3a2a10", border="#fee761"), cb.topleft)
         cd = f", ЗАМОК {realm.course_cd} Х." if realm.course_cd else ""
         font.draw(s, f"КУРС: {COURSES[realm.course].name}{cd}", cb.centerx, cb.centery, "#fee761", anchor="center")
+        from .succession import contenders, heir_score
+        heirs = contenders(self.camp, self.player)[:3]
+        heir_tip = None
+        if heirs and self._seat_rect(0).collidepoint(mouse):
+            heir_tip = "ЗАСЛУГИ: " + ", ".join(f"{OFFICER[h].name} {int(heir_score(self.camp, h))}" for h in heirs) + \
+                " (СОВЕТ, КАРТЫ, ПОБЕДЫ, ПОДВИГИ)"
         # thresholds
         x0 = r.x + 214
         font.draw(s, "НАВЫКИ СОВЕТА", x0, r.y + 18, "#fee761")
@@ -1256,6 +1279,8 @@ class CardTable:
         text, colr, until = self.ms.toast
         if tip:
             font.draw(s, tip, r.centerx, r.bottom - 10, "#c0cbdc", anchor="midtop")
+        elif heir_tip:
+            font.draw(s, heir_tip, r.centerx, r.bottom - 10, "#fee761", anchor="midtop")
         elif self.ms.time < until:
             font.draw(s, text, r.centerx, r.bottom - 10, colr, anchor="midtop")
         else:
