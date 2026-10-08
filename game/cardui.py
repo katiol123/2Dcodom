@@ -24,13 +24,13 @@ from .sim import H, W
 CARD_W, CARD_H = 88, 128
 TIER_COLOR = {"basic": "#8b9bb4", "junk": "#5a6988", "moderate": "#41a6f6", "strong": "#feae34",
               "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44", "vice": "#b86f50",
-              "feat": "#ffd36b"}
+              "feat": "#ffd36b", "fate": "#7a9e48"}
 KIND_COLOR = {"economy": ("#c9a24a", "#4a3a14"), "military": ("#e43b44", "#4a1418"),
               "intrigue": ("#b07ad8", "#2e1a40"), "diplomacy": ("#5fb7d9", "#14304a"),
               "council": ("#63c74d", "#173a1a"), "recruit": ("#d08a4a", "#3e2414"),
               "curse": ("#e43b44", "#1a0a0e"), "vice": ("#b86f50", "#2a1610")}
 
-CITY_STEPS = {"own_city", "own_city_officers", "own_city_pair", "own_city_pair2", "dest_adj", "dest_2",
+CITY_STEPS = {"own_city", "own_city_officers", "own_city_pair", "own_city_pair2", "dest_adj", "dest_2", "enemy_built",
               "dest_any", "dest_any_one", "enemy_adj", "enemy_adj_any", "enemy_reach", "enemy_port",
               "enemy_city", "enemy_city_officers", "city_buyable"}
 RIVAL_STEPS = {"rival", "rival_diplo", "rival_neighbor"}
@@ -47,6 +47,7 @@ PROMPTS = {
     "own_officer": "КАКОЙ ОФИЦЕР", "own_officer_ready": "КАКОЙ ОФИЦЕР", "own_officer_spent": "КТО СНОВА В СТРОЮ",
     "rival": "КАКАЯ ДЕРЖАВА", "rival_diplo": "С КАКОЙ ДЕРЖАВОЙ", "rival_neighbor": "КАКОЙ СОСЕД",
     "hand_card": "КАКУЮ КАРТУ СЖЕЧЬ НАВСЕГДА", "city_buyable": "КАКОЙ ГОРОД КУПИТЬ",
+    "building": "ЧТО ПОСТРОИТЬ", "enemy_built": "ГДЕ РУШИТЬ",
 }
 
 
@@ -877,6 +878,11 @@ class CardTable:
                     if hot:
                         s.blit(self.art.full(inst.key, origin_label(inst.origin), self.player),
                                (r.right + 6, r.y))
+            elif p["step"] == "building":
+                from .buildings import BUILDINGS
+                b = BUILDINGS[opt]
+                font.draw(s, b.name, row.x + 4, row.y + 2, "#fee761")
+                font.draw(s, f"{b.cost // 2} ЗОЛ. (ПОЛЦЕНЫ)   " + b.text[:44], row.x + 4, row.y + 10, "#8b9bb4")
             elif p["step"] in RIVAL_STEPS:
                 fac = FACTION[opt]
                 s.blit(self.ms.shields[opt], (row.x + 2, row.y + 1))
@@ -1019,8 +1025,8 @@ class CardTable:
         r = self.camp.realms[self.player]
         from collections import Counter
         cnt = Counter((c.key, c.origin) for c in r.all_cards())
-        rows = sorted(cnt.items(), key=lambda kv: (["faction", "unique", "strong", "moderate", "basic", "junk",
-                                                     "vice", "curse"].index(CARDS[kv[0][0]].tier),
+        rows = sorted(cnt.items(), key=lambda kv: (["feat", "faction", "unique", "strong", "moderate", "basic",
+                                                     "junk", "vice", "fate", "curse"].index(CARDS[kv[0][0]].tier),
                                                     CARDS[kv[0][0]].name))
         return [(k, n, o) for (k, o), n in rows]
 

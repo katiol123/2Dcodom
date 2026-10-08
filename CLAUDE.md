@@ -85,6 +85,12 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   while he rules a computer realm (`ruler_traits` is empty for the player's realm) and is shown only then.
   Traits hook card values, attack odds, leader risk, hiring, council, course, diplomacy, prisoners, loyalty.
   The AI risks its ruler in a storm only above `leader_odds` or when desperate (`campaign_ai._attack_plan`).
+- Population (`population.py`): the БОЛЕЗНЬ В ГОРОДЕ card (tier `fate`, in every deck) sickens a city
+  (`camp.sick`); officers there may die each own turn. Newcomers (`officers.newcomer`, keys
+  `<faction>:100+`) come via ПОИСК ТАЛАНТОВ or by themselves when a court is short; `camp.enlist` registers
+  them. Iterate the starting cast with `OFFICERS`, not `OFFICER` (newcomers are added to it at runtime).
+- Buildings (`buildings.py`): 7 kinds, slots per city, built for gold + 1 AP (city window СТРОЙКА, AI
+  `ai_build`), ruined by raids/storms/capture. The tower is a `sim.Tower` shooting in real battles.
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

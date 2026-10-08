@@ -21,7 +21,7 @@ from .units import ROSTER
 
 AP_PRICE = 35                   # what one action point is worth, in gold
 TIER_HINT = {"faction": 150, "unique": 130, "strong": 140, "moderate": 80, "basic": 60, "junk": 20, "curse": -60,
-             "vice": -50, "feat": 170}
+             "vice": -50, "feat": 170, "fate": -40}
 POWER_VALUE = 0.7               # gold-equivalent of one point of troop power
 PROSPERITY_VALUE = 45           # gold-equivalent of +1 prosperity in an own city
 
@@ -481,6 +481,41 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         front = set(frontier(camp, f))
         return _best_officer(camp, f, k, lambda o: (camp.power(o) * 0.35 * 0.4 + 30)
                              if camp.officer_city[o] in front and camp.squads[o] else -1)
+    if k == "talent_search":
+        n = len(camp.officers_of(f))
+        from .population import MAX_OFFICERS
+        if n >= MAX_OFFICERS:
+            return -1, []
+        cities = camp.cities_of(f)
+        from .buildings import count
+        city = max(cities, key=lambda c: (count(camp, c, "academy"), c == FACTION[f].capital if f in FACTION else 0))
+        return 60 + max(0, 14 - n) * 25, [city]
+    if k == "master_builder":
+        from .buildings import BUILDINGS, ORDER, _ai_value, can_build
+        best = (-1.0, [])
+        for c in camp.cities_of(f):
+            front = any(camp.owner[n] != f and not camp.at_peace(f, camp.owner[n]) for n in neighbors(c))
+            for b in ORDER:
+                if can_build(camp, f, c, b, BUILDINGS[b].cost // 2)[0] and \
+                        camp.gold[f] - BUILDINGS[b].cost // 2 > camp.upkeep(f) * 2:
+                    v = _ai_value(camp, f, c, b, front) * 0.6
+                    if v > best[0]:
+                        best = (v, [c, b])
+        return best
+    if k == "physician":
+        sick = [c for c in camp.cities_of(f) if c in camp.sick]
+        if sick:
+            c = max(sick, key=lambda c: len(camp.officers_in(c)) + (5 if camp.leader.get(f) in
+                                                                  [o.key for o in camp.officers_in(c)] else 0))
+            return 80 + 60 * len(camp.officers_in(c)), [c]
+        return -1, []
+    if k == "sappers":
+        from .buildings import BUILDINGS
+        opts = options(camp, f, k, [])
+        if not opts:
+            return -1, []
+        c = max(opts, key=lambda c: sum(BUILDINGS[b].cost for b in camp.buildings[c]))
+        return 0.5 * max(BUILDINGS[b].cost for b in camp.buildings[c]), [c]
     if k == "goblin_bane":
         score, city = _recruit_city(camp, f, options(camp, f, k, []))
         return (150 + 120 * POWER_VALUE * max(econ, 0.2)), [city]
@@ -585,7 +620,7 @@ def manage(camp, f: str) -> None:
                 margin -= camp.troop_upkeep(f, k)
 
 
-COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0, "vice": -60, "feat": 170}
+COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0, "vice": -60, "feat": 170, "fate": 0}
 
 
 def council_score(camp, members: Sequence[str], taste: Optional[Dict[str, float]] = None) -> float:
@@ -725,4 +760,6 @@ def play_turn(camp, f: str) -> None:
         ok, _ = camp.play(f, inst, targets)
         if not ok:                       # a stale plan: drop the card from consideration this turn
             break
+    from .buildings import ai_build
+    ai_build(camp, f, 80 + 2 * camp.upkeep(f))                 # spare gold and a spare point: build
     manage(camp, f)

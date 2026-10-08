@@ -27,10 +27,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .officers import OFFICER, OFFICERS, STATS, Officer
 
-TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse", "vice", "feat")
+TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse", "vice", "feat", "fate")
 TIER_NAMES = {"basic": "ОСНОВА", "junk": "ПУСТЯК", "moderate": "ДЕЛЬНАЯ", "strong": "СИЛЬНАЯ",
               "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ", "vice": "ПОРОК",
-              "feat": "ПОДВИГ"}
+              "feat": "ПОДВИГ", "fate": "НАПАСТЬ"}
 KIND_NAMES = {"economy": "ХОЗЯЙСТВО", "military": "ВОЙНА", "intrigue": "ИНТРИГА", "diplomacy": "ДИПЛОМАТИЯ",
               "council": "СОВЕТ", "recruit": "НАБОР", "curse": "БЕДА", "vice": "ПОРОК"}
 
@@ -149,6 +149,17 @@ _CARDS: List[Card] = [
 
     # --- threshold cards: moderate (first threshold) -------------------------------------------
     _c("reform", "РЕФОРМА", 1, "moderate", "economy", "Свой город: процветание +2.", ("own_city",)),
+    _c("talent_search", "ПОИСК ТАЛАНТОВ", 1, "moderate", "recruit", "В свой город прибывает молодой офицер: "
+       "слабый, но учится быстро. Если город с академией - прибывают двое.", ("own_city",)),
+    _c("master_builder", "МАСТЕР-ЗОДЧИЙ", 1, "moderate", "economy", "Построить в своём городе любое здание "
+       "за полцены.", ("own_city", "building")),
+    _c("physician", "ЛЕКАРЬ", 1, "moderate", "council", "Вылечить болезнь в своём городе; 6 ходов болезнь его "
+       "не берёт, верность офицеров там +5.", ("own_city",)),
+    _c("sappers", "САПЁРЫ", 1, "moderate", "intrigue", "Разрушить здание в соседнем вражеском городе.",
+       ("enemy_built",)),
+    _c("sickness", "БОЛЕЗНЬ В ГОРОДЕ", 0, "fate", "curse", "Вытянув, сбросьте и возьмите другую карту. В случайном "
+       "своём городе болезнь: 3 хода офицеры там могут умереть. Лазареты рядом могут её остановить.",
+       unplayable=True, on_draw=True),
     _c("recruiters", "ВЕРБОВЩИКИ", 1, "moderate", "recruit", "Свой город: новобранцы на 140 мощи.",
        ("own_city",)),
     _c("forced_march", "ФОРСИРОВАННЫЙ МАРШ", 1, "moderate", "military", "До 3 офицеров идут на 2 дороги "
@@ -358,7 +369,7 @@ FACTION_CARD: Dict[str, str] = {
 # stat -> (card for the first threshold, card for the second)
 THRESHOLD_CARDS: Dict[str, Tuple[str, str]] = {
     "УПРАВЛЕНИЕ": ("reform", "purge"),
-    "ВЕРБОВКА": ("recruiters", "conscription"),
+    "ВЕРБОВКА": ("talent_search", "conscription"),
     "ЛОГИСТИКА": ("forced_march", "blitz"),
     "РАЗВЕДКА": ("scouts", "all_seeing"),
     "ДИПЛОМАТИЯ": ("truce", "grand_embassy"),
@@ -504,8 +515,33 @@ PERSONAL: Dict[str, Tuple[str, ...]] = _personal()
 UNIQUE_HOLDER: Dict[str, str] = _holders()
 
 
+# the new trades go to a few officers each, the best at them in some realms
+_TRADES = {"master_builder": ("УПРАВЛЕНИЕ", ("highland", "sultanate", "aldern", "league")),
+           "physician": ("ЛОГИСТИКА", ("sylvan", "sultanate", "north", "aldern")),
+           "sappers": ("РАЗВЕДКА", ("khanate", "north", "highland", "league"))}
+
+
+def _give_trades() -> None:
+    for card, (stat, realms) in _TRADES.items():
+        i = STATS.index(stat)
+        for f in realms:
+            offs = [o for o in OFFICER.values() if o.faction == f and o.rank > 0 and card not in PERSONAL[o.key]]
+            best = max(offs, key=lambda o: (o.stats[i], o.key))
+            PERSONAL[best.key] = PERSONAL[best.key] + (card,)
+
+
+_give_trades()
+
+
+def newcomer_cards(officer: Officer) -> List[str]:
+    """A young talent brings one plain card of his best skill."""
+    best = STATS[max(range(len(STATS)), key=lambda i: officer.stats[i])]
+    pool = _POOLS[best]["basic"] or _POOLS[best]["junk"]
+    return [random.Random(f"newcomer-card:{officer.key}").choice(pool)]
+
+
 def personal(officer: str) -> Tuple[str, ...]:
-    return PERSONAL[officer]
+    return PERSONAL.get(officer, ())
 
 
 Stats = Optional[Dict[str, Sequence[int]]]      # officer -> current stats (a campaign changes them)
@@ -563,9 +599,9 @@ def muster_turns(council: List[str], stats: Stats = None) -> int:
 
 def deck_for(faction: str, council: List[str], course: str = "balance") -> List[str]:
     """Card keys of the realm's deck (curses come on top of this during play)."""
-    cards = list(COURSES[course].base) + [FACTION_CARD[faction]]
+    cards = list(COURSES[course].base) + [FACTION_CARD[faction], "sickness"]
     for o in council:
-        cards.extend(PERSONAL[o])
+        cards.extend(PERSONAL.get(o, ()))
     cards.extend(threshold_cards(council))
     return cards
 

@@ -99,6 +99,7 @@ class Battle:
     deff: List[Tuple[Optional[str], "Troop"]] = field(default_factory=list)
     militia: int = 0
     aux: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))   # allied detachments
+    towers: int = 0             # archer towers of the stormed city (buildings.py)
     helpers: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))
     a: float = 0.0
     d: float = 0.0
@@ -122,18 +123,19 @@ class Campaign:
         self.owner: Dict[str, str] = {c.key: c.faction for c in CITIES}
         self.gold: Dict[str, int] = {f: START_GOLD.get(f, DEFAULT_GOLD) for f in OFFICERS}
         self.officer_city: Dict[str, str] = {}
-        self.allegiance: Dict[str, str] = {o.key: o.faction for o in OFFICER.values()}   # officers may defect
-        self.squads: Dict[str, List[Troop]] = {o: [] for o in OFFICER}
+        base = [o for lst in OFFICERS.values() for o in lst]     # newcomers join later (enlist)
+        self.allegiance: Dict[str, str] = {o.key: o.faction for o in base}   # officers may defect
+        self.squads: Dict[str, List[Troop]] = {o.key: [] for o in base}
         self.free: Dict[str, List[Troop]] = {c.key: [] for c in CITIES}
         self.prosperity: Dict[str, int] = dict(PROSPERITY)
         self.taxed: Dict[str, int] = {}                       # city -> turn it was last taxed
         self.untaxed: Dict[str, int] = {c.key: 0 for c in CITIES}
         self.loyalty: Dict[str, int] = {}
         # officers change during the campaign (growth.py): stats, leadership, experience, feats
-        self.ostats: Dict[str, List[int]] = {o.key: list(o.stats) for o in OFFICER.values()}
-        self.olead: Dict[str, int] = {o.key: o.leadership for o in OFFICER.values()}
-        self.xp: Dict[str, float] = {o: 0.0 for o in OFFICER}
-        self.level: Dict[str, int] = {o: 1 for o in OFFICER}
+        self.ostats: Dict[str, List[int]] = {o.key: list(o.stats) for o in base}
+        self.olead: Dict[str, int] = {o.key: o.leadership for o in base}
+        self.xp: Dict[str, float] = {o.key: 0.0 for o in base}
+        self.level: Dict[str, int] = {o.key: 1 for o in base}
         self.idle: Dict[str, int] = {}                        # own turns without experience
         self.last_used: Dict[str, int] = {}                   # turn an adviser's card was last played
         self.streak: Dict[str, int] = {}                      # battles won in a row
@@ -144,6 +146,10 @@ class Campaign:
         self.leader: Dict[str, Optional[str]] = {f: offs[0].key for f, offs in OFFICERS.items()}
         self.dead: set = set()                                # officers who died (succession.py)
         self.claim: Dict[str, float] = {}                     # merit at court: who would inherit the throne
+        self.sick: Dict[str, int] = {}                        # city -> own turns of sickness left
+        self.immune: Dict[str, int] = {}                      # city -> turns a physician keeps it healthy
+        self.buildings: Dict[str, List[str]] = {}             # city -> building keys (buildings.py)
+        self.newcomers: Dict[str, int] = {}                   # faction -> young talents so far
         self.rel: Dict[frozenset, int] = {}
         self.truce: Dict[frozenset, int] = {}                 # pair -> turns left
         self.alliance: Dict[frozenset, List] = {}             # pair -> [turns left, common enemy]
@@ -172,7 +178,9 @@ class Campaign:
                                           "deserted_officers": Counter(), "reshuffles": Counter(),
                                           "diplomacy": Counter(), "hegemon": Counter(), "events": Counter(),
                                           "deaths": Counter(), "successions": Counter(),
-                                          "unrest_turns": Counter()}
+                                          "unrest_turns": Counter(), "outbreaks": Counter(),
+                                          "outbreaks_stopped": Counter(), "sick_deaths": Counter(),
+                                          "newcomers": Counter(), "built": Counter(), "ruined": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
         self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
@@ -231,6 +239,22 @@ class Campaign:
                 break
             squad.append(self._new(self.rng.choice(cands)))
 
+    def enlist(self, off: Officer, city: str) -> None:
+        """A new officer joins the faction owning ``city`` (a young talent, population.py)."""
+        k = off.key
+        faction = self.owner[city]
+        self.dead.discard(k)
+        self.allegiance[k] = faction
+        self.officer_city[k] = city
+        self.squads[k] = []
+        self.loyalty[k] = self.rng.randint(55, 80)
+        self.ostats[k] = list(off.stats)
+        self.olead[k] = off.leadership
+        self.xp[k] = 0.0
+        self.level[k] = 1
+        self.extra[k] = _cards.newcomer_cards(off)
+        self._starting_squad(off, CITY[city])
+
     def _new(self, key: str) -> Troop:
         return Troop(next(self._ids), key)
 
@@ -247,7 +271,7 @@ class Campaign:
         return max(0.0, min(1.0, 0.5 * lead + 0.5 * (sum(st) / len(st) - 6) / 10))
 
     def personal(self, officer: str) -> List[str]:
-        return list(PERSONAL[officer]) + self.extra.get(officer, [])
+        return list(PERSONAL.get(officer, ())) + self.extra.get(officer, [])
 
     def totals(self, council) -> Dict[str, int]:
         return _cards.council_totals(list(council), self.ostats)
@@ -393,15 +417,19 @@ class Campaign:
             return False, "ЭТИХ ВОИНОВ ЗДЕСЬ НЕ НАНЯТЬ"
         if self.muster.get(city, 0) <= 0:
             return False, "НАЙМ ЗАКРЫТ: НУЖНА КАРТА СБОР ВОЙСК"
-        if ROSTER[key].cost > self.gold[faction]:
+        if self.hire_price(city, key) > self.gold[faction]:
             return False, "НЕ ХВАТАЕТ ЗОЛОТА"
         return True, ""
+
+    def hire_price(self, city: str, key: str) -> int:
+        from .buildings import hire_price
+        return hire_price(self, city, ROSTER[key].cost)
 
     def hire(self, city: str, key: str) -> Optional[Troop]:
         ok, _ = self.can_hire(city, key)
         if not ok:
             return None
-        self.gold[self.owner[city]] -= ROSTER[key].cost
+        self.gold[self.owner[city]] -= self.hire_price(city, key)
         t = self._new(key)
         self.free[city].append(t)          # the recruits stand in the city from the moment they are hired
         return t
@@ -541,6 +569,7 @@ class Campaign:
         if lead and OFFICER[lead].rank == 0 and OFFICER[lead].faction == faction:
             r.draw.append(self._inst(FACTION_CARD[faction], "faction"))
         r.draw.extend(self._inst(k, "legacy") for k in r.legacy)
+        r.draw.append(self._inst("sickness", "fate"))
         for o in r.council:
             r.draw.extend(self._inst(k, o) for k in self.personal(o))
         r.draw.extend(self._inst(k, "threshold") for k in self.thresholds(r.council))
@@ -723,8 +752,18 @@ class Campaign:
                 del self.muster[city]
         from . import growth
         growth.turn(self, faction)
-        from . import succession
+        from . import population, succession
         succession.turn(self, faction)
+        population.turn(self, faction)
+        from .buildings import count
+        for city in self.cities_of(faction):
+            if count(self, city, "temple"):
+                for o in self.officers_in(city):
+                    self.change_loyalty(o.key, 1)
+            if city in self.immune:
+                self.immune[city] -= 1
+                if self.immune[city] <= 0:
+                    del self.immune[city]
         if r.course == "intrigue":                            # paranoia: nobody trusts anybody
             for o in self.officers_of(faction):
                 self.change_loyalty(o.key, -1)
@@ -889,7 +928,9 @@ class Campaign:
         owner = self.owner[city]
         troops = sum(self.power(o.key) * self.officer_mult(o.key) for o in self.officers_in(city))
         troops += sum(t.power for t in self.free[city])
-        d = (troops + GUARD[CITY[city].kind] + 12 * self.prosperity[city]) * WALLS[CITY[city].kind]
+        from .buildings import defense_bonus, defense_mult
+        d = (troops + GUARD[CITY[city].kind] + 12 * self.prosperity[city] + defense_bonus(self, city)) \
+            * WALLS[CITY[city].kind] * defense_mult(self, city)
         if city in self.defense:
             d *= self.defense[city][0]
         if city in self.siege and self.siege[city][0] != owner:
@@ -935,6 +976,8 @@ class Campaign:
 
     def _forces(self, b: "Battle") -> None:
         city = b.city
+        from .buildings import count
+        b.towers = count(self, city, "tower")
         b.att = [(o, t) for o in b.officers for t in self.squads[o]]
         b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
         b.a = self.attack_power(b.attacker, b.officers, city, b.mult)
@@ -1041,6 +1084,8 @@ class Campaign:
         tail = f"; павших {dead}, раненых {wounded}" + (f", бежали {fled}" if fled else "") + answer
         from . import growth
         if not won:
+            from .buildings import RUIN_FAILED_STORM, ruin
+            ruin(self, city, RUIN_FAILED_STORM, "штурм отбит, но город пострадал")
             for o in b.officers:
                 self.change_loyalty(o, -5)
             growth.on_battle(self, b)
@@ -1139,6 +1184,9 @@ class Campaign:
         if old in self.realms:
             growth.on_city_lost(self, old, city)
         growth.on_city_won(self, faction)
+        from .buildings import RUIN_CAPTURE, ruin
+        ruin(self, city, RUIN_CAPTURE, "город взят штурмом", all_of_them=True)
+        self.sick.pop(city, None)
         self.owner[city] = faction
         self.losses.append((self.turn, old, faction, city))
         self.prosperity[city] = max(1, self.prosperity[city] - 1)

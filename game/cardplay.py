@@ -99,6 +99,12 @@ def options(camp, f: str, key: str, chosen: list) -> list:
     if step == "rival_neighbor":
         return [x for x in _rivals(camp, f)
                 if any(camp.owner[n] == x for c in own for n in neighbors(c))]
+    if step == "building":                               # what a master builder can put up (half price)
+        from .buildings import BUILDINGS, ORDER, can_build
+        return [k for k in ORDER if can_build(camp, f, chosen[0], k, BUILDINGS[k].cost // 2)[0]]
+    if step == "enemy_built":
+        return [c for c in camp.owner if camp.owner[c] != f and camp.buildings.get(c)
+                and any(camp.owner[n] == f for n in neighbors(c))]
     if step == "hand_card":
         return [c.id for c in camp.realms[f].hand if c.key != "purge" or len([x for x in camp.realms[f].hand
                                                                             if x.key == "purge"]) > 1]
@@ -199,7 +205,8 @@ def effect(key):
 @effect("tax")
 def _tax(camp, f, t):
     city = t[0]
-    g = _gold(camp, f, camp.income_of(city, f), "tax")
+    from .buildings import count
+    g = _gold(camp, f, int(camp.income_of(city, f) * (1.5 if count(camp, city, "market") else 1)), "tax")
     if camp.taxed.get(city, -9) >= camp.turn - 1 and camp.realms[f].course != "economy":
         _prosper(camp, city, -1)
         note = " (поборы: процветание -1)"
@@ -426,6 +433,8 @@ def _raid_card(camp, f, t):
     city, o = t[0], t[1]
     g = _raid(camp, f, city)
     camp.ready.discard(o)
+    from .buildings import RUIN_RAID, ruin
+    ruin(camp, city, RUIN_RAID, "набег")
     if camp.defense_power(city) > camp.power(o) * 1.5:          # the garrison bites back
         camp._losses([(o, None, x) for x in camp.squads[o]], 0.12)
     return f"{CITY[city].name} разграблен, +{g} золота"
@@ -885,9 +894,51 @@ def _purge(camp, f, t):
 
 @effect("muster")
 def _muster(camp, f, t):
-    n = camp.muster_turns(camp.realms[f].council)
+    from .buildings import count
+    n = camp.muster_turns(camp.realms[f].council) + count(camp, t[0], "barracks")
     camp.muster[t[0]] = max(camp.muster.get(t[0], 0), n)
     return f"{CITY[t[0]].name}: найм открыт" + (f" на {n} х." if n > 1 else " на этот ход")
+
+
+@effect("talent_search")
+def _talent_search(camp, f, t):
+    from .buildings import count
+    from .population import come_of_age
+    city = t[0]
+    got = [come_of_age(camp, f, city) for _ in range(1 + count(camp, city, "academy"))]
+    got = [o for o in got if o]
+    if not got:
+        return "двор полон: новых людей не нашлось"
+    return f"{CITY[city].name}: " + ", ".join(OFFICER[o].name for o in got)
+
+
+@effect("master_builder")
+def _master_builder(camp, f, t):
+    from .buildings import BUILDINGS, build
+    city, key = t
+    camp.realms[f].ap += 1                                   # the card's own point pays for the work
+    ok, msg = build(camp, f, city, key, BUILDINGS[key].cost // 2)
+    return msg
+
+
+@effect("physician")
+def _physician(camp, f, t):
+    city = t[0]
+    camp.sick.pop(city, None)
+    camp.immune[city] = 6
+    for o in camp.officers_in(city):
+        camp.change_loyalty(o.key, 5)
+    return f"{CITY[city].name}: лекари на страже 6 ходов"
+
+
+@effect("sappers")
+def _sappers(camp, f, t):
+    from .buildings import ruin
+    city = t[0]
+    lost = ruin(camp, city, 1.0, "сапёры")
+    camp.change_relation(f, camp.owner[city], -6)
+    from .buildings import BUILDINGS
+    return f"{CITY[city].name}: разрушено - " + ", ".join(BUILDINGS[k].name for k in lost) if lost else "не вышло"
 
 
 @effect("ford_hero")
@@ -1007,6 +1058,10 @@ def on_draw(camp, f: str, inst) -> None:
     key = inst.key
     if inst.card.tier == "vice":
         _vice(camp, f, inst)
+        return
+    if key == "sickness":
+        from .population import on_draw_sickness
+        on_draw_sickness(camp, f, inst)
         return
     if key == "fire":
         loss = min(150, camp.gold[f] // 4)

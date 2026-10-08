@@ -255,12 +255,40 @@ class Unit:
 
 # --- world ----------------------------------------------------------------------------
 
+class Tower:
+    """A city's archer tower (buildings.py) in a storm: it stands at the defenders' back and shoots like a
+    somewhat stronger archer. It is not a unit - it cannot be attacked and does not decide the battle - but it
+    stands in for one as the owner of its arrows."""
+    key = "tower"
+    rage = False
+    raised = False
+
+    def __init__(self, team: int, x: float, y: float):
+        base = ROSTER["archer"]
+        lo, hi = base.damage
+        from dataclasses import replace
+        self.type = replace(base, key="tower", name="БАШНЯ", damage=(round(lo * 1.15), round(hi * 1.15)),
+                            attack_range=base.attack_range + 95, cooldown=base.cooldown * 0.85)
+        self.team, self.x, self.y = team, x, y
+        self.facing = -1 if team == 1 else 1
+        self.vx = self.vy = 0.0
+        self.alive, self.dead = True, False
+        self.dealt = self.healed = 0.0
+        self.kills = self.hits = 0
+        self.cd = 1.5
+        self.status: Dict[str, float] = {}
+
+    def has(self, k: str) -> bool:
+        return False
+
+
 class World:
     """``slots``: one :class:`~game.assets.Slot` per unit; ``anims``: AnimInfo per look name;
     ``summon_looks``: look names of units that can join a team mid-battle, keyed (team, class)."""
 
     def __init__(self, slots: Sequence[Slot], anims: Dict[str, Dict[str, AnimInfo]], seed: int = 1,
-                 summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS):
+                 summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS,
+                 towers: Sequence[int] = ()):
         self.rng = random.Random(seed)
         self._order_rng = random.Random(seed * 7919 + 1)   # who acts first this frame: no side always wins ties
         self.seed = seed
@@ -282,6 +310,8 @@ class World:
         self.winner: Optional[int] = None
         self.end_time = 0.0
         self.sounds: List[str] = []   # event names for an optional audio layer
+        mid = (FIELD[1] + FIELD[3]) / 2
+        self.towers: List[Tower] = [Tower(t, FIELD[2] - 8 if t == 1 else FIELD[0] + 8, mid) for t in towers]
         self._spawn(slots)
 
     # formation: melee line in front, flankers on the edges, shooters behind.
@@ -577,6 +607,7 @@ class World:
         for u in order:
             self._update_unit(u, dt)
         self._separate(dt)
+        self._step_towers(dt)
         self._step_projectiles(dt)
 
     def _step_effects(self, dt: float) -> None:
@@ -814,6 +845,19 @@ class World:
 
     def cast_fireball(self, u: Unit, target: Unit) -> None:
         self.cast_orb(u, target, "fireball")
+
+    def _step_towers(self, dt: float) -> None:
+        for t in self.towers:
+            t.cd -= dt
+            if t.cd > 0:
+                continue
+            foes = [u for u in self.units if u.alive and u.team != t.team and u.rising <= 0
+                    and not u.has("stealth") and math.hypot(u.x - t.x, u.y - t.y) <= t.type.attack_range]
+            if not foes:
+                continue
+            target = min(foes, key=lambda u: math.hypot(u.x - t.x, u.y - t.y))
+            self.shoot_arrow(t, target, sz=34.0)
+            t.cd = t.type.cooldown
 
     def _step_projectiles(self, dt: float) -> None:
         for p in self.projectiles:

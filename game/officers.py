@@ -163,6 +163,49 @@ def _build() -> Dict[str, List[Officer]]:
 OFFICERS: Dict[str, List[Officer]] = _build()
 OFFICER: Dict[str, Officer] = {o.key: o for lst in OFFICERS.values() for o in lst}
 
+# young talents who come of age during a campaign (population.py); "*" marks women
+_NEWCOMERS: Dict[str, Tuple[str, ...]] = {
+    "aldern": ("ЭДМУНД ФЕЙР", "*КЛАРИССА ДОН", "ОЛИВЕР КРЕЙН", "*ГВЕНДОЛИН МЭЙ", "ТОМАС АРДЕН", "*МЭРИОН ХИЛЛ",
+               "ГИЛБЕРТ ЛОУ", "*ЭДИТ БРУК", "ХАРОЛЬД ВИНН", "*СИБИЛЛА РОУ", "ЛЕОФРИК ДАН", "*ЭММА ТАЙН"),
+    "sylvan": ("ЭРИН ЛОЗОВЫЙ", "*ЛЕЙНА ЗВЕЗДОЦВЕТ", "ТАЭЛ БЕРЁЗОВЫЙ", "*ИЛЬВА РУЧЕЙ", "ФИНРОД МХОВЫЙ",
+               "*САЭЛЬ ЖИМОЛОСТЬ", "АРДАН КЕДРОВЫЙ", "*НИМРА ЛУНОЦВЕТ", "ЭЛЛАН ТРОСТНИК", "*ЮНА ПЕРО"),
+    "ashen": ("КОРВИН ТЛЕЮЩИЙ", "*ВИОЛА ПРАХ", "МАЛАХИЯ СКЛЕП", "*ГИЗЕЛА МГЛА", "ОСРИК УВЯДШИЙ", "*ЭЛЬВИРА ПЛАЧ",
+              "ДРАГОМИР ТЕНЬ", "*НОКТА ХЛАД", "ЛАЗАРЬ ПОГОСТ", "*БЕРЕНИКА ЗОЛА"),
+    "khanate": ("ЕСУГЕЙ", "*ХУЛАН", "БУРИ", "*СОРГАН", "АРИГ", "ДЖЭБЭ", "*ОГУЛ", "КУБИЛАЙ", "*ТЭГУЛЕН", "БАЯН"),
+    "sultanate": ("ИДРИС", "*НУР", "МАЛИК", "*САФИЯ", "ХАЛИД", "*ДИНАРА", "ЮСУФ", "*РАНИЯ", "АДИЛЬ", "*ФАТИН"),
+    "north": ("ОДД", "*ГУДРУН", "ХАКОН", "*СВАНХИЛЬД", "КЕТИЛЬ", "*ФРЕЙДИС", "АРНЕ", "*ЙОРУНН", "ТРЮГВЕ", "*ВИГДИС"),
+    "league": ("МАТТЕО ДЗЕНО", "*ЛУЧИЯ ФАЛЬЕРИ", "НИККОЛО БРУНИ", "*ДЖИНЕВРА КОНТИ", "ТОММАЗО ЛАНДИ",
+               "*ЭЛЕНА ГРИМАЛЬДИ", "РИНАЛЬДО ВЕНТО", "*АЛЕССИЯ МОРА", "САЛЬВАТОРЕ ПИНИ", "*ОТТАВИЯ НЕРИ"),
+    "highland": ("ФЕРГУС ГРАНИТ", "*ИСЛА ОГНИВО", "ЛАХЛАН КИРКА", "*КИРСТИ КРЕМЕНЬ", "НИЛ ГОРНОВОЙ",
+                 "*ЭЙЛСА ЖИЛА", "ХАМИШ БАСТИОН", "*ШОНА КЛИНОК", "АЛАСДЕР МОЛОТОК", "*МЭЙРИ УТЁС"),
+    "goblin": ("ХРЯСЬ", "ГНИЛОЗУБ", "ЧЕСОТКА", "ПЛЕВОК", "ШМЫГ", "ВОНЮЧКА", "ЗАДИРА", "ХЛЮП", "ГРЫЗЬ", "КОЛТУН"),
+}
+FIRST_NEWCOMER = 100            # newcomers' keys are "<faction>:100", "<faction>:101", ...
+
+
+def newcomer(faction: str, n: int) -> Officer:
+    """The n-th young talent of the faction (deterministic; registered in OFFICER)."""
+    key = f"{faction}:{FIRST_NEWCOMER + n}"
+    if key in OFFICER:
+        return OFFICER[key]
+    names = _NEWCOMERS[faction]
+    raw = names[n % len(names)]
+    female = raw.startswith("*")
+    name = raw.lstrip("*") + ("" if n < len(names) else f" {'МЛАДШАЯ' if female else 'МЛАДШИЙ'}")
+    r = random.Random(f"newcomer:{faction}:{n}")
+    f = next(x for x in ALL_FACTIONS if x.key == faction)
+    good, bad = _BENT[faction]
+    rank = 3
+    lo, hi = _LEADERSHIP[rank]
+    stats = []
+    for st in STATS:
+        v = r.gauss(8.5, 3.2) + (4 if st in good else 0) - (4 if st in bad else 0)
+        stats.append(max(1, min(20, int(round(v)))))
+    o = Officer(key, name, _TITLES[faction][rank - 1][1 if female else 0], f.key, rank,
+                int(round(r.uniform(lo, hi) / 10) * 10), tuple(stats), r.choice(_LOOKS[faction]), female)
+    OFFICER[key] = o
+    return o
+
 
 # --- biographies ---------------------------------------------------------------------------------
 # "{м|ж}" picks the masculine or feminine form. A bio = origin (by faction) + the officer's

@@ -272,7 +272,7 @@ class CampaignScreensTest(unittest.TestCase):
         self.assertEqual(m._city_buttons(), [])
         m.selected = "kronholm"
         actions = [a for _, a in m._city_buttons()]
-        self.assertEqual(actions, ["army", "hire"])
+        self.assertEqual(actions, ["army", "hire", "build"])
         rect = m._city_buttons()[1][0]
         self.assertLess(rect.right, m._city_panel_rect().x)         # left of the city window
         click(rect.center)

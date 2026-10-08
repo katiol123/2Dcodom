@@ -291,7 +291,7 @@ class OfficerCard:
             self.art = CardArt(self.r)
         from .succession import leader_cards
         mine = leader_cards(self.camp, serves.key, o.key) if self.camp.is_leader(o.key) else \
-            list(PERSONAL[o.key]) + self.camp.extra.get(o.key, [])
+            list(PERSONAL.get(o.key, ())) + self.camp.extra.get(o.key, [])
         x1, y1 = r.x + 278, r.y + 168
         font.draw(s, "КАРТЫ В КОЛОДУ СОВЕТА:", x1, y1, "#fee761")
         y1 += 9

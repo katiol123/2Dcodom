@@ -18,7 +18,7 @@ from typing import Dict
 from .campaign import Campaign
 from .cards import CARDS, TIER_NAMES
 from .factions import ALL_FACTIONS, FACTION
-from .officers import OFFICER
+
 
 
 def one_game(args) -> Dict:
@@ -59,7 +59,8 @@ def one_game(args) -> Dict:
                and "взят" in text)
     # how officers changed, by their starting calibre (quintiles of presence among non-leaders)
     from .faces import presence
-    offs = sorted((o for o in OFFICER.values() if o.rank), key=presence)
+    from .officers import OFFICERS
+    offs = sorted((o for lst in OFFICERS.values() for o in lst if o.rank), key=presence)   # the starting cast
     growth = []
     for i, o in enumerate(offs):
         q = i * 5 // len(offs)
@@ -71,6 +72,10 @@ def one_game(args) -> Dict:
         "snap": snap, "standing": {f: standing(c, f) for f in c.order},
         "army_end": {f: c.army(f) for f in c.order},
         "successions": c.stats["successions"], "unrest_turns": c.stats["unrest_turns"],
+        "people": {k: sum(c.stats[k].values()) for k in ("outbreaks", "outbreaks_stopped", "sick_deaths",
+                                                         "newcomers", "deaths")},
+        "built": c.stats["built"], "ruined": c.stats["ruined"],
+        "officers_end": {f: len(c.officers_of(f)) for f in c.order},
         "diplomacy": c.stats["diplomacy"], "hegemon": c.stats["hegemon"], "events": c.stats["events"],
         "alliances": len(c.alliance), "growth": growth, "levels": c.stats["levels"], "declines": c.stats["declines"],
         "feats": c.stats["feats"], "turncoats": c.stats["deserted_officers"], "reshuffles": c.stats["reshuffles"],
@@ -143,6 +148,17 @@ def run(games: int = 40, rounds: int = 40, procs: int = 0, fixed: str = "") -> s
     out.append("СМЕНЫ ПРАВИТЕЛЯ за кампанию: " + ", ".join(
         f"{fac.short} {sum(r['successions'][fac.key] for r in results) / n:.2f}" for fac in ALL_FACTIONS)
         + f"; ходов нестабильности на державу {sum(sum(r['unrest_turns'].values()) for r in results) / n / 9:.1f}")
+    ppl = Counter()
+    bl, ru = Counter(), Counter()
+    for r in results:
+        ppl.update(r["people"])
+        bl.update(r["built"])
+        ru.update(r["ruined"])
+    out.append("ЛЮДИ за кампанию (все державы): " + ", ".join(f"{k} {v / n:.1f}" for k, v in ppl.items())
+               + "; офицеров в конце: " + ", ".join(
+                   f"{fac.short} {sum(r['officers_end'][fac.key] for r in results) / n:.0f}" for fac in ALL_FACTIONS))
+    out.append("ЗДАНИЯ построено/разрушено за кампанию: " + ", ".join(
+        f"{k} {bl[k] / n:.1f}/{ru[k] / n:.1f}" for k in sorted(set(bl) | set(ru))))
     out.append("ГЕГЕМОН (ходов): " + ", ".join(f"{FACTION[k].short} {v / n:.1f}" for k, v in heg.most_common()))
     out.append(f"СОБЫТИЯ МИРА: {sum(ev.values()) / n:.2f} за кампанию: " +
                ", ".join(f"{k} {v / n:.2f}" for k, v in ev.most_common()))

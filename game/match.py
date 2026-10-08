@@ -51,7 +51,7 @@ def campaign_battle(b, factory: SpriteFactory, progress=None) -> Tuple[World, Di
         tagged.append(Slot(s.team, s.key, s.look, next(per_team[s.team])))
     metas = factory.ensure(looks, progress)
     anims = {name: anim_infos(meta) for name, meta in metas.items()}
-    return World(tagged, anims, b.seed % 100000, summons), metas
+    return World(tagged, anims, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0)), metas
 
 
 def headless_campaign_world(b) -> World:
@@ -64,7 +64,7 @@ def headless_campaign_world(b) -> World:
     from .assets import SUMMONS
     summons = {(team, k): f"{k}_{TEAMS[team].key}" for team in (0, 1)
                for owner in keys[team] for k in SUMMONS.get(owner, ())}
-    return World(slots, _CLASS_ANIMS, b.seed % 100000, summons)
+    return World(slots, _CLASS_ANIMS, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0))
 
 
 def battle_outcome(world: World, b, rng: random.Random) -> None:

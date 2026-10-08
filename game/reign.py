@@ -67,6 +67,18 @@ REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
     "patron": ("ПОКРОВИТЕЛЬ", ("generous", "pious", "nepotist")),
     "despot": ("ВЛАСТОЛЮБЕЦ", ("ambitious", "elitist", "aggressive")),
     "strategist": ("СТРАТЕГ", ("vulture", "careful_self", "reformer")),
+    "warlord": ("ПОЛКОВОДЕЦ", ("aggressive", "brave", "recruiter")),
+    "raider": ("ЗАХВАТЧИК", ("conqueror", "reckless", "cruel")),
+    "autocrat": ("ДЕСПОТ", ("cruel", "paranoid", "nepotist")),
+    "envoy": ("КУПЕЦ-ДИПЛОМАТ", ("trader", "diplomat", "greedy")),
+    "architect": ("ЗОДЧИЙ ДЕРЖАВЫ", ("builder", "defender", "miser")),
+    "zealot": ("РЕВНИТЕЛЬ ВЕРЫ", ("pious", "honorable", "aggressive")),
+    "shadow": ("ТЕНЕВОЙ ПРАВИТЕЛЬ", ("schemer", "paranoid", "careful_self")),
+    "crusader": ("КРЕСТОНОСЕЦ", ("honorable", "conqueror", "brave")),
+    "miserly": ("СКУПОЙ ВЛАДЫКА", ("miser", "traditionalist", "cautious")),
+    "upstart": ("ВЫСКОЧКА", ("ambitious", "reckless", "meritocrat")),
+    "benefactor": ("ОТЕЦ НАРОДА", ("generous", "builder", "merciful")),
+    "mercenary": ("НАЁМНЫЙ КНЯЗЬ", ("greedy", "treacherous", "elitist")),
 }
 
 # which skills make each reign likely (weights over STATS order: УПР, ВЕРБ, ЛОГ, РАЗВ, ДИП, ИНТР)
@@ -83,6 +95,18 @@ _LEAN: Dict[str, Tuple[float, ...]] = {
     "patron": (0.4, 0, 0, 0, 1.0, 0),
     "despot": (0.3, 0.7, 0, 0, -0.4, 0.7),
     "strategist": (0, 0, 0.6, 1.2, 0, 0.3),
+    "warlord": (0, 1.1, 0.6, 0.3, -0.3, 0),
+    "raider": (0, 0.9, 0.5, 0, -0.8, 0.4),
+    "autocrat": (0.4, 0, 0, 0, -0.8, 1.1),
+    "envoy": (0.5, 0, 0, 0, 1.2, 0.3),
+    "architect": (1.2, 0, 0.6, 0, 0, -0.3),
+    "zealot": (0, 0.6, 0, 0, 0.5, -0.8),
+    "shadow": (0, 0, 0, 0.8, -0.3, 1.2),
+    "crusader": (0, 0.8, 0.5, 0, 0.4, -0.6),
+    "miserly": (1.0, -0.6, 0.6, 0, 0, 0),
+    "upstart": (0.3, 0.6, 0, 0, -0.3, 0.6),
+    "benefactor": (0.8, 0, 0, 0, 0.8, -0.6),
+    "mercenary": (0.4, 0.4, 0, 0, 0, 0.8),
 }
 _VICE_LEAN = {"cruelty": "tyrant", "embezzle": "merchant", "greed": "merchant", "pride": "despot",
               "cowardice": "keeper", "blabber": "patron"}

@@ -67,6 +67,8 @@ def _cull(camp, city: str, frac: float) -> int:
 
 # --- the events ----------------------------------------------------------------------------------
 def _plague(camp):
+    from .population import plague_cards
+    plague_cards(camp)                                     # two more sickness cards in every deck
     rich = sorted(camp.owner, key=lambda c: -camp.prosperity[c] + camp.rng.random() * 3)
     origin = rich[0]
     reach = _around(origin, 2)
@@ -223,7 +225,8 @@ def _drought(camp):
 
 EVENTS: List[Event] = [
     Event("plague", "ЧУМА НА МАТЕРИКЕ", "Мор идёт от богатейшего города на 2 дороги вокруг: процветание "
-          "-4/-3/-2, гарнизоны теряют до 60% воинов. Нежить Пепла не болеет.", _plague, color="#7a9e48"),
+          "-4/-3/-2, гарнизоны теряют до 60% воинов (нежить Пепла не болеет); в каждую колоду ложатся ещё 2 "
+          "БОЛЕЗНИ В ГОРОДЕ на 10 ходов.", _plague, color="#7a9e48"),
     Event("goblin_horde", "НАШЕСТВИЕ ГОБЛИНОВ", "Гоблины отбивают до 3 слабейших своих логов, во всех "
           "логовах новые орды; гоблинские вожди на службе людей могут вернуться к своим.", _goblin_horde,
           can=lambda camp: camp.turn >= 10 and len(camp.cities_of("goblin")) <= 4, color="#63c74d"),

@@ -274,6 +274,36 @@ class Renderer:
             tint = "hit"
         return art.get(anim, i, u.facing < 0, tint)
 
+    def _tower(self, s: pygame.Surface, world: World, t) -> None:
+        """A city's archer tower: stone, a crenellated top and the defenders' banner (lit from the left)."""
+        x, y = round(t.x), round(t.y)
+        team = world.teams[t.team]
+        light, mid, dark = (192, 203, 220), (139, 155, 180), (90, 105, 136)
+        ink = INK
+        body = pygame.Rect(x - 7, y - 34, 14, 34)
+        pygame.draw.ellipse(s, (24, 20, 37), (x - 10, y - 3, 20, 6))
+        pygame.draw.rect(s, ink, body.inflate(2, 2))
+        pygame.draw.rect(s, mid, body)
+        pygame.draw.rect(s, light, (body.x, body.y, 4, body.h))
+        pygame.draw.rect(s, dark, (body.right - 3, body.y, 3, body.h))
+        for row in range(body.y + 4, body.bottom - 2, 5):              # courses of stone
+            pygame.draw.line(s, dark, (body.x + 1, row), (body.right - 2, row))
+            off = 3 if (row // 5) % 2 else 6
+            s.set_at((body.x + off, row + 2), dark)
+            s.set_at((body.x + off + 6, row + 2), dark)
+        top = pygame.Rect(x - 9, y - 40, 18, 6)
+        pygame.draw.rect(s, ink, top.inflate(2, 2))
+        pygame.draw.rect(s, mid, top)
+        pygame.draw.line(s, light, top.topleft, (top.right - 1, top.y))
+        for k in range(0, 18, 6):                                       # merlons
+            m = pygame.Rect(top.x + k, top.y - 3, 4, 3)
+            pygame.draw.rect(s, ink, m.inflate(2, 1))
+            pygame.draw.rect(s, light if k == 0 else mid, m)
+        pygame.draw.rect(s, (24, 20, 37), (x - 2, y - 26, 4, 6))       # arrow slit
+        pygame.draw.line(s, ink, (x, y - 43), (x, y - 54))             # banner
+        flag = _c(team.accent)
+        pygame.draw.polygon(s, flag, [(x + 1, y - 54), (x + 9, y - 51), (x + 1, y - 48)])
+
     def _units(self, world: World, s: pygame.Surface, real_time: float) -> None:
         items = []
         for u in world.units:
@@ -282,6 +312,8 @@ class Renderer:
             items.append((2 if u.kicked else 0 if u.dead else 1, u.y, 0, u))
         for p in world.projectiles:
             items.append((1, p.y, 1, p))
+        for t in getattr(world, "towers", ()):
+            items.append((1, t.y, 2, t))
         items.sort(key=lambda it: (it[0], it[1]))
         # team markers under the living
         for u in world.units:
@@ -292,6 +324,9 @@ class Renderer:
                 r.center = (round(u.x), round(u.y) + 2)
                 pygame.draw.ellipse(s, col, r, 1)
         for _, _, kind, obj in items:
+            if kind == 2:
+                self._tower(s, world, obj)
+                continue
             if kind == 0:
                 u = obj
                 art = self.art(u.look)

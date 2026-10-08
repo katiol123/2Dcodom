@@ -925,7 +925,7 @@ class WorldMapScreen:
         c = CITY[self.selected]
         w = 166
         roads = wrap("ДОРОГИ: " + ", ".join(CITY[n].name for n in neighbors(c.key)), w - 10)
-        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 9 + 21 + 17
+        h = 25 + 7 * len(wrap(c.desc, w - 10)) + 10 + 17 * len(c.pool) + 1 + 7 * len(roads) + 4 + 9 + 21 + 17 + 9
         return pygame.Rect(W - w - 4, TOP + 3, w, h)
 
     PANEL_FACES = 9
@@ -958,7 +958,14 @@ class WorldMapScreen:
         if c.key in self.camp.defense:
             notes.append(f"ОБОРОНА x{self.camp.defense[c.key][0]:.2g}")
         notes.append(f"ЗАЩИТА {int(self.camp.defense_power(c.key))}")
+        if c.key in self.camp.sick:
+            notes.append(f"БОЛЕЗНЬ {self.camp.sick[c.key]} Х.")
         font.draw(s, "  ".join(notes), r.x + 5, y, "#8b9bb4")
+        y += 9
+        from .buildings import BUILDINGS, slots
+        have = self.camp.buildings.get(c.key, [])
+        font.draw(s, "ЗДАНИЯ: " + (", ".join(BUILDINGS[k].name for k in have) or "НЕТ") + f" ({len(have)}/{slots(c.key)})",
+                  r.x + 5, y, "#feae34" if have else "#5a6988")
         y += 9
         offs = self.camp.officers_in(c.key)
         font.draw(s, f"ОФИЦЕРОВ: {len(offs)}   СВОБОДНЫХ ВОИНОВ: {len(self.camp.free[c.key])}", r.x + 5, y, "#a7f070")
@@ -1104,15 +1111,17 @@ class WorldMapScreen:
         if self.selected is None or not self.camp.controls(self.selected):
             return []
         r = self._city_panel_rect()
-        return [(pygame.Rect(r.x - 50, r.y + 4, 47, 15), "army"), (pygame.Rect(r.x - 50, r.y + 22, 47, 15), "hire")]
+        return [(pygame.Rect(r.x - 50, r.y + 4, 47, 15), "army"), (pygame.Rect(r.x - 50, r.y + 22, 47, 15), "hire"),
+                (pygame.Rect(r.x - 50, r.y + 40, 47, 15), "build")]
 
     def _city_buttons_draw(self, s: pygame.Surface) -> None:
         mx, my = self._mouse
         for rect, action in self._city_buttons():
             hot = rect.collidepoint(mx, my)
-            base = "#3e8948" if action == "hire" else "#124e89"
+            base = {"hire": "#3e8948", "army": "#124e89", "build": "#8a6410"}[action]
             s.blit(self.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
-            self.font.draw(s, "АРМИЯ" if action == "army" else "НАЙМ", rect.centerx, rect.centery, "#ffffff",
+            self.font.draw(s, {"army": "АРМИЯ", "hire": "НАЙМ", "build": "СТРОЙКА"}[action], rect.centerx, rect.centery,
+                           "#ffffff",
                            anchor="center")
 
     # --- portraits ---------------------------------------------------------------------------------
@@ -1182,8 +1191,76 @@ class WorldMapScreen:
 
     FREE_ROWS = 8
 
+    def _build_rect(self, i: int) -> pygame.Rect:
+        r = self.WIN
+        return pygame.Rect(r.x + 8, r.y + 30 + i * 27, r.w - 16, 25)
+
+    def _build_button(self, i: int) -> pygame.Rect:
+        row = self._build_rect(i)
+        return pygame.Rect(row.right - 84, row.y + 5, 80, 15)
+
+    def _build_handle(self, ev, mx: int, my: int, city: str) -> None:
+        from .buildings import ORDER, build
+        if ev.type != pygame.MOUSEBUTTONDOWN or ev.button != 1:
+            return
+        for i, key in enumerate(ORDER):
+            if self._build_button(i).collidepoint(mx, my):
+                p = self.camp.player
+                if self.camp.whose_turn() != p:
+                    self._say("СТРОЯТ В СВОЙ ХОД")
+                    return
+                ok, msg = build(self.camp, p, city, key)
+                self._say(msg, "#a7f070" if ok else "#e43b44")
+                if ok:
+                    from .audio import ui
+                    ui("seal")
+                return
+
+    def _build_window(self, s: pygame.Surface, city: str) -> None:
+        from .buildings import BUILDINGS, ORDER, can_build, sickness_block, slots
+        camp, font = self.camp, self.font
+        r = self.WIN
+        have = camp.buildings.get(city, [])
+        font.draw(s, f"МЕСТ ДЛЯ ЗДАНИЙ: {len(have)} ИЗ {slots(city)}. ЗДАНИЕ СТОИТ ЗОЛОТА И 1 ОД; НАБЕГ, "
+                     "ШТУРМ И ЗАХВАТ МОГУТ ЕГО РАЗРУШИТЬ", r.x + 8, r.y + 18, "#8b9bb4")
+        p = camp.player
+        mine = camp.whose_turn() == p
+        for i, key in enumerate(ORDER):
+            b = BUILDINGS[key]
+            row = self._build_rect(i)
+            built = key in have
+            hot = row.collidepoint(self._mouse)
+            pygame.draw.rect(s, (48, 56, 86) if built else (58, 68, 102) if hot else (38, 43, 68), row)
+            pygame.draw.rect(s, _c("#fee761") if built else (90, 105, 136), row, 1)
+            font.draw(s, b.name, row.x + 4, row.y + 2, "#fee761" if built else "#ffffff")
+            font.draw(s, f"{b.cost} ЗОЛ.", row.x + 70, row.y + 2, "#feae34")
+            for j, line in enumerate(wrap(b.text, row.w - 100)[:2]):
+                font.draw(s, line, row.x + 4, row.y + 10 + j * 7, "#c0cbdc")
+            btn = self._build_button(i)
+            if built:
+                font.draw(s, "ПОСТРОЕНО", btn.centerx, btn.centery, "#a7f070", anchor="center")
+                continue
+            ok, why = can_build(camp, p, city, key)
+            ok = ok and mine and camp.realms[p].ap >= 1
+            s.blit(self.r.panel(btn.w, btn.h, base="#3e8948" if ok else "#3a4466",
+                                border="#a7f070" if ok else "#5a6988"), btn.topleft)
+            font.draw(s, "ПОСТРОИТЬ" if ok else (why[:16] if why else "НЕТ ОД"), btn.centerx, btn.centery,
+                      "#ffffff" if ok else "#8b9bb4", anchor="center")
+        block = sickness_block(camp, city)
+        if block:
+            font.draw(s, f"ЛАЗАРЕТЫ РЯДОМ ОСТАНАВЛИВАЮТ БОЛЕЗНЬ ЗДЕСЬ С ШАНСОМ {int(block * 100)}%", r.x + 8,
+                      r.bottom - 12, "#7a9e48")
+
     def _window_handle(self, ev, mx: int, my: int) -> Optional[str]:
         kind, city = self.window
+        if kind == "build":
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE or \
+                    ev.type == pygame.MOUSEBUTTONDOWN and (ev.button == 3 or self._win_close_rect().collidepoint(mx, my)
+                                                           or not self.WIN.collidepoint(mx, my)):
+                self.window = None
+                return None
+            self._build_handle(ev, mx, my, city)
+            return None
         if ev.type == pygame.KEYDOWN:
             if ev.key in (pygame.K_ESCAPE, pygame.K_a if kind == "army" else pygame.K_h):
                 self.window = None
@@ -1253,6 +1330,8 @@ class WorldMapScreen:
         self._mouse = mouse
         self.win_hover = None
         kind, city = self.window
+        if kind == "build":
+            return
         if kind == "army":
             for i in range(SQUAD_SLOTS):
                 if self._slot_rect(i).collidepoint(mx, my):
@@ -1290,9 +1369,12 @@ class WorldMapScreen:
         cr = self._win_close_rect()
         pygame.draw.rect(s, (162, 38, 51), cr)
         font.draw(s, "X", cr.centerx + 1, cr.centery, "#ffffff", anchor="center")
-        title = ("АРМИЯ" if kind == "army" else "НАЙМ") + f" - {c.name}"
+        title = {"army": "АРМИЯ", "hire": "НАЙМ", "build": "СТРОЙКА"}[kind] + f" - {c.name}"
         font.draw(s, title, r.centerx, r.y + 4, "#fee761", anchor="midtop")
         font.draw(s, f"ЗОЛОТО {self.camp.gold[f.key]}", r.x + 8, r.y + 4, "#feae34")
+        if kind == "build":
+            self._build_window(s, city)
+            return
         if kind == "army":
             self._army_left(s, f)
         else:
@@ -1391,9 +1473,10 @@ class WorldMapScreen:
             name = u.short if len(u.name) > 18 and u.short else u.name
             font.draw(s, name, r.x + 23, r.y + 2, "#ffffff")
             font.draw(s, f"{u.role}, {TIER_NAMES[u.tier]}", r.x + 23, r.y + 10, "#8b9bb4")
-            font.draw(s, f"ЦЕНА {u.cost}   СОДЕРЖ. {u.upkeep}/ХОД", r.x + 23, r.y + 18, "#feae34")
+            font.draw(s, f"ЦЕНА {self.camp.hire_price(c.key, key)}   СОДЕРЖ. {u.upkeep}/ХОД", r.x + 23, r.y + 18,
+                      "#feae34")
             b = self._hire_button(i)
-            ok = u.cost <= gold and left > 0
+            ok = self.camp.hire_price(c.key, key) <= gold and left > 0
             s.blit(self.r.panel(b.w, b.h, base="#3e8948" if ok else "#3a4466", border="#a7f070" if ok else "#5a6988"),
                    b.topleft)
             font.draw(s, "НАНЯТЬ", b.centerx, b.centery, "#ffffff" if ok else "#5a6988", anchor="center")

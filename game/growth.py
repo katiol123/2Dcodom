@@ -194,7 +194,9 @@ def turn(camp, faction: str) -> None:
                 camp.change_relation(faction, x, 1)
     for o in [x.key for x in camp.officers_of(faction)]:
         camp.idle[o] = camp.idle.get(o, 0) + 1
-        gain_xp(camp, o, XP_DRILL, deed=False)               # drill and garrison duty
+        from .buildings import count
+        school = count(camp, camp.officer_city[o], "academy") if o in camp.officer_city else 0
+        gain_xp(camp, o, XP_DRILL * (2 if school else 1), deed=False)   # drill and garrison duty
         if camp.presence(o) > 0.6 and camp.idle[o] > 4 and camp.rng.random() < 0.015:
             degrade(camp, o, "почивает на лаврах")
         if camp.loyalty[o] < 20 and not camp.is_leader(o) \
