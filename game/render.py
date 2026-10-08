@@ -148,6 +148,7 @@ class Renderer:
     (call :meth:`add_metas` with the sheets of every new battle)."""
 
     def __init__(self, metas: Dict[str, dict], seed: int = 0):
+        self.hint = "ПРОБЕЛ-ПАУЗА  R-РЕВАНШ  M-СОСТАВ  1-4 СКОРОСТЬ"     # bottom line in battle
         self.font = Font()
         self.metas: Dict[str, dict] = dict(metas)
         self._art: Dict[str, UnitArt] = {}
@@ -599,4 +600,4 @@ class Renderer:
             self.font.draw(s, "ПАУЗА", W // 2, H // 2, "#ffffff", scale=3, anchor="center")
         if speed != 1.0:
             self.font.draw(s, f"X{speed:g}", W - 4, H - 8, "#fee761", anchor="topright")
-        self.font.draw(s, "ПРОБЕЛ-ПАУЗА  R-РЕВАНШ  M-СОСТАВ  1-4 СКОРОСТЬ", 4, H - 8, "#5a6988")
+        self.font.draw(s, self.hint, 4, H - 8, "#5a6988")

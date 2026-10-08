@@ -26,11 +26,11 @@ from typing import Dict, List, Tuple
 
 from .officers import OFFICER, OFFICERS, STATS, Officer
 
-TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse")
+TIERS = ("basic", "junk", "moderate", "strong", "unique", "faction", "curse", "vice")
 TIER_NAMES = {"basic": "ОСНОВА", "junk": "ПУСТЯК", "moderate": "ДЕЛЬНАЯ", "strong": "СИЛЬНАЯ",
-              "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ"}
+              "unique": "ЕДИНСТВЕННАЯ", "faction": "ФРАКЦИОННАЯ", "curse": "ПРОКЛЯТИЕ", "vice": "ПОРОК"}
 KIND_NAMES = {"economy": "ХОЗЯЙСТВО", "military": "ВОЙНА", "intrigue": "ИНТРИГА", "diplomacy": "ДИПЛОМАТИЯ",
-              "council": "СОВЕТ", "recruit": "НАБОР", "curse": "БЕДА"}
+              "council": "СОВЕТ", "recruit": "НАБОР", "curse": "БЕДА", "vice": "ПОРОК"}
 
 AP = 5                          # action points per turn
 AP_BONUS = {"khanate": 1}       # the Horde: one more action every turn
@@ -53,6 +53,7 @@ class Card:
     unplayable: bool = False    # a dead card in hand
     on_draw: bool = False       # goes off the moment it is drawn
     expires: int = 0            # curses: vanish after this many of the owner's turns
+    reaction: str = ""          # answer cards: "attacked" / "cursed" - they go off in a rival's turn
 
 
 def _c(key, name, cost, tier, kind, text, targets=(), **kw) -> Card:
@@ -129,6 +130,18 @@ _CARDS: List[Card] = [
     _c("mobilize", "МОБИЛИЗАЦИЯ", 0, "moderate", "council", "+2 ОД в этот ход. В колоду ложится УСТАЛОСТЬ "
        "на 3 хода.", ()),
 
+    # --- answers: they wait in hand and go off in a rival's turn ----------------------------------
+    _c("ambush", "ЗАСАДА", 0, "moderate", "military", "ОТВЕТ: когда штурмуют ваш город, нападающие теряют "
+       "15% войск ещё до боя.", reaction="attacked"),
+    _c("sortie", "ВЫЛАЗКА", 0, "moderate", "military", "ОТВЕТ: когда штурмуют ваш город, его защита в этом "
+       "бою x1.3.", reaction="attacked"),
+    _c("reinforce", "ПОДКРЕПЛЕНИЕ", 0, "moderate", "military", "ОТВЕТ: когда штурмуют ваш город, сильнейший "
+       "офицер из соседнего своего города приходит на помощь.", reaction="attacked"),
+    _c("withdraw", "ОТХОД", 0, "junk", "military", "ОТВЕТ: когда штурмуют ваш город, войска уходят в соседний "
+       "свой город целыми. Город сдан без боя.", reaction="attacked"),
+    _c("intercept", "ПЕРЕХВАТ ГОНЦА", 0, "moderate", "intrigue", "ОТВЕТ: когда соперник подбрасывает вам "
+       "проклятия, они не доходят до колоды.", reaction="cursed"),
+
     # --- threshold cards: moderate (first threshold) -------------------------------------------
     _c("reform", "РЕФОРМА", 1, "moderate", "economy", "Свой город: процветание +2.", ("own_city",)),
     _c("recruiters", "ВЕРБОВЩИКИ", 1, "moderate", "recruit", "Свой город: новобранцы на 140 мощи.",
@@ -143,6 +156,8 @@ _CARDS: List[Card] = [
        "мёртвые карты на 3 хода.", ("rival",)),
 
     # --- threshold cards: strong (second threshold) ---------------------------------------------
+    _c("purge", "ЧИСТКА КАНЦЕЛЯРИИ", 1, "strong", "council", "Сжечь навсегда одну карту из руки (хоть "
+       "проклятие) и вытянуть новую.", ("hand_card",)),
     _c("golden_age", "ЗОЛОТОЙ ВЕК", 2, "strong", "economy", "Каждый свой город: процветание +1 и "
        "процветание x6 золота."),
     _c("conscription", "ВСЕОБЩИЙ ПРИЗЫВ", 2, "strong", "recruit", "Каждый свой город: новобранцы на "
@@ -231,6 +246,28 @@ _CARDS: List[Card] = [
     _c("ancient_map", "ДРЕВНЯЯ КАРТА", 1, "unique", "military", "Свой офицер переходит в любой свой город "
        "и остаётся готов.", ("own_officer_ready", "dest_any_one")),
 
+    # --- vices: a councillor's flaws come into the deck with him ---------------------------------
+    _c("sloth", "ЛЕНЬ", 0, "vice", "vice", "Порок советника: мёртвая карта. Ничего не делает, только "
+       "занимает место в руке.", unplayable=True),
+    _c("embezzle", "КАЗНОКРАДСТВО", 0, "vice", "vice", "Порок советника: вытянув, держава теряет 40 золота "
+       "(до пятой части казны).", unplayable=True, on_draw=True),
+    _c("rudeness", "ГРУБОСТЬ", 0, "vice", "vice", "Порок советника: вытянув, отношения со случайной "
+       "державой -10.", unplayable=True, on_draw=True),
+    _c("envy", "ЗАВИСТЬ", 0, "vice", "vice", "Порок советника: вытянув, верность другого случайного "
+       "советника -10.", unplayable=True, on_draw=True),
+    _c("drink", "ПЬЯНСТВО", 0, "vice", "vice", "Порок советника: вытянув, в следующий ход на 1 ОД меньше.",
+       unplayable=True, on_draw=True),
+    _c("cowardice", "ТРУСОСТЬ", 0, "vice", "vice", "Порок советника: вытянув, его отряд на 2 хода слабее "
+       "на 15%.", unplayable=True, on_draw=True),
+    _c("blabber", "БОЛТЛИВОСТЬ", 0, "vice", "vice", "Порок советника: вытянув, он выбалтывает тайны - "
+       "случайный соперник видит вашу руку и тянет карту.", unplayable=True, on_draw=True),
+    _c("gambling", "АЗАРТ", 0, "vice", "vice", "Порок советника: вытянув, он играет на казённые: "
+       "чаще проигрывает 50 золота, реже выигрывает 25.", unplayable=True, on_draw=True),
+    _c("cruelty", "ЖЕСТОКОСТЬ", 0, "vice", "vice", "Порок советника: вытянув, в его городе процветание -1.",
+       unplayable=True, on_draw=True),
+    _c("pride", "ГОРДЫНЯ", 0, "vice", "vice", "Порок советника: вытянув, он обижен, что его не слушают: "
+       "его верность -8.", unplayable=True, on_draw=True),
+
     # --- curses -----------------------------------------------------------------------------------
     _c("unrest", "СМУТА", 0, "curse", "curse", "Мёртвая карта. Исчезнет через 3 хода.", unplayable=True,
        expires=3),
@@ -269,11 +306,11 @@ COURSES: Dict[str, Course] = {c.key: c for c in (
     Course("war", "ВОЙНА", ("assault", "assault", "assault", "march", "tax"),
            "Штурм приходит в руку почти каждый ход.",
            "ВОЕННАЯ УСТАЛОСТЬ: каждый штурм кладёт в колоду мёртвую карту. Свои города сами не растут."),
-    Course("economy", "ХОЗЯЙСТВО", ("tax", "tax", "tax", "tax", "fair"),
-           "Поборы не снижают процветание, города растут каждые 3 хода.",
+    Course("economy", "ХОЗЯЙСТВО", ("tax", "tax", "tax", "fair", "golden_age"),
+           "Поборы не снижают процветание, города растут каждые 3 хода, Золотой век в основе.",
            "ЛАКОМАЯ ДОБЫЧА: соседи охотнее нападают на богатую державу. Ни штурма, ни похода в основе."),
-    Course("defense", "ОБОРОНА", ("tax", "tax", "fortify", "fortify", "march"),
-           "Оборона всех своих городов x1.25, укрепления в основе.",
+    Course("defense", "ОБОРОНА", ("tax", "tax", "fortify", "sortie", "march"),
+           "Оборона всех своих городов x1.25, укрепления и вылазка в основе.",
            "Штурма в основе нет: расширяться можно лишь картами советников."),
     Course("intrigue", "ТАЙНАЯ ПОЛИТИКА", ("tax", "tax", "letters", "bribe", "assault"),
            "Половина чужих проклятий перехвачена, заговоры удаются чаще.",
@@ -296,7 +333,7 @@ FACTION_CARD: Dict[str, str] = {
 
 # stat -> (card for the first threshold, card for the second)
 THRESHOLD_CARDS: Dict[str, Tuple[str, str]] = {
-    "УПРАВЛЕНИЕ": ("reform", "golden_age"),
+    "УПРАВЛЕНИЕ": ("reform", "purge"),
     "ВЕРБОВКА": ("recruiters", "conscription"),
     "ЛОГИСТИКА": ("forced_march", "blitz"),
     "РАЗВЕДКА": ("scouts", "all_seeing"),
@@ -322,11 +359,12 @@ WANDERING_UNIQUES = {"dragon_gold": "highland", "ancient_map": "sylvan"}   # tre
 _POOLS: Dict[str, Dict[str, Tuple[str, ...]]] = {
     "УПРАВЛЕНИЕ": {"basic": ("tax",), "moderate": ("fair", "caravan", "tithe", "build", "loan"),
                    "junk": ("hunt", "tourney", "parade")},
-    "ВЕРБОВКА": {"basic": ("levy",), "moderate": ("militia_call", "volunteers", "mobilize"),
+    "ВЕРБОВКА": {"basic": ("levy",), "moderate": ("militia_call", "volunteers", "mobilize", "sortie"),
                  "junk": ("guard", "feast")},
-    "ЛОГИСТИКА": {"basic": ("march", "assault"), "moderate": ("supplies", "siege", "raid", "fortify"),
-                  "junk": ("pilgrimage", "hunt")},
-    "РАЗВЕДКА": {"basic": ("assault",), "moderate": ("patrol", "sabotage", "raid", "morale", "counterspy"),
+    "ЛОГИСТИКА": {"basic": ("march", "assault"), "moderate": ("supplies", "siege", "raid", "fortify", "reinforce"),
+                  "junk": ("pilgrimage", "hunt", "withdraw")},
+    "РАЗВЕДКА": {"basic": ("assault",), "moderate": ("patrol", "sabotage", "raid", "morale", "counterspy", "ambush",
+                                                  "intercept"),
                  "junk": ("omen", "denounce")},
     "ДИПЛОМАТИЯ": {"basic": ("tax",), "moderate": ("embassy", "trade_pact", "fair", "buyout"),
                    "junk": ("old_debt", "feast")},
@@ -389,8 +427,41 @@ def _personal() -> Dict[str, Tuple[str, ...]]:
             pick = r.choice([k for k in pool[tier] if used.get(k, 0) == least])
             used[pick] = used.get(pick, 0) + 1
             cards.append(pick)
-        out[o.key] = tuple(cards)
+        out[o.key] = tuple(cards) + VICE_OF.get(o.key, ())
     return out
+
+
+VICES: Tuple[str, ...] = ("sloth", "embezzle", "rudeness", "envy", "drink", "cowardice", "blabber", "gambling",
+                          "cruelty", "pride")
+
+
+def _vices() -> Dict[str, Tuple[str, ...]]:
+    """Some officers bring a vice into the council's deck - the able ones a little more often, so
+    a strong adviser can come with a flaw. Every vice belongs to at least three officers."""
+    from .faces import presence
+    r = random.Random("vices")
+    offs = sorted((o for o in OFFICER.values() if o.rank > 0), key=lambda o: o.key)
+    score = {o.key: r.random() + 0.6 * presence(o) for o in offs}
+    keys = sorted(score, key=score.get, reverse=True)[:3 * len(VICES)]
+    r.shuffle(keys)
+    return {k: (VICES[i % len(VICES)],) for i, k in enumerate(keys)}
+
+
+VICE_OF: Dict[str, Tuple[str, ...]] = _vices()
+
+# how a vice shows in the officer's biography ("{м|ж}" forms)
+VICE_TRAIT: Dict[str, str] = {
+    "sloth": "Порок: ленив{|а}, любое дело откладывает на завтра.",
+    "embezzle": "Порок: нечист{|а} на руку, казна при {нём|ней} худеет.",
+    "rudeness": "Порок: груб{|а} с послами, и соседи это запоминают.",
+    "envy": "Порок: завистлив{|а} и плетёт козни против других советников.",
+    "drink": "Порок: пьёт, и наутро совет ждёт {его|её} до полудня.",
+    "cowardice": "Порок: трус{|иха}, и солдаты это чувствуют.",
+    "blabber": "Порок: болтун{|ья}, тайны совета знает вся округа.",
+    "gambling": "Порок: игрок, ставит на кон казённое золото.",
+    "cruelty": "Порок: жесток{|а}, и горожане бегут от {него|неё}.",
+    "pride": "Порок: горд{|а} и обидчив{|а}, когда {его|её} не слушают.",
+}
 
 
 PERSONAL: Dict[str, Tuple[str, ...]] = _personal()

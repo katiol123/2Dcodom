@@ -137,6 +137,7 @@ class Unit:
         self.type = utype
         self.key = utype.key
         self.base_key = utype.key     # class as hired (the druid stays a druid even as a bear)
+        self.tag = 0                  # campaign battles: id of the troop (0 for summons)
         self.team = team
         self.team_key = TEAMS[team].key
         self.look = look
@@ -305,6 +306,7 @@ class World:
                 if team == 1:
                     x = W - x
                 u = Unit(ROSTER[s.key], team, x, y + self.rng.uniform(-3, 3), self.anims[s.look], s.look)
+                u.tag = getattr(s, "tag", 0)
                 u.bias = self.rng.random()
                 u.anim_t = self.rng.uniform(0, 1)
                 self.units.append(u)

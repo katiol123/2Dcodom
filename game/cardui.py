@@ -23,15 +23,15 @@ from .sim import H, W
 
 CARD_W, CARD_H = 88, 128
 TIER_COLOR = {"basic": "#8b9bb4", "junk": "#5a6988", "moderate": "#41a6f6", "strong": "#feae34",
-              "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44"}
+              "unique": "#e07ad8", "faction": "#fee761", "curse": "#e43b44", "vice": "#b86f50"}
 KIND_COLOR = {"economy": ("#c9a24a", "#4a3a14"), "military": ("#e43b44", "#4a1418"),
               "intrigue": ("#b07ad8", "#2e1a40"), "diplomacy": ("#5fb7d9", "#14304a"),
               "council": ("#63c74d", "#173a1a"), "recruit": ("#d08a4a", "#3e2414"),
-              "curse": ("#e43b44", "#1a0a0e")}
+              "curse": ("#e43b44", "#1a0a0e"), "vice": ("#b86f50", "#2a1610")}
 
 CITY_STEPS = {"own_city", "own_city_officers", "own_city_pair", "own_city_pair2", "dest_adj", "dest_2",
               "dest_any", "dest_any_one", "enemy_adj", "enemy_adj_any", "enemy_reach", "enemy_port",
-              "enemy_city", "enemy_city_officers"}
+              "enemy_city", "enemy_city_officers", "city_buyable"}
 RIVAL_STEPS = {"rival", "rival_diplo", "rival_neighbor"}
 PROMPTS = {
     "own_city": "ВЫБЕРИТЕ СВОЙ ГОРОД", "own_city_officers": "ГОРОД, ОТКУДА ВЫСТУПАЮТ",
@@ -45,6 +45,7 @@ PROMPTS = {
     "attackers_port": "КТО ПЛЫВЁТ (ДО 3)", "raider": "КТО ГРАБИТ", "enemy_officer_there": "КОГО",
     "own_officer": "КАКОЙ ОФИЦЕР", "own_officer_ready": "КАКОЙ ОФИЦЕР", "own_officer_spent": "КТО СНОВА В СТРОЮ",
     "rival": "КАКАЯ ДЕРЖАВА", "rival_diplo": "С КАКОЙ ДЕРЖАВОЙ", "rival_neighbor": "КАКОЙ СОСЕД",
+    "hand_card": "КАКУЮ КАРТУ СЖЕЧЬ НАВСЕГДА", "city_buyable": "КАКОЙ ГОРОД КУПИТЬ",
 }
 
 
@@ -91,6 +92,13 @@ def _icon(kind: str, color: str) -> pygame.Surface:
         pygame.draw.rect(s, d, (2, 12, 18, 3))
         pygame.draw.rect(s, d, (10, 12, 3, 8))
         pygame.draw.circle(s, w, (8, 8), 2)
+    elif kind == "vice":                                      # a goblet tipped over
+        pygame.draw.polygon(s, d, [(4, 4), (18, 4), (13, 12), (9, 12)])
+        pygame.draw.polygon(s, c, [(6, 5), (16, 5), (12, 11), (10, 11)])
+        pygame.draw.rect(s, d, (9, 12, 4, 6))
+        pygame.draw.rect(s, d, (5, 17, 12, 3))
+        pygame.draw.rect(s, c, (6, 18, 10, 1))
+        pygame.draw.circle(s, (160, 30, 40), (17, 15), 2)
     else:                                                     # curse: a skull
         pygame.draw.circle(s, d, (11, 9), 8)
         pygame.draw.circle(s, (220, 214, 200), (11, 9), 7)
@@ -309,10 +317,9 @@ class CardTable:
         step = self._step()
         if step is None:
             inst = self.play["inst"]
-            ok, msg = self.camp.play(self.player, inst, self.play["chosen"])
+            chosen = list(self.play["chosen"])
             self.play = None
-            self.ms._say(f"{inst.card.name}: {msg}" if ok and msg else (inst.card.name if ok else msg),
-                         "#a7f070" if ok else "#e43b44")
+            self.ms.run(lambda: self.camp.play(self.player, inst, chosen), ("play", inst.card.name))
             return
         opts = self._options()
         if not opts:
@@ -352,15 +359,101 @@ class CardTable:
             return
         self.cancel()
         self.chron_from = len(self.camp.log)
-        self.camp.end_turn()
-        self.camp.run_ai()
-        self.chronicle_open = True
-        self.chron_scroll = 0
+
+        def turn():
+            self.camp.end_turn()
+            self.camp.run_ai()
+        self.ms.run(turn, ("end", ""))
 
     def next_round(self) -> None:
         """Spectator: every realm plays once."""
         self.chron_from = len(self.camp.log)
-        self.camp.run_ai(stop_at_player=False, max_turns=1)
+        self.ms.run(lambda: self.camp.run_ai(stop_at_player=False, max_turns=1), ("round", ""))
+
+    def finished(self, what, result) -> None:
+        """A background action is over: say what came of it."""
+        kind, name = what
+        status, value = result
+        if status == "error":
+            self.ms._say("ОШИБКА: " + value.strip().splitlines()[-1][:60])
+            return
+        if kind == "play":
+            ok, msg = value
+            self.ms._say(f"{name}: {msg}" if ok and msg else (name if ok else msg), "#a7f070" if ok else "#e43b44")
+        elif kind == "end":
+            self.chronicle_open = True
+            self.chron_scroll = 0
+
+    # --- requests from a running action: watch a battle? answer a storm? ------------------------
+    def _req_rect(self) -> pygame.Rect:
+        return pygame.Rect(W // 2 - 160, 36, 320, 180)
+
+    def _req_buttons(self, req) -> List[Tuple[pygame.Rect, object]]:
+        r = self._req_rect()
+        if req["kind"] == "ask":
+            labels = [("СМОТРЕТЬ БОЙ", "watch"), ("РАССЧИТАТЬ", "calc"), ("ВСЕГДА СЧИТАТЬ", "never")]
+            return [(pygame.Rect(r.x + 8 + i * 102, r.bottom - 22, 98, 15), v) for i, (_, v) in enumerate(labels)]
+        out = [(pygame.Rect(r.x + 8 + i * 70, r.y + 42, 66, 96), c) for i, c in enumerate(req["cards"][:3])]
+        out.append((pygame.Rect(r.x + 8, r.bottom - 22, 98, 15), None))
+        return out
+
+    def handle_request(self, ev, mouse) -> None:
+        req = self.ms.runner.request
+        if not req or req["kind"] == "battle":
+            return
+        mx, my = mouse
+        if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+            self.ms.runner.reply("calc" if req["kind"] == "ask" else None)
+            return
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+            for rect, value in self._req_buttons(req):
+                if rect.collidepoint(mx, my):
+                    self.ms.runner.reply(value)
+                    return
+
+    def draw_request(self, s: pygame.Surface) -> None:
+        req = self.ms.runner.request
+        if not req or req["kind"] == "battle":
+            return
+        b = req["battle"]
+        camp = self.camp
+        font = self.font
+        r = self._req_rect()
+        s.blit(self.ms.dim, (0, 0))
+        mine = req["kind"] == "answer"
+        s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#e43b44" if mine else "#c9a24a"), r.topleft)
+        a = camp.attack_power(b.attacker, b.officers, b.city, b.mult)
+        d = camp.defense_power(b.city) * b.def_mult
+        p = camp.win_chance(a, d)
+        att, deff = FACTION[b.attacker], FACTION[b.defender]
+        title = "НА ВАШ ГОРОД НАПАЛИ!" if mine else "БОЙ ДРУГИХ ДЕРЖАВ"
+        font.draw(s, title, r.centerx, r.y + 5, "#f6757a" if mine else "#fee761", anchor="midtop")
+        font.draw(s, f"{att.short} ШТУРМУЕТ {CITY[b.city].name} ({deff.short})", r.centerx, r.y + 16, att.light,
+                  anchor="midtop")
+        odds = f"СИЛА {int(a)} ПРОТИВ {int(d)}: " + (f"ШАНС УДЕРЖАТЬ {int((1 - p) * 100)}%" if mine
+                                                       else f"ШАНС ШТУРМА {int(p * 100)}%")
+        font.draw(s, odds, r.centerx, r.y + 26, "#c0cbdc", anchor="midtop")
+        mouse = self.ms._mouse
+        preview = None
+        for rect, value in self._req_buttons(req):
+            hot = rect.collidepoint(mouse)
+            if mine and value is not None:
+                img = self.art.full(value.key, "ОТВЕТ", self.player)
+                s.blit(pygame.transform.scale(img, (rect.w, rect.h)), rect.topleft)
+                if hot or preview is None:
+                    preview = value
+                if hot:
+                    pygame.draw.rect(s, _c("#fee761"), rect.inflate(2, 2), 1)
+                continue
+            label = {"watch": "СМОТРЕТЬ БОЙ", "calc": "РАССЧИТАТЬ", "never": "ВСЕГДА СЧИТАТЬ", None: "НЕ ОТВЕЧАТЬ"}[
+                value if not hasattr(value, "key") else None]
+            base = "#3e8948" if value == "watch" else "#a22633" if value is None else "#3a4466"
+            s.blit(self.ms.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
+            font.draw(s, label, rect.centerx, rect.centery, "#ffffff", anchor="center")
+        if mine:
+            font.draw(s, "КЛИК ПО КАРТЕ - ОТВЕТИТЬ ЕЮ", r.x + 8, r.bottom - 32, "#8b9bb4")
+            if preview is not None:
+                s.blit(self.art.full(preview.key, "ОТВЕТ", self.player), (r.right - CARD_W - 8, r.y + 40))
 
     def update(self, dt: float, mouse) -> None:
         mx, my = mouse
@@ -579,7 +672,16 @@ class CardTable:
             picked = opt in p["picked"]
             pygame.draw.rect(s, (58, 68, 102) if hot else (38, 43, 68), row)
             pygame.draw.rect(s, _c("#fee761") if picked else (90, 105, 136), row, 1)
-            if p["step"] in RIVAL_STEPS:
+            if p["step"] == "hand_card":
+                inst = next((c for c in camp.realms[self.player].hand if c.id == opt), None)
+                if inst is not None:
+                    s.blit(self.art.chip(inst.key), (row.x + 4, row.y + 2))
+                    font.draw(s, f"{TIER_NAMES[inst.card.tier]}   {origin_label(inst.origin)}", row.x + 4, row.y + 10,
+                              "#8b9bb4")
+                    if hot:
+                        s.blit(self.art.full(inst.key, origin_label(inst.origin), self.player),
+                               (r.right + 6, r.y))
+            elif p["step"] in RIVAL_STEPS:
                 fac = FACTION[opt]
                 s.blit(self.ms.shields[opt], (row.x + 2, row.y + 1))
                 font.draw(s, fac.name, row.x + 20, row.y + 2, fac.light)
@@ -641,7 +743,16 @@ class CardTable:
             out.append((turn, f, text, i >= self.chron_from, hurt))
         return out
 
+    def _watch_rect(self) -> pygame.Rect:
+        r = self._chron_rect()
+        return pygame.Rect(r.x + 8, r.y + 3, 150, 9)
+
     def _chronicle_handle(self, ev, mx, my) -> None:
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self._watch_rect().collidepoint(mx, my):
+            from .campaign_runner import WATCH_MODES
+            m = self.ms.runner
+            m.watch_ai = WATCH_MODES[(WATCH_MODES.index(m.watch_ai) + 1) % len(WATCH_MODES)]
+            return
         if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_SPACE) or \
                 ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
             self.chronicle_open = False
@@ -661,6 +772,10 @@ class CardTable:
         pygame.draw.rect(s, (162, 38, 51), cr)
         font.draw(s, "X", cr.centerx + 1, cr.centery, "#ffffff", anchor="center")
         font.draw(s, f"ХРОНИКА - ХОД {self.camp.turn}", r.centerx, r.y + 4, "#fee761", anchor="midtop")
+        mode = {"ask": "СПРАШИВАТЬ", "calc": "РАССЧИТЫВАТЬ", "watch": "ВСЕГДА СМОТРЕТЬ"}[self.ms.runner.watch_ai]
+        tr = self._watch_rect()
+        hot = tr.collidepoint(self.ms._mouse)
+        font.draw(s, f"БОИ ДРУГИХ ДЕРЖАВ: {mode}", tr.x, tr.y + 1, "#ffffff" if hot else "#41a6f6")
         font.draw(s, "НОВОЕ - ЯРКО, БЕДЫ ВАШЕЙ ДЕРЖАВЫ - КРАСНЫМ. КОЛЕСО - ЛИСТАТЬ, ESC - ЗАКРЫТЬ", r.centerx,
                   r.bottom - 10, "#5a6988", anchor="midtop")
         y = r.y + 17
@@ -710,7 +825,8 @@ class CardTable:
         from collections import Counter
         cnt = Counter((c.key, c.origin) for c in r.all_cards())
         rows = sorted(cnt.items(), key=lambda kv: (["faction", "unique", "strong", "moderate", "basic", "junk",
-                                                     "curse"].index(CARDS[kv[0][0]].tier), CARDS[kv[0][0]].name))
+                                                     "vice", "curse"].index(CARDS[kv[0][0]].tier),
+                                                    CARDS[kv[0][0]].name))
         return [(k, n, o) for (k, o), n in rows]
 
     def open_council(self) -> None:
@@ -892,6 +1008,8 @@ class CardTable:
                 best = max(labels, key=lambda k: ["junk", "basic", "moderate", "strong", "unique"].index(
                     CARDS[k].tier) if CARDS[k].tier in ("junk", "basic", "moderate", "strong", "unique") else 0) \
                     if labels else None
+                if any(CARDS[k].tier == "vice" for k in labels):
+                    font.draw(s, "ПОРОК", row.right - 3, row.y + 1, "#b86f50", anchor="topright")
                 if best:
                     chip = self.art.chip(best)
                     s.blit(chip, (row.x + 17, row.y + 9), area=pygame.Rect(0, 0, row.w - 20, 8))

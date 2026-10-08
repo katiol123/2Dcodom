@@ -28,6 +28,7 @@ from .factions import (ALL_FACTIONS, CITIES, CITY, EMBLEMS, FACTION, FACTIONS, G
 from .render import INK, Renderer, _c
 from .sim import H, W
 from .campaign import Campaign
+from .campaign_runner import Runner
 from .cardui import CardTable
 from .officercard import OfficerCard
 from .officers import OFFICER, SQUAD_SLOTS, STAT_HELP, STATS
@@ -338,6 +339,9 @@ class WorldMapScreen:
         self.dim.fill((24, 20, 37, 150))
         self.bar = pygame.Surface((W, 1), pygame.SRCALPHA)
         self.table = CardTable(self)                      # the hand, targeting, council, chronicle
+        self.runner = Runner(self.camp)                   # card plays and turns run in a worker thread
+        self.running: Optional[tuple] = None              # what the runner is doing (for its result)
+        self.frozen: Optional[pygame.Surface] = None      # the last frame, shown while it runs
         self._clamp()
 
     # --- helpers -----------------------------------------------------------------------------
@@ -406,8 +410,26 @@ class WorldMapScreen:
         return None
 
     # --- input -------------------------------------------------------------------------------
+    def run(self, fn, what: tuple) -> None:
+        """Play a card / end the turn in the background: a storm may stop it for a real battle."""
+        self.running = what
+        self.runner.start(fn)
+
+    def battle_request(self):
+        """The storm the runner waits on to be fought for real (or None)."""
+        req = self.runner.request
+        return req["battle"] if req and req["kind"] == "battle" else None
+
+    def finish_battle(self) -> None:
+        self.runner.reply(True)
+
     def handle(self, ev, mouse: Tuple[int, int]) -> Optional[str]:
         mx, my = mouse
+        if self.runner.busy():                            # only the runner's questions are live
+            self.table.handle_request(ev, mouse)
+            if ev.type == pygame.QUIT:
+                return "quit"
+            return None
         if self.cards.handle(ev, mouse):                 # a face or a name anywhere opens the card
             return None
         if self.window is None and not self.faction_panel and not self.diplomacy:
@@ -504,6 +526,12 @@ class WorldMapScreen:
         self.time += dt
         self.flash = max(0.0, self.flash - dt * 1.6)
         self._mouse = mouse
+        done = self.runner.collect()
+        if done and self.running:
+            what, self.running = self.running, None
+            self.table.finished(what, done)
+        if self.runner.busy():
+            return
         self.table.update(dt, mouse)
         if self.window is not None:
             self._window_update(mouse)
@@ -526,6 +554,22 @@ class WorldMapScreen:
 
     # --- drawing ------------------------------------------------------------------------------
     def draw(self, s: pygame.Surface) -> None:
+        if self.runner.busy() and self.frozen is not None:
+            self.cards.begin(self._mouse)
+            s.blit(self.frozen, (0, 0))
+            req = self.runner.request
+            if not req:
+                label = "ХОДЯТ ДРУГИЕ ДЕРЖАВЫ..." if self.running and self.running[0] != "play" else "..."
+                w = self.font.render(label, "#fff").get_width() + 16
+                rect = pygame.Rect((W - w) // 2, H // 2 - 8, w, 15)
+                s.blit(self.r.panel(rect.w, rect.h, base="#181425", border="#fee761"), rect.topleft)
+                self.font.draw(s, label, rect.centerx, rect.centery, "#fee761", anchor="center")
+            self.table.draw_request(s)
+            return
+        self._draw(s)
+        self.frozen = s.copy()
+
+    def _draw(self, s: pygame.Surface) -> None:
         self.cards.begin(self._mouse)
         s.fill(INK)
         z = self.zoom

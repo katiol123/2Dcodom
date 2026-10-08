@@ -21,7 +21,8 @@ from .officers import OFFICER
 from .units import ROSTER
 
 AP_PRICE = 35                   # what one action point is worth, in gold
-TIER_HINT = {"faction": 150, "unique": 130, "strong": 140, "moderate": 80, "basic": 60, "junk": 20, "curse": -60}
+TIER_HINT = {"faction": 150, "unique": 130, "strong": 140, "moderate": 80, "basic": 60, "junk": 20, "curse": -60,
+             "vice": -50}
 POWER_VALUE = 0.7               # gold-equivalent of one point of troop power
 PROSPERITY_VALUE = 45           # gold-equivalent of +1 prosperity in an own city
 
@@ -33,7 +34,11 @@ def card_value(camp, f: str, inst) -> float:
 
 
 def cards_to_keep(camp, f: str, n: int) -> list:
-    hand = [c for c in camp.realms[f].hand if c.card.tier != "curse" and not c.card.unplayable]
+    hand = [c for c in camp.realms[f].hand if c.card.tier not in ("curse", "vice") and not c.card.unplayable]
+    if frontier(camp, f) and any(threat(camp, f, c) > 0 for c in frontier(camp, f)):
+        # answers are worth keeping while enemies stand at the gates
+        hand.sort(key=lambda c: -(card_value(camp, f, c) + (60 if c.card.reaction == "attacked" else 0)))
+        return hand[:n]
     return sorted(hand, key=lambda c: -card_value(camp, f, c))[:n]
 
 
@@ -336,6 +341,13 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     # --- council and cards
     if k == "patrol":
         return 55, []
+    if k == "purge":
+        hand = [c for c in camp.realms[f].hand if c is not inst]
+        if not hand:
+            return -1, []
+        worst = min(hand, key=lambda c: card_value(camp, f, c))
+        v = -card_value(camp, f, worst)                           # burning a curse is worth a lot
+        return (max(v, 0) + 45 if card_value(camp, f, worst) < 40 else -1), [worst.id]
     if k == "moon_rite":
         return 110, []
     if k == "scouts":
@@ -438,6 +450,31 @@ def _v(camp, f, inst) -> Tuple[float, list]:
 VALUE = _v
 
 
+def choose_answer(camp, b, cards):
+    """Which answer a computer defender plays when its city is stormed (or None)."""
+    a = camp.attack_power(b.attacker, b.officers, b.city, b.mult)
+    d = camp.defense_power(b.city)
+    p_def = 1 - camp.win_chance(a, d)
+    keys = {c.key: c for c in cards}
+    refuge = [n for n in neighbors(b.city) if camp.owner[n] == b.defender]
+    if p_def < 0.2 and "withdraw" in keys and refuge:
+        return keys["withdraw"]
+    if p_def > 0.85:
+        return None
+    gains = {}
+    if "sortie" in keys:
+        gains["sortie"] = 1 - camp.win_chance(a, d * 1.3)
+    if "ambush" in keys:
+        gains["ambush"] = 1 - camp.win_chance(a * 0.85, d)
+    if "reinforce" in keys:
+        extra = max((camp.power(o.key) for n in refuge for o in camp.officers_in(n)), default=0)
+        gains["reinforce"] = 1 - camp.win_chance(a, d + extra * 1.1)
+    if not gains:
+        return None
+    best = max(gains, key=gains.get)
+    return keys[best] if gains[best] > p_def + 0.05 else None
+
+
 # --- turn ----------------------------------------------------------------------------------------
 def manage(camp, f: str) -> None:
     """Fill squads with the free troops in their city, hire with spare gold."""
@@ -467,7 +504,7 @@ def manage(camp, f: str) -> None:
                 margin -= camp.troop_upkeep(f, k)
 
 
-COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0}
+COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "unique": 150, "faction": 0, "vice": -60}
 
 
 def council_score(members: Sequence[str], taste: Optional[Dict[str, float]] = None) -> float:

@@ -99,6 +99,9 @@ def options(camp, f: str, key: str, chosen: list) -> list:
     if step == "rival_neighbor":
         return [x for x in _rivals(camp, f)
                 if any(camp.owner[n] == x for c in own for n in neighbors(c))]
+    if step == "hand_card":
+        return [c.id for c in camp.realms[f].hand if c.key != "purge" or len([x for x in camp.realms[f].hand
+                                                                            if x.key == "purge"]) > 1]
     if step == "own_officer":
         return [o.key for o in camp.officers_of(f)]
     if step == "own_officer_ready":
@@ -539,35 +542,35 @@ def _sabotage(camp, f, t):
 
 @effect("arson")
 def _arson(camp, f, t):
-    camp.add_curse(t[0], "fire")
+    camp.add_curse(t[0], "fire", source=f)
     camp.change_relation(f, t[0], -4)
     return f"{FACTION[t[0]].short}: в колоде ПОЖАР"
 
 
 @effect("agitators")
 def _agitators(camp, f, t):
-    camp.add_curse(t[0], "desertion", 2)
+    camp.add_curse(t[0], "desertion", 2, source=f)
     camp.change_relation(f, t[0], -5)
     return f"{FACTION[t[0]].short}: 2 ДЕЗЕРТИРСТВА в колоде"
 
 
 @effect("letters")
 def _letters(camp, f, t):
-    camp.add_curse(t[0], "unrest", 2)
+    camp.add_curse(t[0], "unrest", 2, source=f)
     camp.change_relation(f, t[0], -4)
     return f"{FACTION[t[0]].short}: 2 СМУТЫ в колоде"
 
 
 @effect("plague_cauldron")
 def _cauldron(camp, f, t):
-    camp.add_curse(t[0], "plague", 2)
+    camp.add_curse(t[0], "plague", 2, source=f)
     camp.change_relation(f, t[0], -8)
     return f"{FACTION[t[0]].short}: 2 ЧУМЫ в колоде"
 
 
 @effect("mushroom_haze")
 def _haze(camp, f, t):
-    camp.add_curse(t[0], "haze", 2)
+    camp.add_curse(t[0], "haze", 2, source=f)
     return f"{FACTION[t[0]].short}: 2 ГАЛЛЮЦИНАЦИИ в колоде"
 
 
@@ -869,13 +872,83 @@ def _ancient_map(camp, f, t):
     return f"{OFFICER[t[0]].name} -> {CITY[t[1]].name}"
 
 
+@effect("purge")
+def _purge(camp, f, t):
+    r = camp.realms[f]
+    inst = next((c for c in r.hand if c.id == t[0]), None)
+    if inst is None:
+        return "нечего жечь"
+    r.hand.remove(inst)                                          # gone for good
+    camp.draw_cards(f, 1)
+    return f"сожжена карта {inst.card.name}"
+
+
 EFFECTS = E
 
 
 # --- curses going off when drawn -----------------------------------------------------------------
+def _vice(camp, f: str, inst) -> None:
+    """A councillor's vice goes off; the card goes back to the discard (it stays in the deck while
+    he sits in the council, unless burnt by ЧИСТКА КАНЦЕЛЯРИИ)."""
+    r = camp.realms[f]
+    key = inst.key
+    who = OFFICER[inst.origin].name if inst.origin in OFFICER else "советник"
+    if key == "embezzle":
+        loss = min(40, camp.gold[f] // 5)
+        camp.gold[f] -= loss
+        camp.log_event(f, f"КАЗНОКРАДСТВО: {who} украл{'а' if inst.origin in OFFICER and OFFICER[inst.origin].female else ''} {loss} золота")
+    elif key == "rudeness":
+        others = [x for x in camp.alive() if x not in (f, "goblin")]
+        if others and f != "goblin":
+            x = camp.rng.choice(others)
+            camp.change_relation(f, x, -10)
+            camp.log_event(f, f"ГРУБОСТЬ: {who} оскорбил посла, отношения с {FACTION[x].short} -10")
+    elif key == "envy":
+        others = [o for o in r.council if o != inst.origin and OFFICER[o].rank > 0]
+        if others:
+            o = camp.rng.choice(others)
+            camp.change_loyalty(o, -10)
+            camp.log_event(f, f"ЗАВИСТЬ: {who} интригует против {OFFICER[o].name}")
+    elif key == "drink":
+        r.ap_penalty += 1
+        camp.log_event(f, f"ПЬЯНСТВО: {who} проспал совет, -1 ОД")
+    elif key == "cowardice":
+        if inst.origin in OFFICER:
+            camp.buff(inst.origin, 0.85, 2)
+        camp.log_event(f, f"ТРУСОСТЬ: отряд {who} пал духом")
+    elif key == "blabber":
+        others = [x for x in camp.alive() if x != f]
+        if others:
+            x = camp.rng.choice(others)
+            camp.realms[x].revealed[f] = camp.turn
+            camp.draw_cards(x, 1)
+            camp.log_event(f, f"БОЛТЛИВОСТЬ: {who} выболтал тайны - {FACTION[x].short} всё знают")
+    elif key == "gambling":
+        if camp.rng.random() < 0.65:
+            loss = min(50, camp.gold[f])
+            camp.gold[f] -= loss
+            camp.log_event(f, f"АЗАРТ: {who} проиграл {loss} золота казны")
+        else:
+            camp.gold[f] += 25
+            camp.log_event(f, f"АЗАРТ: {who} выиграл 25 золота")
+    elif key == "cruelty":
+        city = camp.officer_city.get(inst.origin)
+        if city and camp.owner[city] == f:
+            _prosper(camp, city, -1)
+            camp.log_event(f, f"ЖЕСТОКОСТЬ: {who} лютует в {CITY[city].name}, процветание -1")
+    elif key == "pride":
+        if inst.origin in OFFICER:
+            camp.change_loyalty(inst.origin, -8)
+        camp.log_event(f, f"ГОРДЫНЯ: {who} обижен на совет")
+    r.discard.append(inst)
+
+
 def on_draw(camp, f: str, inst) -> None:
     r = camp.realms[f]
     key = inst.key
+    if inst.card.tier == "vice":
+        _vice(camp, f, inst)
+        return
     if key == "fire":
         loss = min(150, camp.gold[f] // 4)
         camp.gold[f] -= loss

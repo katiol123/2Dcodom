@@ -104,6 +104,7 @@ class Slot:
     team: int
     key: str
     look: str
+    tag: int = 0                # campaign battles: the troop this unit stands for
 
 
 def look_name(key: str, team_key: str, spec: Look) -> str:

@@ -16,7 +16,7 @@ class CardDataTest(unittest.TestCase):
         for key, c in CARDS.items():
             self.assertTrue(c.name and c.text, key)
             self.assertTrue(0 <= c.cost <= 3, key)
-            if not c.unplayable and not (c.on_draw and c.tier == "curse" and key != "debt"):
+            if not c.unplayable and not c.reaction and not (c.on_draw and c.tier == "curse" and key != "debt"):
                 self.assertIn(key, EFFECTS, key)
             self.assertFalse(" - " in c.name, key)
         tiers = Counter(c.tier for c in CARDS.values())
@@ -64,7 +64,8 @@ class CardDataTest(unittest.TestCase):
             weak = [UNIQUE_HOLDER[k] for k in cards if presence(OFFICER[UNIQUE_HOLDER[k]]) < median]
             self.assertGreaterEqual(len(weak), 2, f)                     # weak officers with unique cards
             best = sorted(offs[1:], key=presence, reverse=True)[:3]
-            self.assertTrue(any(all(CARDS[k].tier in ("junk", "basic") for k in PERSONAL[o.key]) for o in best), f)
+            self.assertTrue(any(all(CARDS[k].tier in ("junk", "basic", "vice") for k in PERSONAL[o.key]) for o in best),
+                            f)
 
 
 class CampaignCardsTest(unittest.TestCase):
@@ -206,14 +207,83 @@ class CampaignCardsTest(unittest.TestCase):
         c._start_turn("aldern")
         self.assertEqual(c.loyalty[o], loy - 1)
 
+    def test_answers_purge_and_fate(self):
+        c = self.c
+        # an answer card cannot be played by hand, but goes off when the city is stormed
+        r = c.realms["aldern"]
+        inst = c._inst("sortie", "base")
+        r.hand.append(inst)
+        self.assertEqual(c.can_play("aldern", inst)[1], "ЭТО ОТВЕТ: СРАБОТАЕТ В ЧУЖОЙ ХОД")
+        c.current = c.order.index("goblin")
+        target = "hartwell"
+        attackers = [o.key for o in c.officers_in("shroomhole")]
+        for o in attackers:
+            c.squads[o] = [c._new("goblin") for _ in range(3)]
+            c.ready.add(o)
+        c.answer_hook = lambda camp, b, cards: cards[0]                 # the player answers
+        msg = c.attack("goblin", attackers[:1], target)
+        self.assertIn("ВЫЛАЗКА", msg)
+        self.assertNotIn(inst, r.hand)
+        # intercept: curses never reach the deck
+        c.realms["sylvan"].hand.append(c._inst("intercept", "base"))
+        n = len(c.realms["sylvan"].draw)
+        self.assertEqual(c.add_curse("sylvan", "unrest", 2, source="aldern"), 0)
+        self.assertEqual(len(c.realms["sylvan"].draw), n)
+        # purge burns a card for good and draws another
+        c.current = c.order.index("aldern")
+        c.realms["aldern"].ap = 5
+        curse = c._inst("unrest", "curse")
+        purge = c._inst("purge", "threshold")
+        r.hand += [curse, purge]
+        ids = {x.id for x in r.all_cards()}
+        ok, _ = c.play("aldern", purge, [curse.id])
+        self.assertTrue(ok)
+        self.assertNotIn(curse.id, {x.id for x in r.all_cards()})
+        self.assertLess(len({x.id for x in r.all_cards()} & ids), len(ids))
+        # who survives a lost battle depends on the officer's logistics and on the margin
+        o = OFFICERS["aldern"][1].key
+        self.assertGreater(c.fate_odds(o, True, 0.5), c.fate_odds(o, False, 0.5))
+        self.assertGreater(c.fate_odds(o, False, 0.9), c.fate_odds(o, False, 0.2))
+        low = min(OFFICERS["aldern"], key=lambda x: x.stat("ЛОГИСТИКА")).key
+        high = max(OFFICERS["aldern"], key=lambda x: x.stat("ЛОГИСТИКА")).key
+        self.assertGreater(c.fate_odds(high, False, 0.5), c.fate_odds(low, False, 0.5))
+
+    def test_vices(self):
+        from game.cards import VICES, VICE_OF
+        held = Counter(k for cards in PERSONAL.values() for k in cards if CARDS[k].tier == "vice")
+        self.assertEqual(len(VICES), 10)
+        self.assertTrue(all(held[v] >= 3 for v in VICES))
+        self.assertTrue(all(OFFICER[o].rank > 0 for o in VICE_OF))
+        c = self.c
+        r = c.realms["aldern"]
+        holder = next(o for o in VICE_OF if o.startswith("aldern:") and VICE_OF[o][0] != "sloth")
+        c.gold["aldern"] = 500
+        for v in VICES:                                                 # each one goes off and stays
+            inst = c._inst(v, holder)
+            r.draw.append(inst)
+            c._draw("aldern", 1)
+            self.assertTrue(inst in r.hand if v == "sloth" else inst in r.discard, v)
+        self.assertLess(c.gold["aldern"], 500)
+        self.assertGreaterEqual(r.ap_penalty, 1)
+
+    def test_council_loyalty(self):
+        c = self.c
+        r = c.realms["aldern"]
+        gone, new = r.council[2], next(o.key for o in c.officers_of("aldern") if o.key not in r.council)
+        c.loyalty[gone] = c.loyalty[new] = 50
+        c.set_council("aldern", [x if x != gone else new for x in r.council])
+        self.assertEqual(c.loyalty[new], 58)
+        self.assertEqual(c.loyalty[gone], 30)                           # the slight hurts more
+
     def test_storm(self):
         c = self.c
         target = "shroomhole"                                           # a goblin lair next to Hartwell
         self.assertIn("hartwell", neighbors(target))
         offs = [o.key for o in c.officers_in("hartwell")]
         for o in offs:
-            c.squads[o] = [c._new("knight") for _ in range(6)]
+            c.squads[o] = [c._new("paladin") for _ in range(7)]
             c.ready.add(o)
+        c.realms["goblin"].hand = []                                    # no answers from the lair
         inst = self._give("aldern", "assault")
         chosen = [target, tuple(offs[:3])]
         c.rng.seed(1)
@@ -268,6 +338,32 @@ class CardScreenTest(unittest.TestCase):
             frame(pos)
             m.handle(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=pos, button=button), pos)
 
+        def settle(screen, watch=False):
+            """Let a background action finish, answering whatever it asks."""
+            import time
+            from game.match import battle_outcome, headless_campaign_world
+            seen = set()
+            for _ in range(20000):
+                screen.update(0.05, (0, 0))
+                screen.draw(surf)
+                req = screen.runner.request
+                if req:
+                    seen.add(req["kind"])
+                    if req["kind"] == "ask":
+                        screen.runner.reply("watch" if watch else "calc")
+                    elif req["kind"] == "answer":
+                        screen.runner.reply(req["cards"][0])
+                    else:
+                        w = headless_campaign_world(req["battle"])
+                        while w.winner is None and w.time < 240:
+                            w.step(1 / 60)
+                        battle_outcome(w, req["battle"], __import__("random").Random(1))
+                        screen.finish_battle()
+                if not screen.runner.busy() and not screen.running:
+                    return seen
+                time.sleep(0.0005)
+            self.fail("the background action never finished")
+
         hand = m.camp.realms["aldern"].hand
         hand.append(m.camp._inst("tax", "base"))
         i = len(hand) - 1
@@ -283,6 +379,7 @@ class CardScreenTest(unittest.TestCase):
         sx, sy = m._to_screen(c.x, c.y)
         gold = m.camp.gold["aldern"]
         click((sx, sy - 4))
+        settle(m)
         self.assertIsNone(m.table.play)
         self.assertGreater(m.camp.gold["aldern"], gold)
         # council: free a seat with its X, then fill it from the list
@@ -307,6 +404,7 @@ class CardScreenTest(unittest.TestCase):
         self.assertFalse(m.table.council_open)
         # end of turn: the others play, the chronicle opens, our turn again
         click(m.table.end_rect().center)
+        settle(m)
         self.assertTrue(m.table.chronicle_open)
         self.assertEqual(m.camp.whose_turn(), "aldern")
         self.assertEqual(m.camp.turn, 2)
@@ -319,7 +417,12 @@ class CardScreenTest(unittest.TestCase):
         s.draw(surf)
         pos = s.table.end_rect().center
         s.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=pos, button=1), pos)
-        self.assertEqual(s.camp.turn, 2)
+        kinds = set()
+        for _ in range(3):                                              # rounds; watch the AI battles
+            kinds |= settle(s, watch=True)
+            s.table.next_round()
+        settle(s, watch=True)
+        self.assertEqual(s.camp.turn, 5)
 
 
 if __name__ == "__main__":

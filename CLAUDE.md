@@ -54,6 +54,12 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   `_CARDS` + `@effect` + AI value + put it in a pool/unique list; then `python -m game.cardsim 64 40` and check
   per-realm cities/income and the card's play rate; regenerate docs/CARDS.md tables.
 - City prosperity (`PROSPERITY` in factions.py, 1..10) sets tax income; AI realms must stay pygame-free.
+- Storms: `Campaign.attack` -> defender's answer card (`_answer`) -> `battle_hook` (real battle) or `_formula` ->
+  `_settle` (fallen roll `fate_odds`: wounded/escaped/dead). The map runs card plays and turns in a worker thread
+  (`campaign_runner.Runner`); a storm involving the player (or an AI storm he chose to watch) asks the screen to
+  fight it (`battle.py` builds it with `match.campaign_battle`, units carry `tag` = troop id). Tests fight such
+  battles with `match.headless_campaign_world`.
+- Courses (`COURSES` in cards.py) set the 5 base cards; vices (`VICE_OF`) are extra personal cards of 30 officers.
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

@@ -80,6 +80,28 @@ class Realm:
         return self.draw + self.hand + self.discard
 
 
+@dataclass
+class Battle:
+    """One storm: who, where, with what - and, once fought, who won and who fell."""
+    attacker: str
+    defender: str
+    city: str
+    officers: List[str]
+    defenders: List[str]
+    mult: float = 1.0
+    seed: int = 0
+    def_mult: float = 1.0
+    withdrawn: bool = False
+    att: List[Tuple[str, "Troop"]] = field(default_factory=list)
+    deff: List[Tuple[Optional[str], "Troop"]] = field(default_factory=list)
+    militia: int = 0
+    a: float = 0.0
+    d: float = 0.0
+    p: float = 0.0
+    att_won: Optional[bool] = None
+    fallen: set = field(default_factory=set)              # troop ids
+
+
 def _pair(a: str, b: str) -> frozenset:
     return frozenset((a, b))
 
@@ -117,6 +139,8 @@ class Campaign:
                                           "paid": Counter(), "courses": Counter()}
         self.earned: Dict[str, int] = {}                      # gold earned this turn
         self.income: Dict[str, List[int]] = {}                # gold earned in the last turns
+        self.battle_hook = None     # (camp, Battle) -> True if the battle was fought for real
+        self.answer_hook = None     # (camp, Battle, cards) -> card the player answers with, or None
         self.turn = 1
         self.order: List[str] = [f.key for f in ALL_FACTIONS]
         if player in self.order:                              # the player moves first
@@ -131,7 +155,7 @@ class Campaign:
             from .campaign_ai import choose_council
             self.realms[f.key].council = choose_council(self, f.key)
             for o in self.realms[f.key].council:
-                self.loyalty[o] = min(100, self.loyalty[o] + 10)
+                self.loyalty[o] = min(100, self.loyalty[o] + 8)
             self._build_deck(f.key)
             self._draw(f.key, hand_size(self.realms[f.key].council))
         for a, b in itertools.combinations([f.key for f in ALL_FACTIONS], 2):
@@ -209,7 +233,7 @@ class Campaign:
         return self.player is not None and self.owner[city] == self.player
 
     def alive(self) -> List[str]:
-        return [f for f in self.order if self.realms[f].alive]
+        return [f for f in self.order if f in self.realms and self.realms[f].alive]
 
     def whose_turn(self) -> str:
         return self.order[self.current]
@@ -451,9 +475,9 @@ class Campaign:
                 r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(k, "threshold"))
         for o in gone:
             if self.allegiance.get(o) == faction:
-                self.change_loyalty(o, -15)
+                self.change_loyalty(o, -20)
         for o in new:
-            self.change_loyalty(o, 10)
+            self.change_loyalty(o, 8)
         return True
 
     def can_change_course(self, faction: str, course: str) -> Tuple[bool, str]:
@@ -490,6 +514,14 @@ class Campaign:
         from .cards import intercepts
         r = self.realms[faction]
         got = 0
+        if source and source != faction and key not in ("debt", "fatigue", "strife", "war_fatigue"):
+            stop = self.answers(faction, "cursed")
+            if stop:                                          # the courier never arrives
+                r.hand.remove(stop[0])
+                r.discard.append(stop[0])
+                self.stats["played"]["intercept"] += 1
+                self.log_event(faction, f"ПЕРЕХВАТ ГОНЦА: {CARDS[key].name} не дошла")
+                return 0
         for _ in range(n):
             catch = max(0.35 if intercepts(r.council) else 0.0, 0.5 if r.course == "intrigue" else 0.0)
             if key not in ("debt", "fatigue", "strife", "war_fatigue") and self.rng.random() < catch:
@@ -678,6 +710,8 @@ class Campaign:
             return False, "СЕЙЧАС НЕ ВАШ ХОД"
         if card.unplayable:
             return False, "ЭТУ КАРТУ НЕЛЬЗЯ СЫГРАТЬ"
+        if card.reaction:
+            return False, "ЭТО ОТВЕТ: СРАБОТАЕТ В ЧУЖОЙ ХОД"
         if card.cost > r.ap:
             return False, "НЕ ХВАТАЕТ ОД"
         if card.gold > self.gold[faction]:
@@ -739,6 +773,175 @@ class Campaign:
             return 0.0
         return a ** BATTLE_K / (a ** BATTLE_K + d ** BATTLE_K)
 
+    def attack(self, faction: str, officers: Sequence[str], city: str, mult: float = 1.0) -> str:
+        """Storm a city. The defender may answer with a card from his hand; then the battle is fought
+        for real (``battle_hook``, when the player is involved or wants to watch) or worked out from
+        the forces. Returns the chronicle line."""
+        defender = self.owner[city]
+        for o in officers:
+            self.ready.discard(o)
+        b = Battle(faction, defender, city, list(officers), [o.key for o in self.officers_in(city)],
+                   mult=mult, seed=self.rng.randrange(1 << 30))
+        answer = self._answer(b)
+        if b.withdrawn:
+            return self._withdraw(b, answer)
+        self._forces(b)
+        if not (self.battle_hook and self.battle_hook(self, b)):
+            self._formula(b)
+        return self._settle(b, answer)
+
+    def _forces(self, b: "Battle") -> None:
+        city = b.city
+        b.att = [(o, t) for o in b.officers for t in self.squads[o]]
+        b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
+        b.a = self.attack_power(b.attacker, b.officers, city, b.mult)
+        b.d = self.defense_power(city) * b.def_mult
+        if (b.defender, b.attacker) in self.grudge:
+            b.d *= 1.3
+        b.p = self.win_chance(b.a, b.d)
+        troops = sum(t.power for _, t in b.deff)
+        b.militia = max(0, min(8, int((b.d - troops) / ROSTER["militia"].cost)))   # walls and townsfolk
+
+    def _formula(self, b: "Battle") -> None:
+        b.att_won = self.rng.random() < b.p
+        ratio = min(b.a, b.d) / max(b.a, b.d, 1)
+        w_loss = max(0.05, min(0.85, 0.6 * ratio ** 1.3 * self.rng.uniform(0.7, 1.3)))
+        l_loss = self.rng.uniform(0.6, 0.95)
+        att_loss, def_loss = (w_loss, l_loss) if b.att_won else (l_loss * 0.7, w_loss)
+        b.fallen = self._pick(b.att, att_loss) | self._pick(b.deff, def_loss)
+
+    def _pick(self, troops, frac: float) -> set:
+        order = list(troops)
+        self.rng.shuffle(order)
+        goal, lost, out = sum(t.power for _, t in order) * frac, 0, set()
+        for _, t in order:
+            if lost >= goal:
+                break
+            out.add(t.id)
+            lost += t.power
+        return out
+
+    def fate_odds(self, officer: Optional[str], won: bool, ratio: float) -> float:
+        """Chance that a fallen warrior lives: the winners' wounded are nursed back (better under an
+        officer with good ЛОГИСТИКА); the losers' wounded may slip away to a neighbouring own city
+        (also ЛОГИСТИКА, and harder the more crushing the defeat)."""
+        log = OFFICER[officer].stat("ЛОГИСТИКА") if officer else 8
+        if won:
+            return min(0.6, 0.2 + 0.015 * log)
+        return min(0.5, (0.1 + 0.015 * log) * (0.5 + 0.5 * ratio))
+
+    def _settle(self, b: "Battle", answer: str) -> str:
+        city, name = b.city, CITY[b.city].name
+        faction, defender = b.attacker, b.defender
+        self.stats["battles"][faction] += 1
+        r = self.realms.get(faction)
+        if r and r.course == "war":                           # war fatigue: every storm
+            self.add_curse(faction, "war_fatigue")
+            self.log_event(faction, "ВОЕННАЯ УСТАЛОСТЬ")
+        won = bool(b.att_won)
+        self.change_relation(faction, defender, -20 if won else -12)
+        for f in self.alive():
+            if f not in (faction, defender):
+                self.change_relation(faction, f, -2)
+        ratio = min(b.a, b.d) / max(b.a, b.d, 1)
+        dead = wounded = fled = 0
+        refuge = [n for n in neighbors(city) if self.owner[n] == defender]
+        escapees: List[Tuple[Optional[str], Troop]] = []
+        for side, troops in (("att", b.att), ("def", b.deff)):
+            side_won = won if side == "att" else not won
+            for o, t in troops:
+                if t.id not in b.fallen:
+                    continue
+                if self.rng.random() < self.fate_odds(o or (b.defenders[0] if b.defenders else None), side_won, ratio):
+                    if side_won or side == "att":
+                        wounded += 1                         # healed in the ranks (stormers are home)
+                        continue
+                    if refuge:
+                        escapees.append((o, t))
+                        fled += 1
+                        self._remove(o, city, t)
+                        continue
+                self._remove(o, city, t)
+                dead += 1
+        tail = f"; павших {dead}, раненых {wounded}" + (f", бежали {fled}" if fled else "") + answer
+        if not won:
+            for o in b.officers:
+                self.change_loyalty(o, -5)
+            for o, t in escapees:                             # (defenders won: nobody had to run)
+                self.free[city].append(t)
+            return f"штурм {name} отбит ({int(b.a)} против {int(b.d)}){tail}"
+        for t in list(self.free[city]):                       # the rest of the garrison runs if it can
+            self.free[city].remove(t)
+            if refuge:
+                escapees.append((None, t))
+        self._take(faction, city, b.defenders)
+        for o, t in escapees:
+            if o and self.allegiance.get(o) == defender and self.officer_city.get(o) in refuge:
+                self.squads[o].append(t)
+            elif refuge:
+                self.free[self.rng.choice(refuge)].append(t)
+        self.move(b.officers, city)
+        for o in b.officers:
+            self.change_loyalty(o, 3)
+        return f"{name} взят ({int(b.a)} против {int(b.d)}){tail}"
+
+    def _remove(self, officer: Optional[str], city: str, t: Troop) -> None:
+        for lst in ((self.squads[officer],) if officer else ()) + (self.free[city],):
+            if t in lst:
+                lst.remove(t)
+                return
+
+    # --- answers ----------------------------------------------------------------------------
+    def answers(self, faction: str, trigger: str) -> List[CardInst]:
+        return [c for c in self.realms[faction].hand if c.card.reaction == trigger] if faction in self.realms else []
+
+    def _answer(self, b: "Battle") -> str:
+        """The defender may play one answer card from his hand."""
+        cards = self.answers(b.defender, "attacked")
+        if not cards:
+            return ""
+        if b.defender == self.player and self.answer_hook:
+            pick = self.answer_hook(self, b, cards)
+        elif b.defender == self.player:
+            pick = None
+        else:
+            from .campaign_ai import choose_answer
+            pick = choose_answer(self, b, cards)
+        if pick is None:
+            return ""
+        r = self.realms[b.defender]
+        r.hand.remove(pick)
+        r.discard.append(pick)
+        self.stats["played"][pick.key] += 1
+        k = pick.key
+        if k == "ambush":
+            for o in b.officers:
+                losses = self._pick([(o, t) for t in self.squads[o]], 0.15)
+                self.squads[o] = [t for t in self.squads[o] if t.id not in losses]
+        elif k == "sortie":
+            b.def_mult *= 1.3
+        elif k == "reinforce":
+            cands = [o for n in neighbors(b.city) if self.owner[n] == b.defender for o in self.officers_in(n)]
+            if cands:
+                o = max(cands, key=lambda x: self.power(x.key)).key
+                self.officer_city[o] = b.city
+                b.defenders.append(o)
+        elif k == "withdraw":
+            b.withdrawn = True
+        return f"; ответ: {pick.card.name}"
+
+    def _withdraw(self, b: "Battle", answer: str) -> str:
+        refuge = [n for n in neighbors(b.city) if self.owner[n] == b.defender]
+        dest = max(refuge, key=lambda c: self.defense_power(c)) if refuge else None
+        if dest:
+            for o in b.defenders:
+                self.officer_city[o] = dest
+            self.free[dest].extend(self.free[b.city])
+        self.free[b.city] = []
+        self._take(b.attacker, b.city, [] if dest else b.defenders)
+        self.move(b.officers, b.city)
+        return f"{CITY[b.city].name} сдан без боя{answer}"
+
     def _losses(self, troops: List[Tuple[Optional[str], Optional[str], Troop]], frac: float) -> None:
         total = sum(t.power for _, _, t in troops)
         goal = total * frac
@@ -749,52 +952,6 @@ class Campaign:
                 break
             (self.squads[o] if o else self.free[c]).remove(t)
             lost += t.power
-
-    def attack(self, faction: str, officers: Sequence[str], city: str, mult: float = 1.0) -> str:
-        """Storm a city. Returns the chronicle line."""
-        defender = self.owner[city]
-        a = self.attack_power(faction, officers, city, mult)
-        d = self.defense_power(city)
-        if (defender, faction) in self.grudge:
-            d *= 1.3
-        p = self.win_chance(a, d)
-        win = self.rng.random() < p
-        for o in officers:
-            self.ready.discard(o)
-        defenders = [o.key for o in self.officers_in(city)]
-        att_troops = [(o, None, t) for o in officers for t in self.squads[o]]
-        def_troops = [(o, None, t) for o in defenders for t in self.squads[o]] + \
-                     [(None, city, t) for t in self.free[city]]
-        ratio = min(a, d) / max(a, d, 1)
-        w_loss = max(0.05, min(0.85, 0.6 * ratio ** 1.3 * self.rng.uniform(0.7, 1.3)))
-        l_loss = self.rng.uniform(0.6, 0.95)
-        self.stats["battles"][faction] += 1
-        r = self.realms.get(faction)
-        if r and r.course == "war":
-            r.storms += 1
-            if r.storms >= 1:
-                r.storms = 0
-                self.add_curse(faction, "war_fatigue")
-                self.log_event(faction, "ВОЕННАЯ УСТАЛОСТЬ")
-        self.change_relation(faction, defender, -20 if win else -12)
-        for f in self.alive():
-            if f not in (faction, defender):
-                self.change_relation(faction, f, -2)
-        name = CITY[city].name
-        if not win:
-            self._losses(att_troops, l_loss * 0.7)               # the stormers fall back home
-            self._losses(def_troops, w_loss)
-            for o in officers:
-                self.change_loyalty(o, -5)
-            return f"штурм {name} отбит ({int(a)} против {int(d)})"
-        self._losses(att_troops, w_loss)
-        self._losses(def_troops, l_loss)
-        self.free[city] = []                                     # the garrison is gone
-        self._take(faction, city, defenders)
-        self.move(officers, city)
-        for o in officers:
-            self.change_loyalty(o, 3)
-        return f"{name} взят ({int(a)} против {int(d)})"
 
     def _take(self, faction: str, city: str, defenders: Sequence[str]) -> None:
         old = self.owner[city]

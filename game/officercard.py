@@ -212,7 +212,7 @@ class OfficerCard:
         y += 5
         for line in self.wrap(bio(o), 148):
             font.draw(s, line, x, y, "#e6dfd0")
-            y += 8
+            y += 7
         # his squad, unit by unit
         y = r.bottom - 42
         font.draw(s, "ОТРЯД:", x - 110, y + 4, "#c0cbdc")

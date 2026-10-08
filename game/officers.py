@@ -318,4 +318,7 @@ def bio(o: Officer) -> str:
     quirks = _GOBLIN_QUIRK + _QUIRK[:4] if o.faction == "goblin" else _QUIRK
     if len(parts) < 3 or r.random() < 0.35:
         parts.append(r.choice(quirks))
+    from .cards import VICE_OF, VICE_TRAIT
+    for v in VICE_OF.get(o.key, ()):
+        parts.append(VICE_TRAIT[v])
     return _gender(" ".join(parts), o.female)

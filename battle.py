@@ -165,6 +165,14 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
 
     view = (0, 0, scale)
     worldmap = None
+    siege = None                                      # a campaign storm being fought for real
+    import random as _random
+    fate = _random.Random(seed)
+
+    def finish_siege(w):
+        from game.match import battle_outcome
+        battle_outcome(w, siege, fate)
+        worldmap.finish_battle()
     on_map = not (args.auto or args.blue or args.red)
     select = None                                     # faction choice comes first, then the world map
     picking = on_map
@@ -214,6 +222,16 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                     world = start(seed)
                     paused = False
                 continue
+            if ev.type == pygame.KEYDOWN and siege is not None:
+                if ev.key == pygame.K_SPACE:
+                    paused = not paused
+                elif ev.key == pygame.K_ESCAPE:                  # skip to the outcome
+                    while world.winner is None and world.time < 240:
+                        world.step(step)
+                    world.end_time = world.time - 10
+                elif ev.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
+                    speed = {pygame.K_1: 0.5, pygame.K_2: 1.0, pygame.K_3: 2.0, pygame.K_4: 4.0}[ev.key]
+                continue
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_SPACE:
                     paused = not paused
@@ -242,6 +260,14 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                 worldmap = WorldMapScreen(renderer, lambda: loading("", 0, 1, title="РИСУЕМ КАРТУ МИРА..."))
             worldmap.update(dt, mouse)
             worldmap.draw(logical)
+            b = worldmap.battle_request()
+            if b is not None and siege is None:            # a storm to fight for real
+                from game.match import campaign_battle
+                siege = b
+                world, metas = campaign_battle(b, factory, lambda name, i, n: loading(name, i, n,
+                                                                                      title="К БОЮ..."))
+                renderer.add_metas(metas)
+                on_map, paused, speed = False, False, 1.0
         elif world is None:
             menu.update(dt, mouse)
             menu.draw(logical)
@@ -252,9 +278,20 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                     world.step(step)
                     acc -= step
                 sfx.play(world.sounds)
-            if world.winner is not None and world.time - world.end_time > 7.0:
+            if siege is not None:
+                if world.winner is not None and world.time - world.end_time > 3.0:
+                    finish_siege(world)
+                    world, siege, on_map = None, None, True
+                    continue
+            elif world.winner is not None and world.time - world.end_time > 7.0:
                 seed += 1
                 world = start(seed)                       # rematch: same squads, new faces
+            if siege is not None:
+                from game.factions import CITY, FACTION
+                renderer.hint = (f"{FACTION[siege.attacker].short} (СЛЕВА) ШТУРМУЕТ {CITY[siege.city].name}, "
+                                 f"ЗАЩИЩАЕТ {FACTION[siege.defender].short}.  ESC - ИТОГ, 1-4 СКОРОСТЬ")
+            else:
+                renderer.hint = "ПРОБЕЛ-ПАУЗА  R-РЕВАНШ  M-СОСТАВ  1-4 СКОРОСТЬ"
             renderer.draw(world, logical, real, paused, speed)
         view = present(logical, screen)
         pygame.display.flip()
