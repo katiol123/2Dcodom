@@ -175,9 +175,11 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         from game.match import battle_outcome
         battle_outcome(w, siege, fate)
         worldmap.finish_battle()
-    on_map = not (args.auto or args.blue or args.red)
-    select = None                                     # faction choice comes first, then the world map
-    picking = on_map
+    titling = not (args.auto or args.blue or args.red)  # the title screen: new / continue / quick battle
+    title = None
+    on_map = False
+    select = None                                     # a new campaign: faction choice, then the world map
+    picking = False
     if args.auto:
         world = start(seed)
     while True:
@@ -185,11 +187,11 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         real += dt
         if args.quit_after and real > args.quit_after:
             pygame.quit()
-            where = (f"battle t={world.time:.1f}s" if world else "select" if picking
+            where = (f"battle t={world.time:.1f}s" if world else "title" if titling else "select" if picking
                      else "map" if on_map else "menu")
             print(f"ok: {where} seed={seed} sfx={'on' if sfx.ok else 'off'}")
             return 0
-        _audio.music(picking or on_map)                  # the tune plays on the map, not in battle
+        _audio.music(titling or picking or on_map)                  # the tune plays on the map, not in battle
         mx, my = pygame.mouse.get_pos()
         mouse = ((mx - view[0]) // view[2], (my - view[1]) // view[2])
         for ev in pygame.event.get():
@@ -202,23 +204,28 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                 screen = (pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if fullscreen
                           else pygame.display.set_mode((W * scale, H * scale)))
                 continue
-            if picking:
-                if select and select.handle(ev, mouse) == "quit":
+            if titling:
+                if title and title.handle(ev, mouse) == "quit":
                     pygame.quit()
                     return 0
                 continue
+            if picking:
+                if select and select.handle(ev, mouse) == "quit":
+                    picking, select, titling = False, None, True      # ESC: back to the title
+                continue
             if on_map:
                 action = worldmap.handle(ev, mouse) if worldmap else None
-                if action == "quit":
-                    pygame.quit()
-                    return 0
-                if action == "battle":
-                    on_map = False
+                if action in ("quit", "menu"):
+                    if worldmap.runner.busy():
+                        worldmap._say("ДОЖДИСЬ КОНЦА ХОДА", "#fee761")
+                    else:
+                        worldmap.autosave(force=True)
+                        worldmap, on_map, titling = None, False, True
                 continue
             if world is None:
                 action = menu.handle(ev, mouse)
                 if action == "back":
-                    on_map = True
+                    titling = True
                     continue
                 if action == "start":
                     seed += 1
@@ -245,7 +252,25 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                     world = None
                 elif ev.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
                     speed = {pygame.K_1: 0.5, pygame.K_2: 1.0, pygame.K_3: 2.0, pygame.K_4: 4.0}[ev.key]
-        if picking:
+        if titling:
+            if title is None:
+                from game.title import TitleScreen
+                title = TitleScreen(renderer, lambda: loading("", 0, 1, title="РИСУЕМ КАРТУ МИРА..."))
+            title.update(dt, mouse)
+            title.draw(logical)
+            if title.result:
+                choice, saved = title.result, title.saved
+                title, titling = None, False
+                if choice == "new":
+                    picking = True
+                elif choice == "battle":
+                    pass                                      # the squad builder (world is None)
+                else:
+                    from game.mapview import WorldMapScreen
+                    worldmap = WorldMapScreen(renderer, campaign=saved)
+                    worldmap.autosaving = True
+                    on_map = True
+        elif picking:
             if select is None:
                 from game.select import SelectScreen
                 select = SelectScreen(renderer, lambda: loading("", 0, 1, title="РИСУЕМ КАРТУ МИРА..."))
@@ -255,8 +280,9 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
                 from game.campaign import Campaign
                 from game.mapview import WorldMapScreen
                 worldmap = WorldMapScreen(renderer, campaign=Campaign(select.result[1]))
+                worldmap.autosaving = True
                 worldmap.flash = 1.0                      # the select screen's white flash fades into the map
-                picking, select = False, None
+                picking, select, on_map = False, None, True
         elif on_map:
             if worldmap is None:
                 from game.mapview import WorldMapScreen

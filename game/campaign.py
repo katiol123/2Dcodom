@@ -118,6 +118,24 @@ def _pair(a: str, b: str) -> frozenset:
 
 
 class Campaign:
+    HOOKS = ("battle_hook", "answer_hook", "diplo_hook")
+
+    def __getstate__(self):
+        """Saved games (saves.py): hooks belong to the screen, id counters become plain numbers."""
+        st = dict(self.__dict__)
+        for h in self.HOOKS:
+            st[h] = None
+        for k in ("_ids", "_cids"):
+            n = next(st[k])                                # peeks one id: harmless, ids only need to be new
+            st[k] = n
+            setattr(self, k, itertools.count(n))
+        return st
+
+    def __setstate__(self, st):
+        for k in ("_ids", "_cids"):
+            st[k] = itertools.count(st[k])
+        self.__dict__.update(st)
+
     def __init__(self, player: Optional[str] = None, seed: int = 1):
         """``player`` is the faction the human plays, or None for a spectator."""
         self.player = player

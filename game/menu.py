@@ -317,7 +317,7 @@ class Menu:
                                 border="#8b9bb4"), b.rect.topleft)
             f.draw(s, b.label, b.rect.centerx, b.rect.centery, "#5a6988" if disabled else "#ffffff",
                    scale=b.scale, anchor="center")
-        f.draw(s, "ЛКМ - В АКТИВНЫЙ ОТРЯД   ПКМ - В ДРУГОЙ   КЛИК ПО БОЙЦУ - УБРАТЬ   ESC - КАРТА", W // 2, H - 8,
+        f.draw(s, "ЛКМ - В АКТИВНЫЙ ОТРЯД   ПКМ - В ДРУГОЙ   КЛИК ПО БОЙЦУ - УБРАТЬ   ESC - МЕНЮ", W // 2, H - 8,
                "#8b9bb4", anchor="midtop")
 
     def _draw_squad(self, s: pygame.Surface, team: int) -> None:

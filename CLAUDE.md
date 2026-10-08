@@ -44,8 +44,12 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Inspect visually: record with `--record`, then `ffmpeg ... -vf "fps=6,tile=3x3"` to look at frame sequences.
 
 ## World map (game/factions.py, worldgen.py, mapview.py)
-- `battle.py` starts on the faction select (`select.py`: banners, spectator = Chronicler), then the world map;
-  "БЫСТРЫЙ БОЙ" opens the squad builder, ESC there returns to the map. Wheel zooms the map out only (`ZOOMS`).
+- `battle.py` starts on the title screen (`title.py`): НАЧАТЬ -> faction select (`select.py`: banners, spectator =
+  Chronicler; ДРУГ/ВРАГ hover shows the *starting* lore of the relation) -> world map; ПРОДОЛЖИТЬ loads the
+  autosave (`saves.py`: pickled Campaign, hooks dropped in `__getstate__`, newcomers re-registered; written each
+  new round while the runner is idle and on leaving the map); БЫСТРЫЙ БОЙ = squad builder. ESC / МЕНЮ on the map
+  and ESC in the builder return to the title. In-game diplomacy shows only live reasons (`diploui.live_reason`),
+  never the starting lore. Wheel zooms the map out only (`ZOOMS`).
 - Officers (`officers.py`): 12-22 per faction, first = leader; leadership caps squad power (sum of unit `cost`),
   6 stats 1..20, `bio()` built from faction origin + best/worst stat + quirk (`{м|ж}` gender forms).
 - `campaign.py` (pygame-free): gold, troops standing in cities (`free`), officers' squads (max 7), hire/assign

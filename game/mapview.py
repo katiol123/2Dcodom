@@ -4,7 +4,7 @@
 * Click a city - its owner, recruit pool and roads.  Click a faction on the
   bottom bar - its lore, leader, proposed mechanics and relations.
 * ДИПЛОМАТИЯ - relation matrix of the eight playable factions (goblins: always war).
-* БЫСТРЫЙ БОЙ - the squad builder (returns "battle").
+* МЕНЮ / ESC - back to the title screen (returns "quit"; the campaign is autosaved).
 
 Turns, diplomacy actions and attacks come later; this screen already holds
 everything they need (cities, owners, roads, pools, relations).
@@ -347,10 +347,10 @@ class WorldMapScreen:
         self.hover_rel: Optional[Tuple[str, str]] = None
         self.keys: Dict[int, bool] = {}
         self.buttons = [
-            Button((W - 236, 2, 34, 11), "СОВЕТ", "council", "#124e89"),
-            Button((W - 200, 2, 44, 11), "ХРОНИКА", "chronicle", "#5a4a1a"),
-            Button((W - 154, 2, 74, 11), "ДИПЛОМАТИЯ", "diplomacy"),
-            Button((W - 78, 2, 76, 11), "БЫСТРЫЙ БОЙ", "battle", "#a22633"),
+            Button((W - 192, 2, 34, 11), "СОВЕТ", "council", "#124e89"),
+            Button((W - 156, 2, 44, 11), "ХРОНИКА", "chronicle", "#5a4a1a"),
+            Button((W - 110, 2, 74, 11), "ДИПЛОМАТИЯ", "diplomacy"),
+            Button((W - 34, 2, 32, 11), "МЕНЮ", "menu", "#5a6988"),
         ]
         # sprites
         self.city_art: Dict[Tuple[str, str], Tuple[pygame.Surface, int]] = {}
@@ -373,6 +373,8 @@ class WorldMapScreen:
         self.running: Optional[tuple] = None              # what the runner is doing (for its result)
         self.frozen: Optional[pygame.Surface] = None      # the last frame, shown while it runs
         self.focus: Optional[dict] = None                 # a storm the camera flies to (battle_focus)
+        self.saved_turn = self.camp.turn                  # a fresh campaign is saved on its first new round
+        self.autosaving = False                           # battle.py turns it on (tests never touch the save)
         self._clamp()
 
     # --- helpers -----------------------------------------------------------------------------
@@ -504,8 +506,6 @@ class WorldMapScreen:
                     self.diplomacy, self.faction_panel, self.selected = False, None, None
                 else:
                     return "quit"
-            if ev.key in (pygame.K_RETURN, pygame.K_b):
-                return "battle"
         elif ev.type == pygame.KEYUP:
             self.keys[ev.key] = False
         elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 3:
@@ -584,6 +584,14 @@ class WorldMapScreen:
         self._clamp()
         self.zoom_back.clear()
 
+    def autosave(self, force: bool = False) -> None:
+        """Each new round is saved for ПРОДОЛЖИТЬ (only while the runner is idle: a still campaign)."""
+        if not self.autosaving or self.runner.busy() or not (force or self.camp.turn != self.saved_turn):
+            return
+        from . import saves
+        if saves.save(self.camp):
+            self.saved_turn = self.camp.turn
+
     def update(self, dt: float, mouse: Tuple[int, int]) -> None:
         self.time += dt
         self.flash = max(0.0, self.flash - dt * 1.6)
@@ -594,6 +602,7 @@ class WorldMapScreen:
             self.table.finished(what, done)
         if self.runner.busy():
             return
+        self.autosave()
         self.fx.update(dt)
         if self.event_show is None and self.events_seen < len(self.camp.world_events):
             self.event_show = self.camp.world_events[self.events_seen]

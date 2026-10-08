@@ -234,8 +234,8 @@ class MapScreenTest(unittest.TestCase):
         self.assertTrue(d.result[0])
         self.assertEqual(sum(m.camp.stats["diplomacy"].values()), 1)
         m.draw(surf)
-        b = next(b for b in m.buttons if b.action == "battle")
-        self.assertEqual(m.handle(ev(pygame.MOUSEBUTTONDOWN, b.rect.center, button=1), b.rect.center), "battle")
+        b = next(b for b in m.buttons if b.action == "menu")
+        self.assertEqual(m.handle(ev(pygame.MOUSEBUTTONDOWN, b.rect.center, button=1), b.rect.center), "menu")
 
 
 def _pygame_ui():
