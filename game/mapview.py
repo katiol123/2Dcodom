@@ -390,6 +390,8 @@ class WorldMapScreen:
         arr = pygame.surfarray.array3d(self.map)                    # (w, h, 3)
         w, h = MAP_W // MINI_K, MAP_H // MINI_K
         a = arr[:w * MINI_K, :h * MINI_K].reshape(w, MINI_K, h, MINI_K, 3).mean(axis=(1, 3))
+        grey = a.mean(axis=2, keepdims=True)              # muted and darker, so the realms' colours stand out
+        a = (a * 0.35 + grey * 0.65) * 0.62 + np.array([10, 9, 18]) * 0.38
         return pygame.surfarray.make_surface(a.astype(np.uint8))
 
     def _art(self, kind: str, faction: str) -> Tuple[pygame.Surface, int]:
@@ -1086,11 +1088,15 @@ class WorldMapScreen:
         pygame.draw.rect(s, INK, r.inflate(4, 4))
         pygame.draw.rect(s, _c("#c9a24a"), r.inflate(2, 2), 1)
         s.blit(self.mini, r.topleft)
-        for c in CITIES:
-            col = _c(FACTION[self.camp.owner[c.key]].color)
+        for c in CITIES:                                  # a bright square per city in its owner's colours
+            f = FACTION[self.camp.owner[c.key]]
             px, py = r.x + c.x // MINI_K, r.y + c.y // MINI_K
-            pygame.draw.rect(s, INK, (px - 1, py - 1, 3, 3))
-            s.set_at((px, py), col)
+            n = 4 if c.key == f.capital else 3
+            pygame.draw.rect(s, INK, (px - 1, py - 1, n + 2, n + 2))
+            pygame.draw.rect(s, _c(f.color), (px, py, n, n))
+            pygame.draw.line(s, _c(f.light), (px, py), (px + n - 1, py))   # lit top edge
+            if c.key == f.capital:
+                s.set_at((px + 1, py + 1), _c(f.metal))
         vr = pygame.Rect(r.x + int(self.cam[0]) // MINI_K, r.y + int(self.cam[1]) // MINI_K,
                          int(W / self.zoom) // MINI_K, int(H / self.zoom) // MINI_K)
         pygame.draw.rect(s, _c("#ffffff"), vr.clip(r), 1)

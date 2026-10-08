@@ -51,8 +51,11 @@ def campaign_battle(b, factory: SpriteFactory, progress=None) -> Tuple[World, Di
         tagged.append(Slot(s.team, s.key, s.look, next(per_team[s.team])))
     metas = factory.ensure(looks, progress)
     anims = {name: anim_infos(meta) for name, meta in metas.items()}
-    return World(tagged, anims, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
-                 fury=getattr(b, "fury", (1.0, 1.0))), metas
+    world = World(tagged, anims, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
+                  fury=getattr(b, "fury", (1.0, 1.0)))
+    from .factions import FACTION
+    world.names = (FACTION[b.attacker].short, FACTION[b.defender].short)   # the realms, not the colours
+    return world, metas
 
 
 def headless_campaign_world(b) -> World:

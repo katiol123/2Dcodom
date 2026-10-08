@@ -192,6 +192,8 @@ class CardTable:
         self.chronicle_open = False
         self.chron_scroll = 0
         self.chron_from = 0
+        self.chron_pending: Optional[float] = None      # the news opens once the hand is dealt
+        self.dealt_at = 0.0
         self.arrows_from = 0                            # storms shown as arrows on the map
         self.council_seat: Optional[int] = None
         self.council_tab = "officers"
@@ -434,8 +436,7 @@ class CardTable:
                 ui("refuse")
             self.launch = None
         elif kind == "end":
-            self.chronicle_open = True
-            self.chron_scroll = 0
+            self.chron_pending = self.ms.time               # the news waits until the new hand is dealt
             self.storm_flashes(self.arrows_from, delay=0.2, gap=0.25)
 
     def storm_flashes(self, since: int, delay: float = 0.0, gap: float = 0.0) -> None:
@@ -646,9 +647,19 @@ class CardTable:
             pygame.draw.rect(s, (38, 43, 68), x, 1)
         self.font.draw(s, str(len(r.discard)), x.centerx, x.bottom + 1, "#8b9bb4", anchor="midtop")
 
+    NEWS_AFTER = 1.2                                     # seconds after the last card lands
+
     def update(self, dt: float, mouse) -> None:
         if self.player and self.camp.realms[self.player].alive:
             self._deal_check()
+        if self.dealing:
+            self.dealt_at = self.ms.time
+        if self.chron_pending is not None and not self.dealing and self.ms.event_show is None and \
+                self.ms.time - max(self.chron_pending, self.dealt_at) > self.NEWS_AFTER:
+            self.chron_pending = None
+            if len(self.camp.log) > self.chron_from and not self.busy() and not self.play:
+                self.chronicle_open = True
+                self.chron_scroll = 0
         mx, my = mouse
         prev = self.hand_hover
         self.hand_hover = None

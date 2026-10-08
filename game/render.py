@@ -553,6 +553,12 @@ class Renderer:
             self.font.draw(s, t.text, t.x, t.y - rise, t.color, scale=scale, anchor="midbottom")
 
     # --- HUD -----------------------------------------------------------------------------------
+    @staticmethod
+    def _side(world: World, team: int) -> str:
+        """A side's name: the realm in a campaign storm, the colour in a quick battle."""
+        names = getattr(world, "names", None)
+        return names[team] if names else world.teams[team].name
+
     def _hud(self, world: World, s: pygame.Surface, real_time: float) -> None:
         for team in (0, 1):
             tm = world.teams[team]
@@ -561,7 +567,7 @@ class Renderer:
             px = W - 4 - 158 if right else 4
             s.blit(self.panel(158, 44, base="#181425", border=tm.color), (px, 3))
             name_x = px + 158 - 6 if right else px + 6
-            self.font.draw(s, tm.name, name_x, 6, tm.light, anchor="topright" if right else "topleft")
+            self.font.draw(s, self._side(world, team), name_x, 6, tm.light, anchor="topright" if right else "topleft")
             units = world.roster(team)
             alive = sum(1 for u in units if u.alive)
             self.font.draw(s, f"{alive}/{len(units)}", px + 6 if right else px + 158 - 6, 6, "#c0cbdc",
@@ -662,7 +668,7 @@ class Renderer:
             px, py = W // 2 - pw // 2, 70
             s.blit(self.panel(pw, ph, base="#181425", border=tm.color), (px, py))
             self.font.draw(s, "ПОБЕДА", W // 2, py + 8, "#fee761", scale=3, anchor="midtop")
-            self.font.draw(s, tm.name, W // 2, py + 30, tm.light, scale=2, anchor="midtop")
+            self.font.draw(s, self._side(world, world.winner), W // 2, py + 30, tm.light, scale=2, anchor="midtop")
             winners = world.roster(world.winner)          # the best fighter of the winning side
             m = max(winners, key=lambda u: (u.dealt, u.kills)) if winners else None
             if m is not None:
