@@ -196,6 +196,8 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         mouse = ((mx - view[0]) // view[2], (my - view[1]) // view[2])
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
+                if on_map and worldmap is not None and not worldmap.runner.busy():
+                    worldmap.autosave(force=True)             # the window's X keeps the campaign too
                 pygame.quit()
                 return 0
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_f:
@@ -279,7 +281,8 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
             if select.result:
                 from game.campaign import Campaign
                 from game.mapview import WorldMapScreen
-                worldmap = WorldMapScreen(renderer, campaign=Campaign(select.result[1]))
+                fresh = _random.SystemRandom().randrange(1 << 30)    # every new campaign is a new world
+                worldmap = WorldMapScreen(renderer, campaign=Campaign(select.result[1], seed=fresh))
                 worldmap.autosaving = True
                 worldmap.flash = 1.0                      # the select screen's white flash fades into the map
                 picking, select, on_map = False, None, True

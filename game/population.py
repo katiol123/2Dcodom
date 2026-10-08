@@ -4,7 +4,7 @@
 not kept: it goes back to the discard pile, a card is drawn in its place, and sickness breaks out
 in a random own city for ``SICK_TURNS`` own turns - unless the infirmaries nearby stop it
 (buildings.py). While a city is sick, every officer standing there may die at the start of each
-own turn (``SICK_DEATH``; a ruler too - and then a successor takes the throne). The world event
+own turn (``SICK_DEATH``, one death a turn at most; a ruler too - and then a successor takes the throne). The world event
 ЧУМА НА МАТЕРИКЕ shuffles two more sickness cards into every deck for a while.
 
 **Newcomers.** So that the world does not empty, young talents come of age: the council card
@@ -22,7 +22,7 @@ from .officers import OFFICER, OFFICERS, newcomer
 
 SICKNESS = "sickness"
 SICK_TURNS = 3
-SICK_DEATH = 0.09              # per officer standing in a sick city, at the start of each own turn
+SICK_DEATH = 0.04              # per officer standing in a sick city, at the start of each own turn
 INFLUX = 0.12                  # per own turn, when the realm has fewer officers than at the start
 MAX_OFFICERS = 24
 PLAGUE_CARDS, PLAGUE_LEFT = 2, 10
@@ -79,6 +79,7 @@ def turn(camp, faction: str) -> None:
             if camp.rng.random() < SICK_DEATH * _temple_care(camp, city):
                 camp.stats["sick_deaths"][faction] += 1
                 die(camp, o, _g(o, "умер", "умерла") + f" от болезни в городе {CITY[city].name}")
+                break                                     # one death a turn at most: a sickness, not a massacre
         camp.sick[city] -= 1
         if camp.sick[city] <= 0:
             del camp.sick[city]

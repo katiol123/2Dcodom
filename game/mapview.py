@@ -371,6 +371,12 @@ class WorldMapScreen:
         self.dim.fill((24, 20, 37, 150))
         self.bar = pygame.Surface((W, 1), pygame.SRCALPHA)
         self.table = CardTable(self)                      # the hand, targeting, council, chronicle
+        if self.camp.turn > 1:                            # a loaded campaign: only the last round is news
+            last = self.camp.turn - 1
+            self.table.chron_from = next((i for i, e in enumerate(self.camp.log) if e[0] >= last),
+                                         len(self.camp.log))
+            self.table.arrows_from = next((i for i, a in enumerate(self.camp.attacks) if a[0] >= last),
+                                          len(self.camp.attacks))
         self.runner = Runner(self.camp)                   # card plays and turns run in a worker thread
         self.running: Optional[tuple] = None              # what the runner is doing (for its result)
         self.frozen: Optional[pygame.Surface] = None      # the last frame, shown while it runs

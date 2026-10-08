@@ -174,7 +174,7 @@ class CardArt:
 def origin_label(origin: str) -> str:
     if origin in OFFICER:
         return OFFICER[origin].name
-    return {"base": "ДЕРЖАВА", "faction": "ЛИДЕР", "threshold": "СОВЕТ", "curse": "ПРОКЛЯТИЕ",
+    return {"base": "ДЕРЖАВА", "faction": "ПРАВИТЕЛЬ", "threshold": "СОВЕТ", "curse": "ПРОКЛЯТИЕ",
             "stolen": "ДОБЫЧА", "legacy": "НАСЛЕДИЕ"}.get(origin, "")
 
 

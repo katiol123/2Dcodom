@@ -147,7 +147,9 @@ def ensure_ruler(camp, faction: str) -> None:
     if heir is None:
         return
     for pile in (r.draw, r.hand, r.discard):              # the old court's cards left with it
-        pile[:] = [c for c in pile if c.origin not in OFFICER or c.origin in r.council and c.origin not in camp.dead]
+        pile[:] = [c for c in pile if c.origin not in ("faction", "legacy") and
+                   (c.origin not in OFFICER or c.origin in r.council and c.origin not in camp.dead)]
+    r.legacy = []                                         # a fallen court leaves no legacy
     camp.leader[faction] = heir
     camp.loyalty[heir] = 100
     if heir not in r.council:

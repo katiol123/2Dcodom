@@ -120,6 +120,7 @@ def _pair(a: str, b: str) -> frozenset:
 
 class Campaign:
     HOOKS = ("battle_hook", "answer_hook", "diplo_hook")
+    _SHAPE: Tuple[str, ...] = ()            # attribute names of a fresh campaign (filled on first init)
 
     def __getstate__(self):
         """Saved games (saves.py): hooks belong to the screen, id counters become plain numbers."""
@@ -136,6 +137,26 @@ class Campaign:
         for k in ("_ids", "_cids"):
             st[k] = itertools.count(st[k])
         self.__dict__.update(st)
+        self._upgrade()
+
+    def _upgrade(self) -> None:
+        """A save from an older build: state added since comes from a fresh campaign with the same seed,
+        cards removed since leave the piles."""
+        fresh = None
+        if not Campaign._SHAPE:                           # nothing to compare with yet in this process
+            Campaign(None)
+        if any(k not in self.__dict__ for k in Campaign._SHAPE):
+            fresh = Campaign(self.player, self.seed)
+            for k, v in fresh.__dict__.items():
+                self.__dict__.setdefault(k, v)
+        for f, r in self.realms.items():
+            for name, field_ in Realm.__dataclass_fields__.items():
+                if name not in r.__dict__:
+                    fresh = fresh or Campaign(self.player, self.seed)
+                    r.__dict__[name] = getattr(fresh.realms[f], name)
+            for pile in (r.draw, r.hand, r.discard):
+                pile[:] = [c for c in pile if c.key in CARDS]
+            r.legacy = [k for k in r.legacy if k in CARDS]
 
     def __init__(self, player: Optional[str] = None, seed: int = 1):
         """``player`` is the faction the human plays, or None for a spectator."""
@@ -239,6 +260,7 @@ class Campaign:
             self._build_deck(f.key)
             self._draw(f.key, self.hand_size(self.realms[f.key].council))
         self._start_turn(self.order[0])
+        Campaign._SHAPE = tuple(self.__dict__)
 
     # --- setup ------------------------------------------------------------------------------
     def _deploy(self) -> None:
