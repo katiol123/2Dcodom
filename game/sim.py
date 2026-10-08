@@ -262,6 +262,7 @@ class World:
     def __init__(self, slots: Sequence[Slot], anims: Dict[str, Dict[str, AnimInfo]], seed: int = 1,
                  summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS):
         self.rng = random.Random(seed)
+        self._order_rng = random.Random(seed * 7919 + 1)   # who acts first this frame: no side always wins ties
         self.seed = seed
         self.teams = teams
         self.anims = anims
@@ -571,7 +572,9 @@ class World:
             for u in self.units:
                 u.anim_t += dt
             return
-        for u in list(self.units):
+        order = list(self.units)
+        self._order_rng.shuffle(order)
+        for u in order:
             self._update_unit(u, dt)
         self._separate(dt)
         self._step_projectiles(dt)

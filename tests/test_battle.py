@@ -14,7 +14,7 @@ def run(w, limit=180.0):
 
 class RosterTest(unittest.TestCase):
     def test_roster(self):
-        self.assertEqual(len(ALL), 56)
+        self.assertEqual(len(ALL), 57)
         self.assertEqual(len(CLASSIC), 7)
         self.assertEqual({k for k, u in ROSTER.items() if u.ranged},
                          {"archer", "mage", "cleric", "crossbowman", "necromancer", "shaman", "goblin_shaman",
@@ -129,6 +129,71 @@ class BattleTest(unittest.TestCase):
         x0 = barb.x
         ai._melee(w, spear, barb)                  # an ordinary thrust: no knockback
         self.assertAlmostEqual(barb.x, x0)
+
+    def _pair(self, a, b):
+        from game import ai
+        w = headless_world([[a], [b]], 1)
+        w.time = 1.0
+        u, e = w.units
+        e.x, e.y = u.x + 25, u.y
+        u.target, e.target = e, u
+        u.facing, e.facing = 1, -1
+        return ai, w, u, e
+
+    def test_every_counter_unit_meets_a_rush(self):
+        for counter in ("spearman", "halberdier", "militia", "uhlan"):
+            ai, w, u, e = self._pair(counter, "barbarian")
+            e.status["charge"] = 1.0
+            hp = e.hp
+            self.assertTrue(ai._try_abilities(w, u), counter)
+            self.assertFalse(e.has("charge"), counter)
+            self.assertLess(e.hp, hp, counter)
+
+    def test_uhlan_lance_breaks_a_rushing_rider(self):
+        for rusher in ("lancer", "wolf", "barbarian"):
+            ai, w, u, e = self._pair("uhlan", rusher)
+            u.status["charge"] = 1.0                   # both in a rush; only the uhlan has the couched lance
+            u.status["lancehit"] = 1.5
+            e.status["charge"] = 1.0
+            hp = e.hp
+            self.assertTrue(ai._try_abilities(w, u), rusher)
+            self.assertFalse(e.has("charge"))
+            self.assertFalse(u.has("charge") or u.has("lancehit"))   # his own rush ends too, no double bonus
+            hi = ROSTER["uhlan"].damage[1] * ai.COUNTER_BONUS * 1.6
+            self.assertLessEqual(hp - e.hp, hi + 1)
+
+    def test_two_uhlans_joust(self):
+        ai, w, a, b = self._pair("uhlan", "uhlan")
+        for x in (a, b):
+            x.status["charge"] = 1.0
+            x.status["lancehit"] = 1.5
+        ha, hb = a.hp, b.hp
+        self.assertTrue(ai._try_abilities(w, a))
+        for x in (a, b):
+            self.assertFalse(x.has("charge") or x.has("lancehit"))
+            self.assertTrue(x.has("stun") and x.has("regroup"))
+        self.assertLess(a.hp, ha)                      # both lances strike at once
+        self.assertLess(b.hp, hb)
+        self.assertTrue(any(t.text == "СШИБКА!" for t in w.texts))
+
+    def test_foot_spears_beat_the_uhlan_rush(self):
+        ai, w, u, e = self._pair("spearman", "uhlan")
+        e.status["charge"] = 1.0
+        e.status["lancehit"] = 1.5
+        self.assertTrue(ai._try_abilities(w, u))
+        self.assertFalse(e.has("charge"))
+        self.assertTrue(e.has("stun"))
+
+    def test_uhlan_rides_off_for_run_ups(self):
+        w = headless_world([["uhlan"], ["knight"]], 2)
+        charges = 0
+        was = False
+        while w.winner is None and w.time < 30:
+            w.step(1 / 60)
+            now = w.units[0].has("charge")
+            charges += now and not was
+            was = now
+        self.assertGreaterEqual(charges, 4)            # a fresh run-up every few seconds
 
     def test_spears_shield_the_mage_from_wolves(self):
         """Two spearmen and a mage against two wolves rushing past at the mage: the spears must

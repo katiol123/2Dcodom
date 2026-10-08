@@ -91,11 +91,11 @@ MAD_AURA = 75.0
 DIVERS = ("rogue", "wolf", "monk", "wolf_rider", "wraith", "griffon_knight", "assassin", "vampire", "war_dog")
 BODYGUARDS = ("knight", "treant", "halberdier", "shieldbearer")
 CROWD_LOVERS = ("mage", "shaman", "hammerer", "ogre", "war_elephant", "fire_dervish", "goblin_bomber", "frost_giant")
-COUNTERS = ("spearman", "halberdier", "militia")      # meet a charge at them with the polearm
+COUNTERS = ("spearman", "halberdier", "militia", "uhlan")   # meet a charge at them with the polearm
 CHARGERS = {  # key: (cooldown, min distance, max distance, rush seconds, text)
     "barbarian": (10.0, 35, 95, 1.4, "НА ПРОРЫВ!"), "wolf_rider": (9.0, 35, 110, 1.4, "НА ПРОРЫВ!"),
     "mamluk": (9.0, 40, 120, 1.4, "НАТИСК!"), "valkyrie": (10.0, 35, 100, 1.2, "С НЕБЕС!"),
-    "lancer": (7.0, 45, 130, 1.6, "ТАРАН!"),
+    "lancer": (7.0, 45, 130, 1.6, "ТАРАН!"), "uhlan": (4.0, 45, 140, 1.3, "В ПИКИ!"),
 }
 
 
@@ -397,7 +397,12 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
         # brace: meet an enemy rushing at me with the spear before it reaches me
         for e in world.enemies(u):
             if e.has("charge") and in_melee_range(u, e, slack=10):   # any rush that comes within reach
-                # the braced spear meets the rush at once - a rusher would be past before a swing lands
+                if u.has("charge") and e.key in COUNTERS:      # two couched lances, head on
+                    _joust(world, u, e)
+                    return True
+                # the braced spear meets the rush at once - a rusher would be past before a swing lands;
+                # a rider's own rush ends in the counter (no double bonus)
+                u.status.pop("lancehit", None)
                 world.start_action(u, "strike", e, cooldown=0.45)
                 u.action["fired"] = True
                 _melee(world, u, e, counter=True)
@@ -408,7 +413,7 @@ def _try_abilities(world: "World", u: "Unit") -> bool:
         if lo < u.dist(u.target) < hi:
             u.abil["leap"] = cd
             u.status["charge"] = secs
-            if u.key == "lancer":
+            if u.key in ("lancer", "uhlan"):
                 u.status["lancehit"] = secs + 0.6
             if u.key == "mamluk":
                 u.status["stunhit"] = secs + 0.6
@@ -541,6 +546,32 @@ def resolve_action(world: "World", u: "Unit", a: dict) -> None:
             _new_shot(world, u, t, a)
         return
     _melee(world, u, t, counter=bool(a.get("counter")))
+
+
+def _joust(world: "World", a: "Unit", b: "Unit") -> None:
+    """Two lancers rushing at each other: both lances strike at once (counter damage), both riders are
+    thrown back and shaken, both rushes are spent - and both ride off for another run-up."""
+    world.text(a, "СШИБКА!", "#feae34", big=True)
+    world.hitstop = max(world.hitstop, 0.1)
+    world.sounds.append("block")
+    hits = []
+    for u, t in ((a, b), (b, a)):
+        lo, hi = u.type.damage
+        hits.append((u, t, world.rng.uniform(lo, hi) * COUNTER_BONUS))
+    for u, t, dmg in hits:                           # simultaneous: nobody strikes first
+        u.facing = 1 if t.x >= u.x else -1
+        for k in ("charge", "lancehit", "stunhit"):
+            u.status.pop(k, None)
+        u.action = None
+        u.cd = u.cooldown()
+        world.deal(u, t, dmg, u.type.damage_type, crit=True, label="СШИБКА")
+    for u, t, _ in hits:
+        if u.alive:
+            u.x = min(FIELD[2], max(FIELD[0], u.x - u.facing * 14))
+            u.vx = u.vy = 0.0
+            _stun(world, u, 0.4, quiet=True)
+            u.status["regroup"] = 1.2
+    world.burst((a.x + b.x) / 2, (a.y + b.y) / 2, 14, "#feae34", n=14, speed=60, up=40, life=0.5)
 
 
 def charging_at(e: "Unit", u: "Unit") -> bool:
@@ -1199,7 +1230,18 @@ def _a_harpooner(world, u):
     return True
 
 
-NEW_ABILITIES = {"harpooner": _a_harpooner, "griffon_knight": _a_griffon, "dryad": _a_dryad, "banshee": _a_banshee, "ghoul": _a_ghoul,
+def _a_uhlan(world, u) -> bool:
+    """Run-up: when the lance charge is (nearly) ready and the enemy is too close to charge, ride off."""
+    if u.has("regroup") or u.has("charge") or u.abil.get("leap", 0) > 0.6:
+        return False
+    near = [e for e in world.enemies(u) if not e.has("stealth")]
+    if near and min(u.dist(e) for e in near) < CHARGERS["uhlan"][1]:
+        u.status["regroup"] = 1.3                     # a proper run-up, not just a step back
+        world.text(u, "РАЗБЕГ", "#c0cbdc")
+    return False
+
+
+NEW_ABILITIES = {"uhlan": _a_uhlan, "harpooner": _a_harpooner, "griffon_knight": _a_griffon, "dryad": _a_dryad, "banshee": _a_banshee, "ghoul": _a_ghoul,
                  "ice_witch": _a_ice_witch, "rune_priest": _a_rune_priest, "assassin": _a_assassin,
                  "bog_spider": _a_spider, "valkyrie": _a_valkyrie}
 
@@ -1368,6 +1410,13 @@ def _new_melee_mods(world, u, t, dmg, crit, label):
                 t.x = min(FIELD[2], max(FIELD[0], t.x + u.facing * 16))
         else:
             dmg *= 0.85
+    if k == "uhlan" and u.has("lancehit"):
+        del u.status["lancehit"]
+        dmg *= 2.0
+        crit, label = True, "ПИКА"
+        u.status["regroup"] = 1.0
+        if t.alive and t.type.radius < 12:
+            t.x = min(FIELD[2], max(FIELD[0], t.x + u.facing * 14))
     if k == "griffon_knight" and u.has("divehit"):
         del u.status["divehit"]
         dmg *= 2.0

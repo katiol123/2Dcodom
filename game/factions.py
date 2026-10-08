@@ -327,7 +327,7 @@ CITIES: Tuple[City, ...] = (
     City("st_alarius", "СВЯТОЙ АЛАРИЙ", "aldern", 590, 350, "town",
          ("monk", "cleric", "paladin", "spearman"), "Монастырь, где воспитывают паладинов"),
     City("ashford", "ЭШФОРД", "aldern", 960, 420, "castle",
-         ("knight", "spearman", "crossbowman", "lancer"), "Восточная твердыня против Каганата"),
+         ("knight", "spearman", "crossbowman", "lancer", "uhlan"), "Восточная твердыня против Каганата"),
     City("hartwell", "ХАРТВЕЛ", "aldern", 620, 580, "town",
          ("spearman", "archer", "knight", "lancer", "militia", "war_dog"), "Житница королевства: поля и мельницы"),
     City("lumen", "ЛЮМЕН", "aldern", 920, 660, "town",
@@ -368,7 +368,8 @@ CITIES: Tuple[City, ...] = (
     City("saltcape", "СОЛЁНЫЙ МЫС", "league", 1050, 990, "fort",
          ("halberdier", "archer", "rogue", "militia"), "Форт против гоблинских пиратов"),
     City("tremont", "ТРЕМОНТ", "league", 710, 780, "town",
-         ("spearman", "halberdier", "crossbowman", "knight", "militia"), "Ярмарочный перекрёсток южных трактов"),
+         ("spearman", "halberdier", "crossbowman", "knight", "militia", "uhlan"),
+         "Ярмарочный перекрёсток южных трактов: наёмные уланы"),
     # --- Каганат: степи на востоке
     City("karak_or", "КАРАК-ОР", "khanate", 1450, 440, "castle",
          ("barbarian", "ogre", "hammerer", "crossbowman", "horse_archer"), "Отнятая у горцев крепость"),

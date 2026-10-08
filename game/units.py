@@ -155,6 +155,10 @@ ROSTER: Dict[str, UnitType] = {u.key: u for u in (
     UnitType("lancer", "КОННЫЙ РЫЦАРЬ", "КАВАЛЕРИЯ", hp=430, armor=0.35, resist=0.05, damage=(24, 30),
              damage_type="physical", attack_range=20, cooldown=1.4, speed=60, radius=10, short="ВСАДНИК",
              prefers={"archer": 20, "mage": 20, "crossbowman": 20}, tier="above"),
+    UnitType("uhlan", "УЛАН", "КОПЕЙНАЯ КАВАЛЕРИЯ", hp=440, armor=0.32, resist=0.10, damage=(23, 29),
+             damage_type="physical", attack_range=24, cooldown=1.3, speed=64, radius=10, short="УЛАН",
+             prefers={"archer": 20, "mage": 20, "crossbowman": 20, "wolf": 20, "barbarian": 15, "wolf_rider": 20},
+             tier="above"),
     # --- Вельдмар ----------------------------------------------------------------------------
     UnitType("ranger", "ЛЕСНОЙ ЕГЕРЬ", "СТРЕЛОК", hp=165, armor=0.10, resist=0.15, damage=(23, 29),
              damage_type="physical", attack_range=190, cooldown=1.5, speed=46, ranged=True, lane="back",
@@ -416,6 +420,13 @@ TRAITS: Dict[str, Dict[str, Tuple[Tuple[str, str], ...]]] = {
         flaws=(("БЕЗ РАЗГОНА", "обычные удары на 15% слабее"),
                ("КОПЬЯ", "копейщики и алебардщики встречают разгон контрударом")),
         behavior=(("НАСКОК", "после таранного удара отъезжает для нового разгона"),)),
+    "uhlan": dict(
+        perks=(("НАСКОК С ПИКОЙ", "разгон к врагу: первый удар x2 и отбрасывает; перезарядка всего 4 с"),
+               ("КОНТРУДАР", "встречает пикой любого врага в рывке, до которого дотянется: +100% урона, "
+                             "рывок сломан, враг сбит с ног")),
+        flaws=(("КОПЬЯ", "копейщики и алебардщики встречают его разгон контрударом"),),
+        behavior=(("РАЗБЕГ", "когда разгон готов, выходит из ближнего боя и отъезжает, чтобы снова ударить "
+                             "с разбега"),)),
     "ranger": dict(
         perks=(("МАСКИРОВКА", "невидим для врагов, пока не выстрелит; снова скрывается через 5 с без урона"),
                ("ВЫСТРЕЛ ИЗ ЗАСАДЫ", "выстрел из маскировки наносит двойной урон")),
@@ -568,7 +579,7 @@ PRICES: Dict[str, Tuple[int, int]] = {
     "necromancer": (125, 11), "skeleton": (90, 8), "monk": (90, 8), "hammerer": (100, 9), "shaman": (95, 9),
     "wolf": (80, 7), "ogre": (150, 14), "goblin": (55, 5), "wolf_rider": (145, 13), "mad_goblin": (105, 10),
     "goblin_shaman": (110, 10), "goblin_bomber": (40, 4), "bog_spider": (75, 7), "griffon_knight": (120, 11),
-    "lancer": (120, 11), "ranger": (70, 6), "dryad": (105, 10), "treant": (150, 14), "druid": (85, 8),
+    "lancer": (120, 11), "uhlan": (165, 15), "ranger": (70, 6), "dryad": (105, 10), "treant": (150, 14), "druid": (85, 8),
     "bladedancer": (65, 6), "death_knight": (130, 12), "wraith": (75, 7), "banshee": (60, 5), "ghoul": (80, 7),
     "vampire": (115, 10), "horse_archer": (75, 7), "war_drummer": (75, 7), "mamluk": (125, 11),
     "war_elephant": (145, 13), "fire_dervish": (75, 7), "assassin": (75, 7), "valkyrie": (100, 9),
@@ -759,6 +770,12 @@ def look_for(key: str, team: Team, seed: int) -> Look:
                         body_len=13, body_w=7, leg_len=5, tail="thin", size=(64, 52),
                         rider="human", rider_skin=r.choice(SKINS), rider_top="#c0cbdc", rider_helmet="#c0cbdc",
                         rider_weapon="lance", rider_cloth=c, rider_eye="#181425", rider_blade="#c0cbdc")
+    if key == "uhlan":
+        return QuadSpec(kind="horse", fur=r.choice(["#ead4aa", "#c0cbdc", "#b86f50", "#733e39"]),
+                        belly=r.choice(["#ffffff", "#ead4aa"]), eye="#181425", mane=r.choice(["#ffffff", "#3e2731"]),
+                        collar=c, body_len=14, body_w=6, leg_len=8, tail="long", size=(60, 52),
+                        rider="human", rider_skin=r.choice(SKINS), rider_top=c, rider_helmet="#feae34",
+                        rider_weapon="lance", rider_cloth=a, rider_eye="#181425")
     if key == "lancer":
         return QuadSpec(kind="horse", fur=r.choice(["#733e39", "#3e2731", "#ead4aa", "#8b9bb4", "#b86f50"]),
                         belly=r.choice(["#ead4aa", "#c0cbdc"]), eye="#181425", mane=r.choice(["#181425", "#ead4aa"]),
