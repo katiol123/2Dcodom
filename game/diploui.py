@@ -19,6 +19,23 @@ from .sim import H, W
 ACTIONS = (("truce", "МИР"), ("alliance", "СОЮЗ"), ("trade", "ТОРГОВЛЯ"), ("war", "РАЗОРВАТЬ"))
 
 
+def live_reason(camp, a: str, b: str) -> str:
+    """Why two realms stand where they stand now: storms, treaties and betrayals of this campaign."""
+    out = []
+    for x, y in ((a, b), (b, a)):
+        t = camp.last_attack.get((x, y))
+        if t is not None:
+            out.append(f"штурм {FACTION[x].short} -> {FACTION[y].short} на ходу {t}")
+    st = dip.status(camp, a, b)
+    if st != "war":
+        out.append({"truce": "между ними мир", "alliance": "они в союзе"}[st])
+    if frozenset((a, b)) in camp.trade:
+        out.append("торгуют")
+    if not out:
+        out.append("в этой кампании они ещё не сталкивались")
+    return "СЕЙЧАС: " + "; ".join(out) + "."
+
+
 class DiploWindow:
     CELL_W, CELL_H = 26, 15
 
@@ -180,8 +197,8 @@ class DiploWindow:
             st = {"war": "ВОЙНА", "truce": "МИР", "alliance": "СОЮЗ"}[dip.status(camp, a, b)]
             font.draw(s, f"{FACTION[a].short} - {FACTION[b].short}: {v} {name}, {st}", r.x + 8, y, col)
             yy = y + 8
-            for line in wrap("ИСТОРИЯ: " + lore(a, b)[1], x0 + len(ALL_FACTIONS) * cw - r.x - 8)[:3]:
-                font.draw(s, line, r.x + 8, yy, "#c0cbdc")
+            for line in wrap(live_reason(camp, a, b), x0 + len(ALL_FACTIONS) * cw - r.x - 8)[:3]:
+                font.draw(s, line, r.x + 8, yy, "#c0cbdc")      # what this campaign did to them, not old lore
                 yy += 7
             for line in wrap(dip.TIER_EFFECTS[key], x0 + len(ALL_FACTIONS) * cw - r.x - 8)[:3]:
                 font.draw(s, line, r.x + 8, yy, "#8b9bb4")
@@ -196,7 +213,7 @@ class DiploWindow:
                     x, y = r.x + 8, y + 8
                 x = font.draw(s, item, x, y, col).right + 6
             for line in wrap("БЕЛЫЙ УГОЛОК - МИР, ЗЕЛЁНЫЙ - СОЮЗ, ! - ГЕГЕМОН (ЕГО БОЯТСЯ ВСЕ). НАВЕДИ НА КЛЕТКУ - "
-                             "ПРИЧИНА И ЧТО ДАЮТ ОТНОШЕНИЯ; КЛИК - ВЫБРАТЬ ДЕРЖАВУ", limit - r.x - 8):
+                             "ЧТО МЕЖДУ НИМИ БЫЛО И ЧТО ДАЮТ ОТНОШЕНИЯ; КЛИК - ВЫБРАТЬ ДЕРЖАВУ", limit - r.x - 8):
                 y += 8
                 font.draw(s, line, r.x + 8, y, "#5a6988")
         self._panel(s)

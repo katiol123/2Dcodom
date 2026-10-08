@@ -1265,7 +1265,7 @@ class WorldMapScreen:
                                           "может отбить их логова.", r.right - x0 - 8)):
                 font.draw(s, line, x0, r.y + 18 + i * 7, "#f6757a")
             return
-        font.draw(s, "НАВЕДИ НА СТРОКУ - ПРИЧИНА", x0, r.y + 14, "#5a6988")
+        font.draw(s, "НАВЕДИ НА СТРОКУ - ЧТО МЕЖДУ НИМИ БЫЛО", x0, r.y + 14, "#5a6988")
         for rect, other in self._faction_rows(f):
             o = FACTION[other]
             v = self.camp.relation(f.key, other)
@@ -1287,10 +1287,10 @@ class WorldMapScreen:
         s.blit(self.shields["goblin"], (goblin.x, goblin.y - 1))
         font.draw(s, GOBLINS.short, goblin.x + 18, goblin.y + 1, GOBLINS.light)
         font.draw(s, "ВЕЧНАЯ ВОЙНА", goblin.x + 96, goblin.y + 5, "#e43b44")
-        if self.hover_rel:
-            _, reason = relation(*self.hover_rel)
+        if self.hover_rel:                                # what happened between them in this campaign
+            from .diploui import live_reason
             y = goblin.bottom + 4
-            for line in wrap(reason, r.right - x0 - 8):
+            for line in wrap(live_reason(self.camp, *self.hover_rel), r.right - x0 - 8):
                 font.draw(s, line, x0, y, "#ffffff")
                 y += 7
 

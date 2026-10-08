@@ -343,8 +343,14 @@ class SelectScreen:
             friend = max(others, key=lambda o: relation(c.key, o.key)[0])
             foe = min(others, key=lambda o: relation(c.key, o.key)[0])
             rows += [("ДРУГ", friend.short), ("ВРАГ", foe.short)]
+            why = None
             for k, (label, value) in enumerate(rows):
                 yy = r.y + 6 + k * 9
+                if label in ("ДРУГ", "ВРАГ") and pygame.Rect(col, yy - 1, r.right - 8 - col, 9).collidepoint(self._mouse):
+                    other = friend if label == "ДРУГ" else foe     # the old memories of the peoples, as the campaign starts
+                    v, reason = relation(c.key, other.key)
+                    why = (f"{c.short} И {other.short}: {v}", reason, "#a7f070" if label == "ДРУГ" else "#f6757a")
+                    pygame.draw.line(s, _c("#5a6988"), (col, yy + 7), (r.right - 8, yy + 7))
                 font.draw(s, label, col, yy, "#8b9bb4")
                 vc = "#feae34" if label == "ЗОЛОТО" else "#a7f070" if label == "ДРУГ" else \
                     "#f6757a" if label == "ВРАГ" else "#ffffff"
@@ -364,6 +370,13 @@ class SelectScreen:
                     self.art = CardArt(self.r)
                 self.cards.cover()
                 s.blit(self.art.full(card.key, "ЛИДЕР", c.key), (col - CARD_W - 8, r.y - CARD_H + 60))
+            if why:                                        # the reason, in a box above the panel
+                lines = wrap(why[1], 250)
+                box = pygame.Rect(col - 120, r.y - 14 - 7 * len(lines), 258, 12 + 7 * len(lines))
+                s.blit(self.r.panel(box.w, box.h, base="#181425", border=why[2]), box.topleft)
+                font.draw(s, why[0], box.x + 4, box.y + 3, why[2])
+                for i, line in enumerate(lines):
+                    font.draw(s, line, box.x + 4, box.y + 11 + i * 7, "#e6dfd0")
         blink = int(self.time * 2) % 2 == 0
         who = "ЗА " + f.short if c else "В РЕЖИМЕ ЗРИТЕЛЯ"
         hint = f"КЛИК ПО ЗНАМЕНИ ИЛИ ENTER - НАЧАТЬ {who}" if self.chosen is None else "В ПУТЬ!"
