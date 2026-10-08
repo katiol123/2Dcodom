@@ -83,24 +83,53 @@ def _city_worth(camp, city: str) -> float:
     return 300 + camp.prosperity[city] * 60 + (250 if CITY[city].kind == "capital" else 0)
 
 
+LEADER_VALUE = 2500              # gold-equivalent of the ruler's life (what a succession costs)
+
+
+def _odds(camp, f: str, group: Sequence[str], target: str, mult: float) -> Tuple[float, float, float]:
+    a = camp.attack_power(f, group, target, mult)
+    d = camp.defense_power(target)
+    if (camp.owner[target], f) in camp.grudge:
+        d *= 1.3
+    if camp.owner[target] != "goblin" and camp.relation(f, camp.owner[target]) <= 14:
+        d *= 1.15
+    return camp.win_chance(a, d), a, d
+
+
+def _desperate(camp, f: str, target: str) -> bool:
+    """Stakes high enough to risk the ruler: the realm is down to its last cities, or the target is
+    its own lost capital."""
+    from .factions import FACTION
+    return len(camp.cities_of(f)) <= 2 or (f in FACTION and target == FACTION[f].capital)
+
+
 def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list]:
     from .diplomacy import enemy_of_alliance, hegemon
+    from . import reign
+    from .succession import BATTLE_DEATH_LOST, BATTLE_DEATH_WON
     best = (-1.0, [])
     h = hegemon(camp)
     foes = set(enemy_of_alliance(camp, f)) | ({h} if h and h != f else set())
+    need = reign.min_odds(camp, f)
+    ruler = camp.leader.get(f)
     for target in options(camp, f, key, []):
         cands = options(camp, f, key, [target])
         cands = sorted(cands, key=lambda o: -camp.power(o) * camp.officer_mult(o))[:MAX_GROUP]
         if not cands:
             continue
-        a = camp.attack_power(f, cands, target, mult)
-        d = camp.defense_power(target)
-        if (camp.owner[target], f) in camp.grudge:
-            d *= 1.3
-        if camp.owner[target] != "goblin" and camp.relation(f, camp.owner[target]) <= 14:
-            d *= 1.15
-        p = camp.win_chance(a, d)
-        if p < 0.55:
+        p, a, d = _odds(camp, f, cands, target, mult)
+        if ruler in cands and f != camp.player:
+            # the ruler rides out only when the storm is safe enough - or when there is no other way
+            # and losing the city weighs more than the risk of losing him
+            others = [o for o in options(camp, f, key, [target]) if o != ruler]
+            others = sorted(others, key=lambda o: -camp.power(o) * camp.officer_mult(o))[:MAX_GROUP]
+            p2, a2, d2 = _odds(camp, f, others, target, mult) if others else (0.0, 0.0, d)
+            if p < reign.leader_odds(camp, f):
+                if p2 >= need:
+                    cands, p, a, d = others, p2, a2, d2
+                elif not (_desperate(camp, f, target) and p >= need):
+                    continue
+        if p < need:
             continue
         hostility = 1.0 + (40 - min(40, camp.relation(f, camp.owner[target]))) / 80
         if camp.realms[camp.owner[target]].course == "economy":
@@ -109,7 +138,11 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
             hostility *= 1.35                    # the alliance's common enemy / the hegemon
         if camp.realms[camp.owner[target]].unrest:
             hostility *= 1.25                    # a throne that shakes invites the sword
-        v = p * _city_worth(camp, target) * hostility - (1 - p) * a * 0.5 - p * 0.3 * min(a, d) * POWER_VALUE
+        hostility *= reign.hostility(camp, f, camp.owner[target])
+        v = p * _city_worth(camp, target) * reign.worth_mult(camp, f) * hostility - (1 - p) * a * 0.5 \
+            - p * 0.3 * min(a, d) * POWER_VALUE
+        if ruler in cands:                       # the price of risking the ruler's life
+            v -= LEADER_VALUE * ((1 - p) * BATTLE_DEATH_LOST + p * BATTLE_DEATH_WON)
         if v > best[0]:
             best = (v, [target, tuple(cands)])
     return best
@@ -196,13 +229,15 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     k = inst.key
     gold = camp.gold[f]
     econ = _econ_factor(camp, f)
+    from . import reign
+    PV = reign.prosperity_value(camp, f, PROSPERITY_VALUE)      # a builder values growth more
     if k == "tax":
         def s(c):
             over = camp.taxed.get(c, -9) >= camp.turn - 1 and camp.realms[f].course != "economy"
-            return camp.income_of(c, f) - (PROSPERITY_VALUE * 1.3 if over else 0)
+            return camp.income_of(c, f) - (PV * 1.3 if over else 0)
         return _best_city(camp, f, k, s)
     if k == "fair":
-        return _best_city(camp, f, k, lambda c: camp.prosperity[c] * 10 + (PROSPERITY_VALUE
+        return _best_city(camp, f, k, lambda c: camp.prosperity[c] * 10 + (PV
                                                                             if camp.prosperity[c] < 10 else 0))
     if k == "caravan":
         best = (-1.0, [])
@@ -216,13 +251,13 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         m = 6
         return sum(camp.prosperity[c] * m for c in camp.cities_of(f)), []
     if k == "golden_age":
-        return sum((camp.prosperity[c] + 1) * 6 + PROSPERITY_VALUE for c in camp.cities_of(f)), []
+        return sum((camp.prosperity[c] + 1) * 6 + PV for c in camp.cities_of(f)), []
     if k in ("build", "reform", "charter"):
         n = {"build": 2, "reform": 2, "charter": 3}[k]
         cost = 80 if k == "build" else 0
         if k == "build" and gold < 80 + camp.upkeep(f):
             return -1, []
-        return _best_city(camp, f, k, lambda c: min(n, 10 - camp.prosperity[c]) * PROSPERITY_VALUE - cost
+        return _best_city(camp, f, k, lambda c: min(n, 10 - camp.prosperity[c]) * PV - cost
                           + (10 if c in frontier(camp, f) else 20))
     if k == "loan":
         return (90 if gold < camp.upkeep(f) * 1.5 else -1), []
@@ -532,13 +567,16 @@ def manage(camp, f: str) -> None:
     margin = camp.expected_income(f) - up
     if margin < 0:
         reserve = 4 * up                                # cannot afford a bigger army
+    from . import reign
+    reserve = reign.reserve(camp, f, reserve)
     front = [c for c in camp.cities_of(f) if camp.muster.get(c, 0) > 0]      # recruiting is open only there
     for c in sorted(front, key=lambda c: -threat(camp, f, c)):
         for o in camp.officers_in(c):
             while camp.gold[f] > reserve:
                 room = camp.leadership(o.key) - camp.power(o.key)
                 cands = [k for k in camp._pool(c) if ROSTER[k].cost <= room and ROSTER[k].cost <= camp.gold[f] - reserve
-                         and not ROSTER[k].boss and camp.troop_upkeep(f, k) <= max(0, margin - 0.1 * up)]
+                         and not ROSTER[k].boss and camp.troop_upkeep(f, k) <= max(0, margin - 0.1 * up)
+                         and reign.hire_ok(camp, f, k)]
                 if not cands or len(camp.squads[o.key]) >= 7:
                     break
                 k = max(cands, key=lambda k: ROSTER[k].cost)
@@ -560,6 +598,12 @@ def council_score(camp, members: Sequence[str], taste: Optional[Dict[str, float]
     v += 70 * (camp.hand_size(m) - 5) + 45 * camp.reserve(m) - (90 if camp.strife(m) else 0)
     v -= sum(max(0, 35 - camp.loyalty.get(o, 60)) * 2 for o in m)     # grumblers are a liability
     v += sum(2 * sum(camp.ostats[o]) + 25 * camp.level.get(o, 0) for o in m[1:])  # skill and renown
+    from . import reign
+    f = camp.allegiance.get(m[0]) if m else None
+    if f and reign.has(camp, f, "nepotist"):
+        v += sum(4 * camp.loyalty.get(o, 50) for o in m[1:])          # the faithful first
+    if f and reign.has(camp, f, "meritocrat"):
+        v += sum(3 * sum(camp.ostats[o]) for o in m[1:])              # the able first
     return v
 
 
@@ -594,7 +638,9 @@ def fill_council(camp, f: str) -> None:
     if len(r.council) < COUNCIL_SEATS:
         camp.set_council(f, choose_council(camp, f), quiet=True)
         return
-    if camp.turn % 6 == (camp.order.index(f) if f in camp.order else 0) % 6:
+    from . import reign
+    every = 3 if reign.has(camp, f, "meritocrat") else 6
+    if camp.turn % every == (camp.order.index(f) if f in camp.order else 0) % every:
         new = choose_council(camp, f)
         if set(new) != set(r.council) and council_score(camp, new) > council_score(camp, r.council) + 80:
             camp.set_council(f, new, quiet=True)
@@ -602,6 +648,7 @@ def fill_council(camp, f: str) -> None:
 
 
 def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float, object, list]]:
+    from . import reign
     r = camp.realms[f]
     best = None
     for inst in list(r.hand):
@@ -610,6 +657,7 @@ def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float,
         v, targets = VALUE(camp, f, inst)
         if v is None or v <= 0:
             continue
+        v *= reign.card_mult(camp, f, inst.card)
         cost = camp.card_cost(f, inst)
         net = v - cost * ap_price
         if net <= 0:
@@ -642,6 +690,9 @@ def course_scores(camp, f: str) -> Dict[str, float]:
          "intrigue": 1.0 + (0.6 if intrigue >= 62 else 0) + (0.3 if v <= 0 else 0)}
     for k, d in COURSE_TASTE.get(f, {}).items():
         s[k] += d
+    from . import reign
+    for k, d in reign.course_bias(camp, f).items():
+        s[k] += d
     return s
 
 
@@ -651,7 +702,8 @@ def pick_course(camp, f: str) -> None:
         return
     s = course_scores(camp, f)
     best = max(s, key=s.get)
-    if best != r.course and s[best] > s[r.course] + 0.5:          # only for a clear reason
+    from . import reign
+    if best != r.course and s[best] > s[r.course] + reign.course_margin(camp, f):   # only for a clear reason
         camp.change_course(f, best)
 
 

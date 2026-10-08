@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import cards as _cards
+from . import reign
 from .cards import AP, AP_BONUS, CARDS, COURSES, COUNCIL_SEATS, FACTION_CARD, PERSONAL
 from .factions import ALL_FACTIONS, CITIES, CITY, FACTION, PROSPERITY, City, neighbors, relation
 from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, STATS, Officer
@@ -1160,6 +1161,21 @@ class Campaign:
                 die(self, o, "погиб" + ("ла" if OFFICER[o].female else "") + f" при падении {CITY[city].name}")
                 continue
             leader = False
+            fate = reign.prisoner_fate(self, faction) if self.cities_of(old) else None
+            if fate == "execute":
+                from .succession import die
+                self.change_relation(faction, old, -10)
+                die(self, o, "казнен" + ("а" if OFFICER[o].female else "") + f" по приказу {FACTION[faction].short}")
+                continue
+            if fate == "release":
+                self.squads[o] = []
+                home = self.nearest_city(city, old)
+                if home:
+                    self.officer_city[o] = home
+                    self.change_relation(faction, old, 5)
+                    self.log_event(faction, f"{OFFICER[o].name} отпущен" + ("а" if OFFICER[o].female else "")
+                                   + " домой из милости")
+                    continue
             feud = old != "goblin" and self.relation(old, faction) <= 14      # blood feud: no oaths
             if not leader and not feud and (self.rng.random() < (100 - self.loyalty[o]) / 100 + 0.15
                                or not self.cities_of(old)):

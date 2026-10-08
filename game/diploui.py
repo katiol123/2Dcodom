@@ -208,7 +208,7 @@ class DiploWindow:
             return
         f = FACTION[other]
         s.blit(self.ms.shields[other], (x, r.y + 16))
-        font.draw(s, f.name, x + 18, r.y + 17, f.light)
+        font.draw(s, f.short, x + 18, r.y + 17, f.light)
         alive = other in camp.alive()
         tags = []
         if not alive:
@@ -217,6 +217,19 @@ class DiploWindow:
             tags.append("ГЕГЕМОН")
         tags.append(f"ГОРОДОВ {len(camp.cities_of(other))}, АРМИЯ {camp.army(other)}")
         font.draw(s, ", ".join(tags), x + 18, r.y + 25, "#8b9bb4")
+        from . import reign
+        ruler = camp.leader.get(other)
+        if ruler and reign.shown(camp, ruler):          # how their ruler governs, with the traits on hover
+            name, traits = reign.describe(ruler)
+            label = f"ПРАВИТЕЛЬ: {name}"
+            rect = font.draw(s, label, r.right - 8, r.y + 17, "#feae34", anchor="topright")
+            if rect.collidepoint(self.ms._mouse):
+                tip = pygame.Rect(rect.right - 200, rect.bottom + 2, 200, 4 + 16 * len(traits))
+                pygame.draw.rect(s, (24, 20, 37), tip)
+                pygame.draw.rect(s, _c("#feae34"), tip, 1)
+                for i, (tn, td) in enumerate(traits):
+                    font.draw(s, tn, tip.x + 4, tip.y + 3 + i * 16, "#fee761")
+                    font.draw(s, td[:48], tip.x + 4, tip.y + 10 + i * 16, "#c0cbdc")
         if not p:
             return
         v = camp.relation(p, other)

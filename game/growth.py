@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from . import reign
 from .cards import CARDS
 from .faces import presence
 from .factions import CITY, FACTION, neighbors
@@ -179,10 +180,18 @@ def turn(camp, faction: str) -> None:
             continue
         gain_xp(camp, o, XP_SEAT)
         if camp.turn - camp.last_used.get(o, camp.turn) >= 5:
-            camp.change_loyalty(o, -1)                         # nobody listens to him
+            camp.change_loyalty(o, -2 if reign.has(camp, faction, "paranoid") else -1)   # nobody listens
         if camp.loyalty[o] < 35 and camp.rng.random() < 0.15:
             camp.add_curse(faction, "unrest")
             camp.log_event(faction, f"{OFFICER[o].name} ропщет в совете")
+    if reign.has(camp, faction, "generous") and camp.turn % 3 == 0:
+        for x in camp.officers_of(faction):
+            camp.change_loyalty(x.key, 1)
+    if reign.has(camp, faction, "pious") and camp.turn % 4 == 0:
+        from .diplomacy import borders, humans
+        for x in humans(camp):
+            if x != faction and borders(camp, faction, x):
+                camp.change_relation(faction, x, 1)
     for o in [x.key for x in camp.officers_of(faction)]:
         camp.idle[o] = camp.idle.get(o, 0) + 1
         gain_xp(camp, o, XP_DRILL, deed=False)               # drill and garrison duty

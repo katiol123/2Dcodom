@@ -212,6 +212,13 @@ def evaluate(camp, frm: str, to: str, kind: str, bonus: int = 0) -> Tuple[int, L
         add("ОНИ ВЕРШАТ СУДЬБЫ МИРА", -10)
     if camp.realms[frm].unrest:
         add("ВАШ ТРОН ШАТАЕТСЯ", -15 if kind == "alliance" else -5)
+    from . import reign
+    if kind == "truce" and reign.has(camp, to, "warmonger"):
+        add("ИХ ПРАВИТЕЛЬ ВОИНСТВЕН", -15)
+    if kind == "trade" and reign.has(camp, to, "trader"):
+        add("ИХ ПРАВИТЕЛЬ - ТОРГОВЕЦ", 10)
+    if kind == "alliance" and reign.has(camp, to, "ambitious"):
+        add("ИХ ПРАВИТЕЛЬ НЕ ДЕЛИТ СЛАВУ", -20)
     dip = camp.totals(camp.realms[frm].council)["ДИПЛОМАТИЯ"]
     add("ИСКУССТВО ВАШИХ ПОСЛОВ", (dip - 50) / 4)
     intr = camp.totals(camp.realms[to].council)["ИНТРИГА"]
@@ -437,6 +444,12 @@ def ai_wishes(camp, f: str) -> List[Tuple[float, str, str]]:
         trades = sum(1 for k in camp.trade if f in k)
         if trades < 2 and can_propose(camp, f, r, "trade")[0] and camp.relation(f, r) >= 50:
             out.append((trade_gold(camp, f, r) * 3, "trade", r))
+    from . import reign
+    t = reign.ruler_traits(camp, f)
+    mult = {"truce": (2.0 if "diplomat" in t else 1.0) * (0.0 if "warmonger" in t else 1.0),
+            "alliance": (2.0 if "diplomat" in t else 1.0) * (0.0 if "ambitious" in t else 1.0),
+            "trade": 2.0 if "trader" in t else 1.0}
+    out = [(w * mult[k], k, r) for w, k, r in out if w * mult[k] > 0]
     scored = []
     for want, kind, r in out:
         score, _ = evaluate(camp, f, r, kind)
@@ -458,9 +471,13 @@ def ai_turn(camp, f: str, ap_price: float) -> None:
         r.ap -= ENVOY_COST
         propose(camp, f, other, kind)
     # treachery: a truce partner who has become easy prey (never an ally)
+    from . import reign
+    if reign.has(camp, f, "honorable"):
+        return
+    sly = reign.has(camp, f, "treacherous")
     for other in humans(camp):
-        if other != f and status(camp, f, other) == "truce" and camp.relation(f, other) < 45 \
-                and camp.betrayals[f] < 2 and prey(camp, f, other) >= 0.8:
-            if camp.rng.random() < 0.15:
+        if other != f and status(camp, f, other) == "truce" and camp.relation(f, other) < (60 if sly else 45) \
+                and camp.betrayals[f] < (4 if sly else 2) and prey(camp, f, other) >= 0.8:
+            if camp.rng.random() < (0.45 if sly else 0.15):
                 declare_war(camp, f, other)
                 break

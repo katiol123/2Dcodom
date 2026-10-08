@@ -81,6 +81,10 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   ruler's cards become the ruler's cards, the dead ruler's stay as `Realm.legacy` (one ruler only); then
   political instability (`Realm.unrest`). Use `camp.is_leader(o)`, never `rank == 0`, for "the ruler".
   Dead officers stay in `camp.dead` (excluded from `officers_of/officers_in`).
+- Reign types (`reign.py`): every officer has a reign type of 3 traits (30 traits, 12 types); it acts only
+  while he rules a computer realm (`ruler_traits` is empty for the player's realm) and is shown only then.
+  Traits hook card values, attack odds, leader risk, hiring, council, course, diplomacy, prisoners, loyalty.
+  The AI risks its ruler in a storm only above `leader_odds` or when desperate (`campaign_ai._attack_plan`).
 - Officer faces are NOT pixel art (user request): `faces.py` paints them with Pillow (supersampled curves);
   charismatic (high `presence`) = richer, plain = simpler. Painted pictures go through `hires.HIRES` so
   `present()` redraws them sharp after the integer upscale; faces/names are clickable via `OfficerCard`.

@@ -238,9 +238,20 @@ class OfficerCard:
             y += 11
         pygame.draw.line(s, _c("#3a4466"), (x, y), (x + 146, y))
         y += 5
-        for line in self.wrap(bio(o), 148):
-            font.draw(s, line, x, y, "#e6dfd0")
-            y += 7
+        from . import reign
+        if reign.shown(self.camp, o.key):              # a ruler the computer plays: how he governs
+            name, traits = reign.describe(o.key)
+            font.draw(s, f"ПРАВЛЕНИЕ: {name}", x, y, "#feae34")
+            y += 9
+            for tname, tdesc in traits:
+                for j, line in enumerate(self.wrap(f"{tname} - {tdesc}", 148)):
+                    font.draw(s, line, x + (0 if j == 0 else 4), y, "#fee761" if j == 0 else "#c0cbdc")
+                    y += 7
+            y += 2
+        else:
+            for line in self.wrap(bio(o), 148):
+                font.draw(s, line, x, y, "#e6dfd0")
+                y += 7
         # his squad, unit by unit
         y = r.bottom - 42
         font.draw(s, "ОТРЯД:", x - 110, y + 4, "#c0cbdc")
