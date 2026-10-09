@@ -103,6 +103,19 @@ def _desperate(camp, f: str, target: str) -> bool:
     return len(camp.cities_of(f)) <= 2 or (f in FACTION and target == FACTION[f].capital)
 
 
+def frost_reluctance(camp, f: str, city: str) -> float:
+    """СТУЖА: a frozen city is a costly prize - its garrison would cost 30% more and fight slower. A realm
+    whose purse is already strained keeps away from it; the North itself does not mind the cold."""
+    if not camp.chilled(f, city):
+        return 1.0
+    up = camp.upkeep(f)
+    strain = up / max(1.0, camp.expected_income(f))           # how much of the income the army eats
+    k = 0.85 * max(0.3, min(1.0, 1.6 - strain))
+    if camp.gold[f] < 2 * up:
+        k *= 0.7                                               # an empty treasury
+    return k
+
+
 def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list]:
     from .diplomacy import enemy_of_alliance, hegemon
     from . import reign
@@ -140,6 +153,7 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
         if camp.realms[camp.owner[target]].unrest:
             hostility *= 1.25                    # a throne that shakes invites the sword
         hostility *= reign.hostility(camp, f, camp.owner[target])
+        hostility *= frost_reluctance(camp, f, target)
         v = p * _city_worth(camp, target) * reign.worth_mult(camp, f) * hostility - (1 - p) * a * 0.5 \
             - p * 0.3 * min(a, d) * POWER_VALUE
         if ruler in cands:                       # the price of risking the ruler's life
@@ -725,7 +739,7 @@ def manage(camp, f: str) -> None:
             while camp.gold[f] > reserve:
                 room = camp.leadership(o.key) - camp.power(o.key)
                 cands = [k for k in pool if ROSTER[k].cost <= room and camp.hire_price(c, k) <= camp.gold[f] - reserve
-                         and not ROSTER[k].boss and camp.troop_upkeep(f, k) <= max(0, margin - 0.1 * up)
+                         and not ROSTER[k].boss and camp.troop_upkeep(f, k, c) <= max(0, margin - 0.1 * up)
                          and reign.hire_ok(camp, f, k)]
                 if not cands or len(camp.squads[o.key]) >= 7:
                     break
@@ -734,7 +748,7 @@ def manage(camp, f: str) -> None:
                 if t is None:
                     break
                 camp.assign(o.key, t.id)
-                margin -= camp.troop_upkeep(f, k)
+                margin -= camp.troop_upkeep(f, k, c)
 
 
 COUNCIL_HINT = {"basic": 55, "junk": 15, "moderate": 80, "strong": 140, "rare": 110, "unique": 150, "faction": 0, "vice": -60, "feat": 170, "fate": 0}

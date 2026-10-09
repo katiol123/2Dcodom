@@ -17,7 +17,7 @@ class FactionDataTest(unittest.TestCase):
             self.assertIn(f.emblem, EMBLEMS)
             self.assertEqual(CITY[f.capital].faction, f.key, f.key)
             self.assertGreaterEqual(len(cities_of(f.key)), 3, f.key)
-            self.assertTrue(f.lore and f.leader and len(f.mechanics) >= 3, f.key)
+            self.assertTrue(f.lore and f.leader and (len(f.mechanics) == 2 if f.playable else len(f.mechanics) >= 2), f.key)
         for em in EMBLEMS.values():
             self.assertEqual((len(em), {len(r) for r in em}), (9, {9}))
 

@@ -23,11 +23,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from . import cards as _cards
 from . import reign
 from .cards import AP, AP_BONUS, CARDS, COURSES, COUNCIL_SEATS, FACTION_CARD, PERSONAL
-from .factions import ALL_FACTIONS, CITIES, CITY, FACTION, PROSPERITY, City, neighbors, relation
+from .factions import (ALL_FACTIONS, CITIES, CITY, FACTION, FROST_CITIES, FROST_IMMUNE, PROSPERITY, City, neighbors,
+                       relation)
 from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, STATS, Officer
 from .units import ROSTER
 
-LOOT_PER_PROSPERITY = 25        # the North's ДОБЫЧА: gold for every point of a stormed city's prosperity
+FROST_UPKEEP = 1.3              # СТУЖА: upkeep of the troops standing in a frozen city (the North is used to it)
+FROST_PACE = 0.7                # ... and their speed of march and blow in a real battle there
+FROST_POWER = 0.85              # ... and their strength in a worked-out battle
 START_GOLD = {"league": 700, "sultanate": 650, "goblin": 250}
 DEFAULT_GOLD = 450
 START_SQUAD = (0.25, 0.4)       # starting squads: this share of the officer's leadership
@@ -106,6 +109,8 @@ class Battle:
     aux: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))   # allied detachments
     towers: int = 0             # archer towers of the stormed city (buildings.py)
     fury: Tuple[float, float] = (1.0, 1.0)    # damage multipliers of the sides (the horde's totem)
+    frost: bool = False                       # fought in a frozen city: a blizzard on the field
+    chill: Tuple[float, float] = (1.0, 1.0)   # speed of march and blow of the sides (СТУЖА)
     helpers: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))
     a: float = 0.0
     d: float = 0.0
@@ -215,6 +220,7 @@ class Campaign:
         self.attacks: List[Tuple[int, str, Optional[str], str, bool]] = []   # turn, by, from, city, won
         self.world_events: List[Tuple[int, str, str]] = []  # (turn, event, what happened)
         self.active: Dict[str, int] = {}                      # running world events -> rounds left
+        self.frost_wide: set = set()                          # cities under the event ВЕЛИКАЯ СТУЖА
         self.last_event = -99
         self.no_events = False                                # tests switch the world's whims off
         self.diplo_hook = None      # (camp, from, to, kind, reasons) -> the player's yes/no
@@ -392,20 +398,29 @@ class Campaign:
     def power(self, officer: str) -> int:
         return sum(t.power for t in self.squads[officer])
 
-    def troop_upkeep(self, faction: str, key: str) -> float:
+    def frosted(self, city: str) -> bool:
+        """СТУЖА holds the city: the frozen north always, half the world during ВЕЛИКАЯ СТУЖА."""
+        return city in FROST_CITIES or ("frost" in self.active and city in self.frost_wide)
+
+    def chilled(self, faction: str, city: str) -> bool:
+        """The faction's troops suffer from the frost in this city (the North never does)."""
+        return faction not in FROST_IMMUNE and self.frosted(city)
+
+    def troop_upkeep(self, faction: str, key: str, city: Optional[str] = None) -> float:
+        """Gold a turn for one troop; ``city`` - where it stands (a frozen city costs more)."""
         from .horde import upkeep_mult
         u = ROSTER[key].upkeep * upkeep_mult(self, faction, key)
-        if "frost" in self.active and faction not in ("north", "highland"):
-            u *= 1.3
+        if city and self.chilled(faction, city):
+            u *= FROST_UPKEEP
         if faction == "ashen" and ROSTER[key].undead:
             return u * 0.3                                # the dead ask for little pay, only for bones
         return u
 
     def upkeep(self, faction: str) -> int:
         """Gold per turn for every troop of the faction (in squads and unassigned)."""
-        total = sum(self.troop_upkeep(faction, t.key) for o, sq in self.squads.items()
+        total = sum(self.troop_upkeep(faction, t.key, self.officer_city.get(o)) for o, sq in self.squads.items()
                     if self.allegiance[o] == faction for t in sq)
-        total += sum(self.troop_upkeep(faction, t.key) for c, lst in self.free.items()
+        total += sum(self.troop_upkeep(faction, t.key, c) for c, lst in self.free.items()
                      if self.owner[c] == faction for t in lst)
         return int(total)
 
@@ -872,7 +887,7 @@ class Campaign:
                     del self.siege[city]
         # untaxed cities grow
         for city in self.cities_of(f):
-            if self.taxed.get(city) == self.turn or r.course == "war" or "frost" in self.active \
+            if self.taxed.get(city) == self.turn or r.course == "war" or "frost" in self.active and city in self.frost_wide \
                     or self.ravaged.get(city):
                 self.untaxed[city] = 0
             else:
@@ -1044,6 +1059,8 @@ class Campaign:
             d *= 1.25
         if owner == "sylvan" and CITY[city].faction == "sylvan":
             d *= 1.2                                      # the forest hides its own
+        if self.chilled(owner, city):
+            d *= FROST_POWER
         from .horde import side_mult
         return d * side_mult(self, owner)
 
@@ -1052,6 +1069,8 @@ class Campaign:
         a = sum(self.power(o) * self.officer_mult(o) for o in officers) * mult * side_mult(self, faction)
         if (faction, self.owner[city]) in self.grudge:
             a *= 1.3
+        if self.chilled(faction, city):
+            a *= FROST_POWER                                   # numb hands, slow horses
         if self.owner[city] != "goblin" and self.relation(faction, self.owner[city]) <= 14:
             a *= 1.15                                         # blood feud
         return a
@@ -1087,6 +1106,8 @@ class Campaign:
         city = b.city
         from .buildings import count
         b.towers = count(self, city, "tower")
+        b.frost = self.frosted(city)
+        b.chill = tuple(FROST_PACE if self.chilled(f, city) else 1.0 for f in (b.attacker, b.defender))
         b.att = [(o, t) for o in b.officers for t in self.squads[o]]
         b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
         b.a = self.attack_power(b.attacker, b.officers, city, b.mult)
@@ -1362,8 +1383,6 @@ class Campaign:
         from .buildings import RUIN_CAPTURE, ruin
         ruin(self, city, 1.0 if faction == "goblin" else RUIN_CAPTURE,     # goblins keep nothing people built
              "город взят штурмом", all_of_them=True)
-        if faction == "north":                                   # ДОБЫЧА: the longships carry the city's wealth home
-            self.earn(faction, LOOT_PER_PROSPERITY * self.prosperity[city], "loot")
         self.handover(city, faction)
         self.prosperity[city] = max(1, self.prosperity[city] - 1)
         self.stats["captured"][faction] += 1

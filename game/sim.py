@@ -139,6 +139,7 @@ class Unit:
         self.key = utype.key
         self.base_key = utype.key     # class as hired (the druid stays a druid even as a bear)
         self.tag = 0                  # campaign battles: id of the troop (0 for summons)
+        self.chill = 1.0              # СТУЖА: speed of march and blow (0.7 in a frozen city, the North 1.0)
         self.team = team
         self.team_key = TEAMS[team].key
         self.look = look
@@ -232,13 +233,13 @@ class Unit:
             v *= 1.2
         if self.has("panic"):
             v *= 1.25
-        return v
+        return v * self.chill
 
     def cooldown(self) -> float:
         k = 0.6 if (self.rage or self.has("frenzy")) else 1.0
         if self.has("rhythm"):
             k *= 0.85
-        return self.type.cooldown * k
+        return self.type.cooldown * k / self.chill
 
     def set_anim(self, name: str, speed: float = 1.0, restart: bool = False) -> None:
         if name not in self.anims:
@@ -290,8 +291,11 @@ class World:
 
     def __init__(self, slots: Sequence[Slot], anims: Dict[str, Dict[str, AnimInfo]], seed: int = 1,
                  summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS,
-                 towers: Sequence[int] = (), fury: Tuple[float, float] = (1.0, 1.0)):
+                 towers: Sequence[int] = (), fury: Tuple[float, float] = (1.0, 1.0),
+                 chill: Tuple[float, float] = (1.0, 1.0), frost: bool = False):
         self.rng = random.Random(seed)
+        self.chill = chill            # СТУЖА: each side's speed of march and blow
+        self.frost = frost            # a blizzard sweeps the field (render.py)
         self.fury = fury              # damage multiplier of each team (the goblin horde's war totem)
         self._order_rng = random.Random(seed * 7919 + 1)   # who acts first this frame: no side always wins ties
         self.seed = seed
@@ -344,6 +348,7 @@ class World:
                 u.row = u.y                # the soldier's row in the line (soft formation, ai.py)
                 u.bias = self.rng.random()
                 u.anim_t = self.rng.uniform(0, 1)
+                u.chill = self.chill[team]
                 self.units.append(u)
 
     def summon(self, owner: Unit, x: float, y: float, key: str = "skeleton", hp: Optional[float] = None,
@@ -363,6 +368,7 @@ class World:
         u.rising = rising
         u.facing = owner.facing
         u.bias = self.rng.random()
+        u.chill = self.chill[owner.team]
         self.units.append(u)
         return u
 

@@ -127,9 +127,15 @@ def _goblin_horde(camp):
                 f"{plural(back, 'вождь', 'вождя', 'вождей')}" if back else "")), worst)
 
 
+FROST_SHARE = 0.6               # ВЕЛИКАЯ СТУЖА: the northern 60% of the cities freeze
+
+
 def _frost(camp):
     camp.active["frost"] = 3
-    return ("на 3 хода: содержание войск +30% (кроме Севера и Дургхейма), города не растут", None)
+    north_first = sorted(camp.owner, key=lambda c: CITY[c].y)
+    camp.frost_wide = set(north_first[:int(len(north_first) * FROST_SHARE + 0.5)])
+    return (f"на 3 хода стужа накрыла {len(camp.frost_wide)} городов севера и центра: войска там стоят на 30% "
+            f"дороже и бьются медленнее (кроме Севера), города не растут", None)
 
 
 def _fair(camp):
@@ -240,8 +246,9 @@ EVENTS: List[Event] = [
     Event("goblin_horde", "НАШЕСТВИЕ ГОБЛИНОВ", "Гоблины отбивают до 3 слабейших своих логов, во всех "
           "логовах новые орды; гоблинские вожди на службе людей могут вернуться к своим.", _goblin_horde,
           can=lambda camp: camp.turn >= 10 and len(camp.cities_of("goblin")) <= 4, color="#63c74d"),
-    Event("frost", "ВЕЛИКАЯ СТУЖА", "3 хода: содержание войск +30% (Север и Дургхейм привычны к холоду), "
-          "города не растут.", _frost, color="#9bd3f0"),
+    Event("frost", "ВЕЛИКАЯ СТУЖА", "3 хода стужа накрывает больше половины материка (с севера): содержание "
+          "войск там +30%, в бою они на 30% медленнее (Северу нипочём), "
+          "города там не растут.", _frost, color="#9bd3f0"),
     Event("fair", "ЯРМАРКА В ЛИГЕ", "Лига +350 золота, каждый гость (мир с Лигой или отношения 50+) "
           "+150 золота и отношения +8.", _fair, can=lambda camp: "league" in _humans(camp), color="#feae34"),
     Event("gold_rush", "ЗОЛОТАЯ ЖИЛА", "В городе одной из трёх слабейших держав нашли золото: процветание "

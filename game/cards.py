@@ -223,8 +223,8 @@ _CARDS: List[Card] = [
     # --- unique personal cards: one copy in the whole world --------------------------------------
     _c("charter", "ГРАМОТА О ВОЛЬНОСТЯХ", 1, "unique", "economy", "Свой город: процветание +3. Сгорает.",
        ("own_city",), exhaust=True),
-    _c("tiltyard", "РИСТАЛИЩЕ", 1, "rare", "recruit", "За 140 золота построить в своём городе ристалище: "
-       "конница державы нанимается там в любой ход, без СБОРА ВОЙСК, на 15% дешевле; оборона города x1.1.",
+    _c("tiltyard", "РИСТАЛИЩЕ", 1, "rare", "recruit", "Ристалище в своём городе за 140 золота: "
+       "конница державы нанимается там в любой ход без СБОРА ВОЙСК и на 15% дешевле, оборона x1.1.",
        ("tiltyard_city",)),
     _c("griffon_order", "ОРДЕН ГРИФОНА", 1, "unique", "military", "Свой офицер: +40% силы на 3 хода, и он "
        "снова готов.", ("own_officer",)),
@@ -566,6 +566,7 @@ for _o, _cards in list(PERSONAL.items()):
     if "peers_court" in _cards:
         PERSONAL[_o] = tuple("tiltyard" if k == "peers_court" else k for k in _cards)
 UNIQUE_HOLDER = {("tiltyard" if k == "peers_court" else k): o for k, o in UNIQUE_HOLDER.items()}
+UNIQUES["aldern"] = tuple("tiltyard" if k == "peers_court" else k for k in UNIQUES["aldern"])
 
 
 # the new trades go to a few officers each, the best at them in some realms

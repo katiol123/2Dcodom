@@ -222,18 +222,51 @@ class Renderer:
     def draw(self, world: World, screen: pygame.Surface, real_time: float, paused: bool = False,
              speed: float = 1.0) -> None:
         ws = self.world_surf
-        ws.blit(self.bg, (0, 0))
+        ws.blit(self._snowy_bg() if getattr(world, "frost", False) else self.bg, (0, 0))
         self._decals(world, ws)
         self._units(world, ws, real_time)
         self._rings(world, ws)
         self._vfx(world, ws)
         self._particles(world, ws)
         self._lightning(world, ws)
+        if getattr(world, "frost", False):
+            self._blizzard(ws, real_time)
         self._bars(world, ws, real_time)
         self._texts(world, ws, real_time)
         screen.blit(ws, (0, 0))
         self._hud(world, screen, real_time)
         self._overlays(world, screen, real_time, paused, speed)
+
+    _FLAKES = [((i * 7919) % 997 / 997, (i * 104729) % 991 / 991, 0.6 + (i * 31) % 17 / 17 * 0.8, i % 5)
+               for i in range(300)]
+
+    def _snowy_bg(self) -> pygame.Surface:
+        """The battlefield under snow: the same ground, whitened (made once)."""
+        if getattr(self, "_snow_bg", None) is None or self._snow_src is not self.bg:
+            snow = self.bg.copy()
+            veil = pygame.Surface(snow.get_size(), pygame.SRCALPHA)
+            veil.fill((232, 240, 250, 150))
+            veil.fill((205, 220, 238, 90), pygame.Rect(0, 0, snow.get_width(), FIELD[1] - 8))   # the sky stays grey
+            snow.blit(veil, (0, 0))
+            self._snow_bg, self._snow_src = snow, self.bg
+        return self._snow_bg
+
+    def _blizzard(self, s: pygame.Surface, t: float) -> None:
+        """СТУЖА: a light blizzard - a cold tint and snow driven across the field by gusts."""
+        if not hasattr(self, "_cold"):
+            self._cold = pygame.Surface((W, H), pygame.SRCALPHA)
+            self._cold.fill((190, 225, 255, 22))
+        s.blit(self._cold, (0, 0))
+        gust = 1.0 + 0.6 * max(0.0, math.sin(t * 0.7))          # the wind comes in waves
+        for fx, fy, sp, kind in self._FLAKES:
+            x = (fx * W - t * 55 * sp * gust) % W
+            y = (fy * H + t * 32 * sp + math.sin(t * 2 + fx * 20) * 3) % H
+            col = (255, 255, 255) if kind else (139, 155, 180)  # some grey flakes read on the snow
+            s.set_at((int(x), int(y)), col)
+            if sp > 1.0:                                         # the near flakes leave a streak in the wind
+                s.set_at((int(x) + 1, int(y)), col)
+                if sp > 1.25:
+                    s.set_at((int(x) + 2, int(y) - 1), (220, 238, 255))
 
     def _decals(self, world: World, s: pygame.Surface) -> None:
         for i, d in enumerate(world.decals):

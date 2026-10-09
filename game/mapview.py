@@ -299,6 +299,24 @@ class Button:
         self.color = color
 
 
+def _snowflake() -> pygame.Surface:
+    rows = ("...#...", ".#.#.#.", "..###..", "#######", "..###..", ".#.#.#.", "...#...")
+    img = pygame.Surface((9, 9), pygame.SRCALPHA)
+    for y, row in enumerate(rows):                       # outline first, then the ice
+        for x, ch in enumerate(row):
+            if ch == "#":
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    img.set_at((x + 1 + dx, y + 1 + dy), (24, 20, 37))
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            if ch == "#":
+                img.set_at((x + 1, y + 1), (255, 255, 255) if (x, y) == (3, 3) else (155, 211, 240))
+    return img
+
+
+_SNOWFLAKE = None
+
+
 ZOOMS = (1.0, 0.5, 0.25)        # mouse wheel: the map can be pulled back (never closer than 1:1)
 
 
@@ -380,6 +398,8 @@ class WorldMapScreen:
         self.runner = Runner(self.camp)                   # card plays and turns run in a worker thread
         self.running: Optional[tuple] = None              # what the runner is doing (for its result)
         self.frozen: Optional[pygame.Surface] = None      # the last frame, shown while it runs
+        global _SNOWFLAKE
+        _SNOWFLAKE = _SNOWFLAKE or _snowflake()
         self.focus: Optional[dict] = None                 # a storm the camera flies to (battle_focus)
         self.saved_turn = self.camp.turn                  # a fresh campaign is saved on its first new round
         self.autosaving = False                           # battle.py turns it on (tests never touch the save)
@@ -1009,6 +1029,16 @@ class WorldMapScreen:
                 s.blit(self.r.panel(tw, 10, base="#181425", border="#e43b44" if den else "#feae34"),
                        (r.right + 5, r.y - 6))
                 self.font.draw(s, label, r.right + 8, r.y - 4, "#f6757a" if den else "#feae34")
+
+        if self.camp.frosted(c.key):                       # СТУЖА: a snowflake on the ribbon's left end
+            fx, fy = r.x - 4, r.y - 4
+            s.blit(_SNOWFLAKE, (fx, fy))
+            if hot:
+                label = "СТУЖА: ВОЙСКА +30% СОДЕРЖАНИЯ, В БОЮ -30% СКОРОСТИ (СЕВЕРУ НИПОЧЁМ)"
+                tw = text_width(label) + 6
+                x = max(2, min(W - tw - 2, r.centerx - tw // 2))
+                s.blit(self.r.panel(tw, 10, base="#181425", border="#9bd3f0"), (x, r.y - 17))
+                self.font.draw(s, label, x + 3, r.y - 15, "#c0e8ff")
 
     def _bars(self, s: pygame.Surface) -> None:
         f = self.font

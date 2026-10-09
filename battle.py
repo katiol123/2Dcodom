@@ -321,7 +321,9 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
             if siege is not None:
                 from game.factions import CITY, FACTION
                 renderer.hint = (f"{FACTION[siege.attacker].short} (СЛЕВА) ШТУРМУЕТ {CITY[siege.city].name}, "
-                                 f"ЗАЩИЩАЕТ {FACTION[siege.defender].short}.  ESC - ИТОГ, 1-4 СКОРОСТЬ")
+                                 f"ЗАЩИЩАЕТ {FACTION[siege.defender].short}." +
+                                 ("  СТУЖА: -30% СКОРОСТИ (КРОМЕ СЕВЕРА)." if getattr(siege, "frost", False) else "")
+                                 + "  ESC - ИТОГ, 1-4 СКОРОСТЬ")
             else:
                 renderer.hint = "ПРОБЕЛ-ПАУЗА  R-РЕВАНШ  M-СОСТАВ  1-4 СКОРОСТЬ"
             renderer.draw(world, logical, real, paused, speed)

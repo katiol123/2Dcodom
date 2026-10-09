@@ -40,7 +40,8 @@ class CardDataTest(unittest.TestCase):
             council = [o.key for o in offs[:COUNCIL_SEATS]]
             deck = deck_for(f, council)
             from game.cards import course_base
-            expect = list(course_base(f, "balance")) + [FACTION_CARD[f], "sickness"] + \
+            from game.cards import PASSIVE_CARDS
+            expect = list(course_base(f, "balance")) + [FACTION_CARD[f], "sickness"] + list(PASSIVE_CARDS.get(f, ())) + \
                 [k for o in council for k in PERSONAL[o]] + threshold_cards(council, faction=f)
             self.assertEqual(sorted(deck), sorted(expect))
             self.assertEqual(PERSONAL[offs[0].key], ())                 # the leader brings the faction card

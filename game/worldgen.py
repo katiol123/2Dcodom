@@ -22,7 +22,7 @@ from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
-from .factions import CITIES, CITY, FACTION, MAP_H, MAP_W, ROADS
+from .factions import CITIES, CITY, FACTION, FROST_CITIES, MAP_H, MAP_W, ROADS
 
 MAP_VERSION = "1"
 
@@ -290,7 +290,7 @@ CULTURES = list(GROUND)
 def map_key() -> str:
     """Changes whenever the map design data changes (used to name the cached PNG)."""
     h = hashlib.sha1(MAP_VERSION.encode())
-    h.update(repr((CITIES, ROADS, WEST_COAST, SOUTH_COAST, NORTH_COAST, LAKE, RIVERS)).encode())
+    h.update(repr((CITIES, ROADS, WEST_COAST, SOUTH_COAST, NORTH_COAST, LAKE, RIVERS, sorted(FROST_CITIES))).encode())
     try:
         with open(__file__, "rb") as f:
             h.update(f.read())
@@ -336,10 +336,10 @@ def generate(seed: int = 7) -> WorldMap:
             d *= 0.75
         m = d < best
         best[m] = d[m]
-        culture[m] = CULTURES.index(FACTION[c.faction].culture)
+        culture[m] = CULTURES.index("tundra" if c.key in FROST_CITIES else FACTION[c.faction].culture)
     blob = fbm(H, W, 18, 3, rng)
     for c in CITIES:
-        if c.faction == "goblin":
+        if c.faction == "goblin" and c.key not in FROST_CITIES:   # a frozen lair stays under the snow
             d = np.sqrt((wx - c.x) ** 2 + ((wy - c.y) * 1.3) ** 2) / 46 + (blob - 0.5) * 1.1
             culture[d < 1.0] = CULTURES.index("swamp")
 

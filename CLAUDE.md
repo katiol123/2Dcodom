@@ -79,6 +79,13 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   fight it (`battle.py` builds it with `match.campaign_battle`, units carry `tag` = troop id). Tests fight such
   battles with `match.headless_campaign_world`.
 - Courses (`COURSES` in cards.py) set the 6 base cards; vices (`VICE_OF`) are extra personal cards of 30 officers.
+- Faction descriptions (`Faction.mechanics`): exactly two lines for a playable realm - its ruler's faction card
+  and one passive (Aldern: СУД ПЭРОВ in every deck via `cards.PASSIVE_CARDS`, origin "passive").
+- СТУЖА (`FROST_CITIES` in factions.py, `camp.frosted/chilled`): in frozen cities troops of every realm but the
+  North cost `FROST_UPKEEP` more and fight/march at `FROST_PACE` in real battles (`Battle.chill` ->
+  `Unit.chill`, blizzard + snowy field in render.py), `FROST_POWER` in worked-out ones; the map shows snow
+  ground and a snowflake on the ribbon. ВЕЛИКАЯ СТУЖА freezes the northern 60% of cities (`camp.frost_wide`).
+  The AI shies from frozen targets when its purse is strained (`campaign_ai.frost_reluctance`).
 - Diplomacy (`diplomacy.py`, UI `diploui.py`): war by default, truce/alliance/trade by proposal (1 AP),
   answered by `evaluate` (weighted reasons, shown in the UI; the player answers AI envoys via `diplo_hook`),
   `declare_war` = betrayal. Relation tiers (`TIERS`/`TIER_EFFECTS`) have mechanical effects - keep the texts
