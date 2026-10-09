@@ -53,6 +53,12 @@ class OfficerCard:
         self.hits = []
         self.units = []
 
+    def cover_rect(self, rect: pygame.Rect) -> None:
+        """Something is drawn over ``rect``: only the faces there lose their sharpness and their click."""
+        HIRES.drop_in(rect)
+        self.hits = [(r, k) for r, k in self.hits if not r.colliderect(rect)]
+        self.units = [u for u in self.units if not u[0].colliderect(rect)]
+
     def handle(self, ev, mouse: Tuple[int, int]) -> bool:
         """True if the event was the card's (an open card swallows everything)."""
         mx, my = mouse

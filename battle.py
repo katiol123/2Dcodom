@@ -195,6 +195,9 @@ def _run(args, screen, scale, font, factory, renderer, logical, menu, seed, load
         mx, my = pygame.mouse.get_pos()
         mouse = ((mx - view[0]) // view[2], (my - view[1]) // view[2])
         for ev in pygame.event.get():
+            if hasattr(ev, "pos") and ev.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
+                # where the event happened, not where the cursor was when the frame began
+                mouse = ((ev.pos[0] - view[0]) // view[2], (ev.pos[1] - view[1]) // view[2])
             if ev.type == pygame.QUIT:
                 if on_map and worldmap is not None and not worldmap.runner.busy():
                     worldmap.autosave(force=True)             # the window's X keeps the campaign too

@@ -696,6 +696,7 @@ class WorldMapScreen:
         self._attack_arrows(s)
         self._cities(s)
         self._city_badges(s)
+        self._hot_names(s)
         self.fx.draw(s, 1)
         self.table.draw_targets(s)
         self._bars(s)
@@ -981,6 +982,23 @@ class WorldMapScreen:
                                  (plaque.right - 1, plaque.bottom - 1))
                 font.draw(s, text, plaque.centerx, plaque.y + 1, "#ffffff", anchor="midtop")
 
+    def _hot_names(self, s: pygame.Surface) -> None:
+        """The hovered and the selected city's names go over everything else on the map (badges, other
+        cities): up close its ribbon again, pulled back a plaque above its banner."""
+        for key in dict.fromkeys(k for k in (self.selected, self.hover_city) if k):
+            c = CITY[key]
+            f = FACTION[self.camp.owner[key]]
+            sx, sy = self._to_screen(c.x, c.y)
+            if self.zoom >= 1:
+                self._ribbon(s, c, f, sx, sy, True)
+                continue
+            tw = text_width(c.name) + 8
+            y = sy - (36 if self.zoom >= 0.5 else 24)
+            rect = pygame.Rect(sx - tw // 2, y, tw, 11)
+            s.blit(self.r.panel(rect.w, rect.h, base=f.color, border="#fee761" if key == self.selected else f.light),
+                   rect.topleft)
+            self.font.draw(s, c.name, rect.centerx, rect.centery, "#ffffff", anchor="center")
+
     def _city_marker(self, s: pygame.Surface, c: City, f: Faction, sx: int, sy: int, phase: int) -> None:
         """Pulled-back view: a banner on a pole (half zoom) or a small shield (quarter zoom)."""
         hot = c.key in (self.hover_city, self.selected)
@@ -995,7 +1013,6 @@ class WorldMapScreen:
             s.blit(sh, (sx - sh.get_width() // 2, sy - sh.get_height()))
         if hot:
             pygame.draw.ellipse(s, _c("#fee761"), (sx - 9, sy - 3, 18, 6), 1)
-            self.font.draw(s, c.name, sx, sy + 2, "#fee761", anchor="midtop")
 
     def _ribbon(self, s: pygame.Surface, c: City, f: Faction, sx: int, sy: int, hot: bool) -> None:
         _, r = self._city_rects(c)
@@ -1016,7 +1033,7 @@ class WorldMapScreen:
         if c.key == f.capital:
             s.blit(self.crown, (x - 1, r.y + 3))
             x += 6
-        self.font.draw(s, c.name, x, r.y + 1, "#fee761" if hot else "#ffffff")
+        self.font.draw(s, c.name, x, r.y + 1, "#ffffff")         # white on every ribbon: readable on gold too
         law = self.camp.law.get(c.key)
         if c.key in self.camp.dens or (law is not None and law < 4 and self.camp.owner[c.key] != "goblin"):
             den = c.key in self.camp.dens                  # crime at a glance: a red pip (a den), amber (low order)

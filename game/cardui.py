@@ -1304,6 +1304,15 @@ class CardTable:
         x0 = r.x + 214
         font.draw(s, "НАВЫКИ СОВЕТА", x0, r.y + 18, "#fee761")
         totals = self.camp.totals(council)
+        # what the council would be: a candidate under the mouse takes a free seat (yellow gain),
+        # an adviser under his X leaves (red loss)
+        after, gain = None, False
+        if without is not None:
+            after = self.camp.totals(without)
+        elif self.council_tab == "officers" and len(council) < COUNCIL_SEATS:
+            for i, key in enumerate(self._candidates()[self.council_scroll:self.council_scroll + self.CROWS]):
+                if self._cand_rect(i).collidepoint(mouse):
+                    after, gain = self.camp.totals(council + [key]), True
         for i, st in enumerate(STATS):
             yy = r.y + 27 + i * 29
             v = totals[st]
@@ -1315,6 +1324,13 @@ class CardTable:
             bar = pygame.Rect(x0, yy + 8, 116, 4)
             pygame.draw.rect(s, (38, 43, 68), bar)
             pygame.draw.rect(s, _c("#41a6f6"), (bar.x, bar.y, int(bar.w * min(1, v / 100)), bar.h))
+            if after is not None and after[st] != v:
+                lo, hi = sorted((v, after[st]))
+                x1, x2 = bar.x + int(bar.w * min(1, lo / 100)), bar.x + int(bar.w * min(1, hi / 100))
+                pygame.draw.rect(s, _c("#fee761" if gain else "#e43b44"), (x1, bar.y, max(1, x2 - x1), bar.h))
+                d = after[st] - v
+                font.draw(s, f"{d:+d}", x0 + 116 - text_width(str(v)) - 4, yy, "#fee761" if gain else "#f6757a",
+                          anchor="topright")
             for t in THRESHOLDS:
                 tx = bar.x + int(bar.w * t / 100)
                 pygame.draw.line(s, _c("#fee761"), (tx, bar.y - 1), (tx, bar.bottom))
@@ -1397,13 +1413,14 @@ class CardTable:
         else:
             font.draw(s, "МЕСТО СЛЕВА - ВЫБРАТЬ, X - ОСВОБОДИТЬ. СМЕНА СОВЕТА ПЕРЕСОБИРАЕТ КОЛОДУ", r.centerx,
                       r.bottom - 10, "#5a6988", anchor="midtop")
-        if self.hover_card:                            # shown over the stats column: no portraits there
+        if self.hover_card:
+            # a card of the seats goes over the skills column; a candidate's or a threshold's goes over the
+            # seats, so the competence bars stay in sight (their preview is what the player is weighing)
             key, label = self.hover_card
             img = self.art.full(key, label, self.player)
-            x = r.x + 228 if mouse[0] > r.x + 330 or mouse[0] < r.x + 210 else r.x + 6 + 200 - CARD_W
+            x = r.x + 228 if mouse[0] < r.x + 210 else r.x + 6 + 200 - CARD_W
             y = r.y + 30
-            if x < r.x + 210:                          # over the seats: their portraits must give way
-                self.ms.cards.cover()
+            self.ms.cards.cover_rect(pygame.Rect(x, y, CARD_W, CARD_H + 10))   # only the faces under it give way
             s.blit(img, (x, y))
             if label:
                 self.font.draw(s, label, x + CARD_W // 2, y + CARD_H + 2, "#c0cbdc", anchor="midtop")
