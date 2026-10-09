@@ -403,19 +403,18 @@ CITIES: Tuple[City, ...] = (
 CITY: Dict[str, City] = {c.key: c for c in CITIES}
 
 # Cities with a feature of their own (kind, name, description); shown in the city panel. The rules:
-# slot - one building slot more (buildings.slots); walls - defence x1.3 (campaign.defense_power and the real
-# battle's spirit); market - tax +30% (income_of); hire - hiring 20% cheaper (hire_price); grove - sickness
-# never takes hold (population); tombs - now and then a skeleton rises into the garrison; hall - officers
-# standing there gain loyalty every turn of the owner.
+# slot - one building slot more (buildings.slots); market - tax +30% (income_of); hire - hiring 20% cheaper
+# (hire_price); grove - sickness never takes hold (population); tombs - in a battle for the city a skeleton
+# rises for the defenders every 10 s (sim ``World.tombs``; gone after the battle); hall - officers standing
+# there with loyalty under 50 gain 2 every turn of the owner.
 CITY_FEATS: Dict[str, Tuple[str, str, str]] = {
     "valmarra": ("slot", "МРАМОРНЫЕ КВАРТАЛЫ", "места хватает на одно здание больше"),
     "durgheim": ("slot", "ВЕЛИКАЯ КУЗНЯ", "в скале вырублено место ещё под одно здание"),
-    "ashford": ("walls", "ВОСТОЧНАЯ ТВЕРДЫНЯ", "оборона города x1.3"),
     "bahri": ("market", "РЫНОК ПРЯНОСТЕЙ", "подать здесь на 30% больше"),
     "steppecamp": ("hire", "БИРЖА НАЁМНИКОВ", "найм в городе на 20% дешевле"),
     "worldroots": ("grove", "СВЯЩЕННАЯ РОЩА", "болезнь здесь не вспыхивает и не убивает"),
-    "kingbarrow": ("tombs", "НЕСПОКОЙНЫЕ ГРОБНИЦЫ", "каждый ход с шансом 30% в гарнизон встаёт скелет"),
-    "hjoldgard": ("hall", "МЕДОВЫЙ ЗАЛ", "верность офицеров в городе +2 каждый ход"),
+    "kingbarrow": ("tombs", "НЕСПОКОЙНЫЕ ГРОБНИЦЫ", "в бою за город каждые 10 с встаёт скелет за защитников"),
+    "hjoldgard": ("hall", "МЕДОВЫЙ ЗАЛ", "верность офицеров в городе ниже 50 растёт на 2 каждый ход"),
 }
 
 

@@ -37,6 +37,7 @@ HARDY_POWER = 1.25              # ... worth this much in a worked-out battle
 WRATH = "sylvan"                # ЯРОСТЬ ЛЕСА: roots hold the stormers of Veldmar's own forest cities
 WRATH_DPS = 3                   # ... damage a second per point of the city's prosperity
 WRATH_POWER = 1.15              # ... worth this much in a worked-out battle
+TOMBS_POWER = 1.1               # НЕСПОКОЙНЫЕ ГРОБНИЦЫ in a worked-out battle
 TRADE_SKIM = 0.2                # ПЕРЕКУПЩИКИ: Zarkhad's cut of its partners' other trade (per path)
 DEFAULT_GOLD = 450
 START_SQUAD = (0.25, 0.4)       # starting squads: this share of the officer's leadership
@@ -120,6 +121,7 @@ class Battle:
     frost: bool = False                       # fought in a frozen city: a blizzard on the field
     chill: Tuple[float, float] = (1.0, 1.0)   # speed of march and blow of the sides (СТУЖА)
     hardy: Tuple[bool, bool] = (False, False)  # the highlanders' side (ГОРНАЯ ЗАКАЛКА)
+    tombs: bool = False                        # НЕСПОКОЙНЫЕ ГРОБНИЦЫ: skeletons rise for the defenders
     wrath: Optional[Tuple[int, float]] = None  # ЯРОСТЬ ЛЕСА: (defending team, root damage a second)
     helpers: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))
     a: float = 0.0
@@ -430,11 +432,10 @@ class Campaign:
         """The features of some cities that act every turn of their owner (factions.CITY_FEATS)."""
         for city in self.cities_of(faction):
             feat = city_feat(city)
-            if feat == "tombs" and len(self.free[city]) < 12 and self.rng.random() < 0.3:
-                self.free[city].append(self._new("skeleton"))
-            elif feat == "hall":
+            if feat == "hall":
                 for o in self.officers_in(city):
-                    self.change_loyalty(o.key, 2)
+                    if self.loyalty[o.key] < 50:
+                        self.change_loyalty(o.key, 2)
 
     def forest_wrath(self, owner: str, city: str) -> bool:
         """ЯРОСТЬ ЛЕСА: Veldmar defends one of its own forest cities."""
@@ -1159,8 +1160,8 @@ class Campaign:
             d *= 1.25
         if self.forest_wrath(owner, city):
             d *= WRATH_POWER                              # the forest fights for its own
-        if city_feat(city) == "walls":
-            d *= 1.3                                      # ВОСТОЧНАЯ ТВЕРДЫНЯ
+        if city_feat(city) == "tombs":
+            d *= TOMBS_POWER                              # НЕСПОКОЙНЫЕ ГРОБНИЦЫ: the dead rise for the city
         if owner == HARDY:
             d *= HARDY_POWER
         if self.chilled(owner, city):
@@ -1215,6 +1216,7 @@ class Campaign:
         b.frost = self.frosted(city)
         b.chill = tuple(FROST_PACE if self.chilled(f, city) else 1.0 for f in (b.attacker, b.defender))
         b.hardy = (b.attacker == HARDY, b.defender == HARDY)
+        b.tombs = city_feat(city) == "tombs"
         b.wrath = (1, WRATH_DPS * self.prosperity[city]) if self.forest_wrath(b.defender, city) else None
         b.att = [(o, t) for o in b.officers for t in self.squads[o]]
         b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
@@ -1275,8 +1277,6 @@ class Campaign:
             fd *= 1.25
         from .horde import side_mult                       # (the forest's roots fight in the battle itself)
         fd *= side_mult(self, owner)
-        if city_feat(b.city) == "walls":
-            fd *= 1.3
         if (b.defender, b.attacker) in self.grudge:
             fd *= 1.3
         if "goblin" not in (b.attacker, b.defender) and self.relation(b.attacker, b.defender) <= 14:

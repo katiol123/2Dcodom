@@ -91,31 +91,41 @@ class PassivesTest(unittest.TestCase):
 
 
 class CityFeatsTest(unittest.TestCase):
-    def test_eight_cities_with_features(self):
+    def test_cities_with_features(self):
         from game.buildings import slots
         from game.factions import CITY_FEATS
-        self.assertEqual(len(CITY_FEATS), 8)
+        from game.units import ROSTER
+        self.assertEqual(len(CITY_FEATS), 7)
         self.assertEqual(sum(1 for k, _, _ in CITY_FEATS.values() if k == "slot"), 2)
         self.assertEqual(slots("valmarra"), 4)
         self.assertEqual(slots("ashford"), 2)
         c = Campaign(None, seed=3)
-        d = c.defense_power("ashford")
-        import game.factions as F
-        saved = F.CITY_FEATS.pop("ashford")
-        try:
-            self.assertAlmostEqual(d, c.defense_power("ashford") * 1.3)
-        finally:
-            F.CITY_FEATS["ashford"] = saved
-        self.assertEqual(c.hire_price("steppecamp", c._pool("steppecamp")[0]),
-                         int(round(__import__("game.units").units.ROSTER[c._pool("steppecamp")[0]].cost * 0.8)))
+        key = c._pool("steppecamp")[0]
+        self.assertEqual(c.hire_price("steppecamp", key), int(round(ROSTER[key].cost * 0.8)))
         from game.population import outbreak
         outbreak(c, "sylvan", "worldroots")
         self.assertNotIn("worldroots", c.sick)
-        n = len(c.free["kingbarrow"])
-        for _ in range(20):
-            c._city_feats("ashen")
-        self.assertGreater(len(c.free["kingbarrow"]), n)
+        hall = [o for o in c.officers_of("north") if not c.is_leader(o.key)][:1]
+        if hall:
+            c.officer_city[hall[0].key] = "hjoldgard"
+            c.loyalty[hall[0].key] = 40
+            c._city_feats("north")
+            self.assertEqual(c.loyalty[hall[0].key], 42)
+            c.loyalty[hall[0].key] = 70
+            c._city_feats("north")
+            self.assertEqual(c.loyalty[hall[0].key], 70)       # the loyal need no mead
 
+    def test_tombs_raise_skeletons_for_the_defenders(self):
+        c = Campaign(None, seed=3)
+        att = [o.key for o in c.officers_of("sylvan") if c.squads[o.key]][:3]
+        b = Battle("sylvan", c.owner["kingbarrow"], "kingbarrow", att, [o.key for o in c.officers_in("kingbarrow")])
+        c._forces(b)
+        self.assertTrue(b.tombs)
+        w = headless_campaign_world(b)
+        while w.time < 21 and w.winner is None:
+            w.step(1 / 60)
+        risen = [u for u in w.units if u.team == 1 and u.key == "skeleton" and not u.tag]
+        self.assertGreaterEqual(len(risen), 2 if w.winner is None else 1)
 
 if __name__ == "__main__":
     unittest.main()

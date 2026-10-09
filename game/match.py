@@ -44,7 +44,8 @@ def campaign_squads(b) -> Tuple[List[List[str]], List[List[int]]]:
 def campaign_battle(b, factory: SpriteFactory, progress=None) -> Tuple[World, Dict[str, dict]]:
     """A real battle for a campaign storm: attackers on the left, defenders on the right."""
     keys, tags = campaign_squads(b)
-    slots, summons, looks = plan_battle(keys, b.seed % 100000)
+    tombs = getattr(b, "tombs", False)
+    slots, summons, looks = plan_battle(keys, b.seed % 100000, {1: ["skeleton"]} if tombs else None)
     tagged = []
     per_team = {0: iter(tags[0]), 1: iter(tags[1])}
     for s in slots:
@@ -54,7 +55,7 @@ def campaign_battle(b, factory: SpriteFactory, progress=None) -> Tuple[World, Di
     world = World(tagged, anims, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
                   fury=getattr(b, "fury", (1.0, 1.0)), chill=getattr(b, "chill", (1.0, 1.0)),
                   frost=getattr(b, "frost", False), hardy=getattr(b, "hardy", (False, False)),
-                  wrath=getattr(b, "wrath", None))
+                  wrath=getattr(b, "wrath", None), tombs=1 if tombs else None)
     from .factions import FACTION
     world.names = (FACTION[b.attacker].short, FACTION[b.defender].short)   # the realms, not the colours
     return world, metas
@@ -70,10 +71,13 @@ def headless_campaign_world(b) -> World:
     from .assets import SUMMONS
     summons = {(team, k): f"{k}_{TEAMS[team].key}" for team in (0, 1)
                for owner in keys[team] for k in SUMMONS.get(owner, ())}
+    tombs = getattr(b, "tombs", False)
+    if tombs:
+        summons[(1, "skeleton")] = f"skeleton_{TEAMS[1].key}"
     return World(slots, _CLASS_ANIMS, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
                  fury=getattr(b, "fury", (1.0, 1.0)), chill=getattr(b, "chill", (1.0, 1.0)),
                  frost=getattr(b, "frost", False), hardy=getattr(b, "hardy", (False, False)),
-                 wrath=getattr(b, "wrath", None))
+                 wrath=getattr(b, "wrath", None), tombs=1 if tombs else None)
 
 
 def battle_outcome(world: World, b, rng: random.Random) -> None:

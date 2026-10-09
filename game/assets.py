@@ -115,7 +115,7 @@ def look_name(key: str, team_key: str, spec: Look) -> str:
 SUMMONS = {"necromancer": ("skeleton",), "troll": ("goblin",), "wolf_rider": ("goblin",), "druid": ("bear",)}
 
 
-def plan_battle(squads: Sequence[Sequence[str]], seed: int
+def plan_battle(squads: Sequence[Sequence[str]], seed: int, extra: Optional[Dict[int, Sequence[str]]] = None
                 ) -> Tuple[List[Slot], Dict[Tuple[int, str], str], Dict[str, Look]]:
     """Seeded looks for every unit of both squads.
 
@@ -132,7 +132,7 @@ def plan_battle(squads: Sequence[Sequence[str]], seed: int
             name = look_name(key, t.key, spec)
             looks[name] = spec
             slots.append(Slot(team, key, name))
-        for key in sorted({k for owner in squad for k in SUMMONS.get(owner, ())}):
+        for key in sorted({k for owner in squad for k in SUMMONS.get(owner, ())} | set((extra or {}).get(team, ()))):
             spec = look_for(key, t, seed * 131 + 999)
             name = look_name(key, t.key, spec)
             looks[name] = spec

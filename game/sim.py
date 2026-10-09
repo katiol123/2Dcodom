@@ -295,11 +295,14 @@ class World:
                  summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS,
                  towers: Sequence[int] = (), fury: Tuple[float, float] = (1.0, 1.0),
                  chill: Tuple[float, float] = (1.0, 1.0), frost: bool = False,
-                 hardy: Tuple[bool, bool] = (False, False), wrath: Optional[Tuple[int, float]] = None):
+                 hardy: Tuple[bool, bool] = (False, False), wrath: Optional[Tuple[int, float]] = None,
+                 tombs: Optional[int] = None):
         self.rng = random.Random(seed)
         self.hardy = hardy            # ГОРНАЯ ЗАКАЛКА: the highlanders' side (+armour, +health)
         self.wrath = wrath            # ЯРОСТЬ ЛЕСА: (team the forest fights for, root damage a second)
         self.wrath_t = 0.0
+        self.tombs = tombs            # НЕСПОКОЙНЫЕ ГРОБНИЦЫ: the team the dead rise for
+        self.tombs_t = 0.0
         self.chill = chill            # СТУЖА: each side's speed of march and blow
         self.frost = frost            # a blizzard sweeps the field (render.py)
         self.fury = fury              # damage multiplier of each team (the goblin horde's war totem)
@@ -389,6 +392,35 @@ class World:
             u.armor_bonus = self.HARDY_ARMOR
             u.max_hp *= self.HARDY_HP
             u.hp = u.chip = u.max_hp
+
+    TOMBS_EVERY = 10.0
+
+    def _step_tombs(self, dt: float) -> None:
+        """НЕСПОКОЙНЫЕ ГРОБНИЦЫ: every few seconds a skeleton claws its way up behind the defenders' line.
+        Summoned for this battle only (no troop behind it), so it is gone when the battle ends."""
+        if self.tombs is None or self.winner is not None:
+            return
+        self.tombs_t += dt
+        if self.tombs_t < self.TOMBS_EVERY:
+            return
+        self.tombs_t -= self.TOMBS_EVERY
+        team = self.tombs
+        look = self.summon_looks.get((team, "skeleton"))
+        if look is None:
+            return
+        x = FIELD[2] - 40 if team == 1 else FIELD[0] + 40
+        y = self.rng.uniform(FIELD[1] + 8, FIELD[3] - 8)
+        u = Unit(ROSTER["skeleton"], team, x, y, self.anims[look], look)
+        u.summoned = True
+        u.revived = True
+        u.rising = 1.0
+        u.facing = -1 if team == 1 else 1
+        u.bias = self.rng.random()
+        u.chill = self.chill[team]
+        self._harden(u)
+        self.units.append(u)
+        self.text(u, "ИЗ ГРОБНИЦЫ", "#c0cbdc")
+        self.burst(x, y, 2, "#5a6988", n=10, speed=25, up=30, life=0.6)
 
     def _step_wrath(self, dt: float) -> None:
         """ЯРОСТЬ ЛЕСА: every few seconds roots burst from the ground of a forest city under siege, hold a
@@ -681,6 +713,7 @@ class World:
         self._separate(dt)
         self._step_towers(dt)
         self._step_wrath(dt)
+        self._step_tombs(dt)
         self._step_projectiles(dt)
 
     def _step_effects(self, dt: float) -> None:
