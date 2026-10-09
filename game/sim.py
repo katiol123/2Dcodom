@@ -140,6 +140,8 @@ class Unit:
         self.base_key = utype.key     # class as hired (the druid stays a druid even as a bear)
         self.tag = 0                  # campaign battles: id of the troop (0 for summons)
         self.chill = 1.0              # СТУЖА: speed of march and blow (0.7 in a frozen city, the North 1.0)
+        self.armor_bonus = 0.0        # ГОРНАЯ ЗАКАЛКА: extra physical armour (added to the class's)
+        self.wrath_dps = 0.0          # ЯРОСТЬ ЛЕСА: damage a second while the roots hold him
         self.team = team
         self.team_key = TEAMS[team].key
         self.look = look
@@ -292,8 +294,12 @@ class World:
     def __init__(self, slots: Sequence[Slot], anims: Dict[str, Dict[str, AnimInfo]], seed: int = 1,
                  summon_looks: Optional[Dict[Tuple[int, str], str]] = None, teams: Tuple[Team, Team] = TEAMS,
                  towers: Sequence[int] = (), fury: Tuple[float, float] = (1.0, 1.0),
-                 chill: Tuple[float, float] = (1.0, 1.0), frost: bool = False):
+                 chill: Tuple[float, float] = (1.0, 1.0), frost: bool = False,
+                 hardy: Tuple[bool, bool] = (False, False), wrath: Optional[Tuple[int, float]] = None):
         self.rng = random.Random(seed)
+        self.hardy = hardy            # ГОРНАЯ ЗАКАЛКА: the highlanders' side (+armour, +health)
+        self.wrath = wrath            # ЯРОСТЬ ЛЕСА: (team the forest fights for, root damage a second)
+        self.wrath_t = 0.0
         self.chill = chill            # СТУЖА: each side's speed of march and blow
         self.frost = frost            # a blizzard sweeps the field (render.py)
         self.fury = fury              # damage multiplier of each team (the goblin horde's war totem)
@@ -349,6 +355,7 @@ class World:
                 u.bias = self.rng.random()
                 u.anim_t = self.rng.uniform(0, 1)
                 u.chill = self.chill[team]
+                self._harden(u)
                 self.units.append(u)
 
     def summon(self, owner: Unit, x: float, y: float, key: str = "skeleton", hp: Optional[float] = None,
@@ -369,8 +376,41 @@ class World:
         u.facing = owner.facing
         u.bias = self.rng.random()
         u.chill = self.chill[owner.team]
+        self._harden(u)
         self.units.append(u)
         return u
+
+    HARDY_ARMOR, HARDY_HP = 0.15, 1.15
+    WRATH_EVERY, WRATH_HOLD = 7.0, 3.0
+
+    def _harden(self, u: Unit) -> None:
+        """ГОРНАЯ ЗАКАЛКА: the highlanders' warriors (and their summons) wear more and last longer."""
+        if self.hardy[u.team]:
+            u.armor_bonus = self.HARDY_ARMOR
+            u.max_hp *= self.HARDY_HP
+            u.hp = u.chip = u.max_hp
+
+    def _step_wrath(self, dt: float) -> None:
+        """ЯРОСТЬ ЛЕСА: every few seconds roots burst from the ground of a forest city under siege, hold a
+        random stormer fast and crush him (physical damage, softened by armour)."""
+        if not self.wrath or self.winner is not None:
+            return
+        self.wrath_t += dt
+        if self.wrath_t < self.WRATH_EVERY:
+            return
+        self.wrath_t -= self.WRATH_EVERY
+        team, dps = self.wrath
+        prey = [u for u in self.units if u.team != team and u.alive and u.rising <= 0
+                and not u.type.incorporeal and "root" not in u.type.immune]
+        if not prey:
+            return
+        u = self.rng.choice(prey)
+        u.status["root"] = max(u.status.get("root", 0.0), self.WRATH_HOLD)
+        u.status["wrath"] = self.WRATH_HOLD
+        u.wrath_dps = dps
+        self.text(u, "КОРНИ", "#63c74d")
+        self.burst(u.x, u.y, 4, "#3e8948", n=10, speed=30, up=50, life=0.6)
+        self.sounds.append("block")
 
     # --- queries ----------------------------------------------------------------
     def enemies(self, u: Unit) -> List[Unit]:
@@ -452,7 +492,8 @@ class World:
             return 0.0
         stunned = dst.has("stun")
         sx = source_xy[0] if source_xy else (src.x if src else dst.x)
-        dodgeable = dtype == "physical" or (dst.type.dodge_magic and dtype in ("magic", "holy"))
+        dodgeable = (dtype == "physical" or (dst.type.dodge_magic and dtype in ("magic", "holy"))) \
+            and not dst.has("wrath")                 # bound by roots: no dodging them
         if dodgeable and not stunned and not dst.has("stupor") and self.rng.random() < dst.type.dodge:
             self.text(dst, "УКЛОН", "#c0cbdc")
             self.sounds.append("dodge")
@@ -503,7 +544,7 @@ class World:
                 a.key == "shieldbearer" and math.hypot(a.x - dst.x, a.y - dst.y) < 40 for a in self.allies(dst)):
             mult *= 0.7                            # shieldbearer's cover
         if dtype == "physical":
-            armor = t.armor * (0.5 if dst.has("corrode") else 1.0)
+            armor = min(0.9, t.armor + dst.armor_bonus) * (0.5 if dst.has("corrode") else 1.0)
             red = armor * (0.25 if pierce else 0.7 if blunt else 1.0)
         elif dtype in ("magic", "holy"):
             red = dst.type.resist
@@ -639,6 +680,7 @@ class World:
             self._update_unit(u, dt)
         self._separate(dt)
         self._step_towers(dt)
+        self._step_wrath(dt)
         self._step_projectiles(dt)
 
     def _step_effects(self, dt: float) -> None:
@@ -755,6 +797,11 @@ class World:
             self.deal(None, u, 3, "bleed", quiet=True)
             u.dot_acc += 3
             self.burst(u.x, u.y, 14, "#a22633", n=2, speed=8, up=10, life=0.4)
+            if u.dead:
+                return
+        if u.has("wrath") and u.wrath_dps > 0:
+            self.deal(None, u, u.wrath_dps / 2, "physical", quiet=True, label="КОРНИ")
+            self.burst(u.x, u.y, 4, "#3e8948", n=2, speed=8, up=14, life=0.4)
             if u.dead:
                 return
         if u.has("poison"):

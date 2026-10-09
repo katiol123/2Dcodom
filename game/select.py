@@ -370,6 +370,13 @@ class SelectScreen:
                     self.art = CardArt(self.r)
                 self.cards.cover()
                 s.blit(self.art.full(card.key, "ЛИДЕР", c.key), (col - CARD_W - 8, r.y - CARD_H + 60))
+            if len(c.mechanics) > 1:                       # the realm's passive: its name, the rule on hover
+                name, desc = c.mechanics[1]
+                font.draw(s, "ОСОБЕННОСТЬ:", col, y + 30, "#fee761")
+                chip = font.render(name, "#a7f070")
+                s.blit(chip, (col, y + 39))
+                if pygame.Rect(col, y + 39, chip.get_width(), 8).collidepoint(self._mouse):
+                    why = (name, desc[:1].upper() + desc[1:], "#a7f070")
             if why:                                        # the reason, in a box above the panel
                 lines = wrap(why[1], 250)
                 h = 14 + 7 * len(lines)                    # right by the hovered row, over the lore

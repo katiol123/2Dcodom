@@ -68,7 +68,7 @@ def count(camp, city: str, key: str) -> int:
     return 1 if key in camp.buildings.get(city, ()) else 0
 
 
-MASONS = {"highland": 0.7}       # МАСТЕРА КАМНЯ: the highlanders build for less
+MASONS: dict = {}               # a realm that builds cheaper (none now; kept for the price hook)
 
 
 def price_for(faction: str, cost: int) -> int:

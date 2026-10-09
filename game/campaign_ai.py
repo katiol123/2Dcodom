@@ -550,6 +550,10 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         return _best_rival(camp, f, k, lambda r: 45 * hostile(r) * arrives(camp, f, r))
     if k == "plague_cauldron":
         return _best_rival(camp, f, k, lambda r: 90 * hostile(r) * arrives(camp, f, r))
+    if k == "green_vow":                     # most worth it against a neighbour that could storm us
+        return _best_rival(camp, f, k, lambda r: (70 if any(camp.owner[n] == r for c in camp.cities_of(f)
+                                                              for n in neighbors(c)) else 20)
+                           * hostile(r) * arrives(camp, f, r))
     if k == "mushroom_haze":
         return _best_rival(camp, f, k, lambda r: 60 * hostile(r) * arrives(camp, f, r))
     if k == "all_seeing":
@@ -814,7 +818,7 @@ def fill_council(camp, f: str) -> None:
 
 
 # hostile acts: the computer does not spend them on realms it is at peace with (allies least of all)
-HOSTILE = {"arson", "agitators", "letters", "dirty_tricks", "plague_cauldron", "mushroom_haze", "all_seeing",
+HOSTILE = {"arson", "agitators", "letters", "green_vow", "dirty_tricks", "plague_cauldron", "mushroom_haze", "all_seeing",
            "secret_auction", "harem_intrigue", "winter_storm", "sabotage", "bribe", "plot", "sappers",
            "thieves_guild", "thievery", "intimidate", "denounce", "old_debt"}
 
@@ -904,6 +908,18 @@ def pick_course(camp, f: str) -> None:
         camp.change_course(f, best)
 
 
+def _broker(camp, f: str) -> None:
+    """ВЕКСЕЛЬНЫЙ ДВОР (the League): buy off curses while the purse is easy, and redeal a hand with
+    nothing worth playing in it."""
+    if f != camp.BROKER:
+        return
+    spare = lambda cost: camp.gold[f] - cost > 60 + 2 * camp.upkeep(f)
+    while camp.can_burn_curse(f)[0] and spare(camp.BURN_COST):
+        camp.burn_curse(f)
+    if camp.can_redeal(f)[0] and spare(camp.REDEAL_COST) and best_play(camp, f) is None:
+        camp.redeal(f)
+
+
 def play_turn(camp, f: str) -> None:
     if not camp.realms[f].alive:
         return
@@ -914,6 +930,7 @@ def play_turn(camp, f: str) -> None:
     fill_council(camp, f)
     from .diplomacy import ai_turn
     ai_turn(camp, f, AP_PRICE)
+    _broker(camp, f)
     for _ in range(20):
         pick = best_play(camp, f)
         if pick is None:                 # nothing worth a full action left: spend what remains

@@ -40,6 +40,19 @@ def _rivals(camp, f) -> List[str]:
 
 
 def options(camp, f: str, key: str, chosen: list) -> list:
+    out = _options(camp, f, key, chosen)
+    spared = camp.vows.get(f)
+    if spared and CARDS[key].kind == "military":         # ЛЕСНОЙ ЗАРОК: no war on the realm that sent it
+        def free(x) -> bool:
+            if not isinstance(x, str):
+                return True
+            side = camp.owner.get(x) or (x if x in camp.realms else camp.allegiance.get(x))
+            return side not in spared
+        out = [x for x in out if free(x)]
+    return out
+
+
+def _options(camp, f: str, key: str, chosen: list) -> list:
     card = CARDS[key]
     if len(chosen) >= len(card.targets):
         return []
@@ -600,6 +613,13 @@ def _letters(camp, f, t):
     camp.add_curse(t[0], "unrest", 2, source=f)
     camp.change_relation(f, t[0], -4)
     return f"{FACTION[t[0]].short}: 2 СМУТЫ в колоде"
+
+
+@effect("green_vow")
+def _green_vow(camp, f, t):
+    got = camp.add_curse(t[0], "forest_vow", 1, source=f)
+    camp.change_relation(f, t[0], -3)
+    return f"{FACTION[t[0]].short}: ЛЕСНОЙ ЗАРОК в колоде" if got else "зарок перехвачен"
 
 
 @effect("plague_cauldron")
@@ -1212,6 +1232,12 @@ def on_draw(camp, f: str, inst) -> None:
         camp.gold[f] -= pay
         camp.log_event(f, f"ДОЛГ: проценты {pay} золота")
         r.hand.append(inst)                                        # stays until repaid
+        return
+    elif key == "forest_vow":
+        if inst.by and inst.by != f:
+            camp.vows.setdefault(f, set()).add(inst.by)
+            camp.log_event(f, f"ЛЕСНОЙ ЗАРОК: в этот ход ни одной военной карты против {FACTION[inst.by].short}")
+        camp._draw(f, 1)                                           # the vow burns, a card comes instead
         return
     elif key == "haze":
         others = [c for c in r.hand if c is not inst]

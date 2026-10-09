@@ -80,7 +80,15 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   battles with `match.headless_campaign_world`.
 - Courses (`COURSES` in cards.py) set the 6 base cards; vices (`VICE_OF`) are extra personal cards of 30 officers.
 - Faction descriptions (`Faction.mechanics`): exactly two lines for a playable realm - its ruler's faction card
-  and one passive (Aldern: СУД ПЭРОВ in every deck via `cards.PASSIVE_CARDS`, origin "passive").
+  and one passive (the select screen shows both, the rule on hover). Passives: Aldern СУД ПЭРОВ in every deck
+  (`cards.PASSIVE_CARDS`, origin "passive"); Veldmar ЯРОСТЬ ЛЕСА (roots in real battles for its own forest
+  cities, `Battle.wrath` -> `World._step_wrath`; `WRATH_POWER` in worked-out ones); Ashen undead upkeep;
+  Khanate 6 AP; Zarkhad ПЕРЕКУПЩИКИ (`Campaign._skim`, `TRADE_SKIM`); North immune to СТУЖА; League
+  ВЕКСЕЛЬНЫЙ ДВОР (`camp.redeal` / `burn_curse`, buttons above the hand); Highland ГОРНАЯ ЗАКАЛКА
+  (`Battle.hardy` -> `Unit.armor_bonus`, +15% hp; `HARDY_POWER` in worked-out ones). Odds multipliers that
+  act in the real battle itself are divided out of `_battle_fury` (no double counting).
+- ЛЕСНОЙ ЗАРОК (curse from Veldmar's ЗАРОК РОЩИ): `CardInst.by` = sender; drawing it fills `camp.vows`, and
+  `cardplay.options` hides the sender's cities/officers from the drawer's military cards until its turn ends.
 - СТУЖА (`FROST_CITIES` in factions.py, `camp.frosted/chilled`): in frozen cities troops of every realm but the
   North cost `FROST_UPKEEP` more and fight/march at `FROST_PACE` in real battles (`Battle.chill` ->
   `Unit.chill`, blizzard + snowy field in render.py), `FROST_POWER` in worked-out ones; the map shows snow

@@ -31,7 +31,13 @@ from .units import ROSTER
 FROST_UPKEEP = 1.3              # СТУЖА: upkeep of the troops standing in a frozen city (the North is used to it)
 FROST_PACE = 0.7                # ... and their speed of march and blow in a real battle there
 FROST_POWER = 0.85              # ... and their strength in a worked-out battle
-START_GOLD = {"league": 700, "sultanate": 650, "goblin": 250}
+START_GOLD = {"goblin": 250}
+HARDY = "highland"              # ГОРНАЯ ЗАКАЛКА: +15% armour (added) and +15% health to all their warriors
+HARDY_POWER = 1.25              # ... worth this much in a worked-out battle
+WRATH = "sylvan"                # ЯРОСТЬ ЛЕСА: roots hold the stormers of Veldmar's own forest cities
+WRATH_DPS = 3                   # ... damage a second per point of the city's prosperity
+WRATH_POWER = 1.15              # ... worth this much in a worked-out battle
+TRADE_SKIM = 0.2                # ПЕРЕКУПЩИКИ: Zarkhad's cut of its partners' other trade (per path)
 DEFAULT_GOLD = 450
 START_SQUAD = (0.25, 0.4)       # starting squads: this share of the officer's leadership
 TAX = 20                        # gold per point of prosperity for a tax card
@@ -63,6 +69,7 @@ class CardInst:
     key: str
     origin: str = "base"        # base | faction | threshold | curse | officer key (personal card)
     left: int = 0               # curses: turns until they vanish (0 = stays)
+    by: str = ""                # curses: the realm that sent it (ЛЕСНОЙ ЗАРОК binds the drawer to it)
 
     @property
     def card(self):
@@ -85,6 +92,7 @@ class Realm:
     storms: int = 0             # storms since the last war fatigue
     revealed: Dict[str, int] = field(default_factory=dict)   # rival -> turn their hand was seen
     legacy: List[str] = field(default_factory=list)  # cards left by the ruler who died last
+    redealt: int = -1           # the League's last paid redeal (round)
     unrest: int = 0             # own turns of political instability left (succession.py)
 
     def all_cards(self) -> List[CardInst]:
@@ -111,6 +119,8 @@ class Battle:
     fury: Tuple[float, float] = (1.0, 1.0)    # damage multipliers of the sides (the horde's totem)
     frost: bool = False                       # fought in a frozen city: a blizzard on the field
     chill: Tuple[float, float] = (1.0, 1.0)   # speed of march and blow of the sides (СТУЖА)
+    hardy: Tuple[bool, bool] = (False, False)  # the highlanders' side (ГОРНАЯ ЗАКАЛКА)
+    wrath: Optional[Tuple[int, float]] = None  # ЯРОСТЬ ЛЕСА: (defending team, root damage a second)
     helpers: Tuple[List[str], List[str]] = field(default_factory=lambda: ([], []))
     a: float = 0.0
     d: float = 0.0
@@ -221,6 +231,7 @@ class Campaign:
         self.world_events: List[Tuple[int, str, str]] = []  # (turn, event, what happened)
         self.active: Dict[str, int] = {}                      # running world events -> rounds left
         self.frost_wide: set = set()                          # cities under the event ВЕЛИКАЯ СТУЖА
+        self.vows: Dict[str, set] = {}                        # ЛЕСНОЙ ЗАРОК: realm -> realms its war cards spare
         self.last_event = -99
         self.no_events = False                                # tests switch the world's whims off
         self.diplo_hook = None      # (camp, from, to, kind, reasons) -> the player's yes/no
@@ -397,6 +408,27 @@ class Campaign:
 
     def power(self, officer: str) -> int:
         return sum(t.power for t in self.squads[officer])
+
+    SKIMMER = "sultanate"
+
+    def _skim(self, f: str, deal: frozenset, g: int) -> int:
+        """ПЕРЕКУПЩИКИ: Zarkhad's caravans undercut a trade it is not part of whenever it trades with the
+        other side of it: a cut of what ``f`` earns from ``deal`` goes to Zarkhad instead. Each such path is
+        one cut (several partners of Zarkhad trading with ``f`` take a cut each)."""
+        z = self.SKIMMER
+        if z in deal or z not in self.realms or not self.realms[z].alive:
+            return 0
+        partner = next(iter(deal - {f}))
+        if frozenset((z, partner)) not in self.trade:
+            return 0
+        cut = int(round(g * TRADE_SKIM))
+        if cut:
+            self.earn(z, cut, "skim")
+        return cut
+
+    def forest_wrath(self, owner: str, city: str) -> bool:
+        """ЯРОСТЬ ЛЕСА: Veldmar defends one of its own forest cities."""
+        return owner == WRATH and CITY[city].faction == WRATH
 
     def frosted(self, city: str) -> bool:
         """СТУЖА holds the city: the frozen north always, half the world during ВЕЛИКАЯ СТУЖА."""
@@ -767,7 +799,9 @@ class Campaign:
             if hostile and self.rng.random() < catch:
                 self.log_event(faction, f"Разведка перехватила {CARDS[key].name}")
                 continue
-            r.draw.insert(self.rng.randrange(len(r.draw) + 1), self._inst(key, "curse"))
+            inst = self._inst(key, "curse")
+            inst.by = source
+            r.draw.insert(self.rng.randrange(len(r.draw) + 1), inst)
             got += 1
         return got
 
@@ -793,6 +827,58 @@ class Campaign:
 
     def draw_cards(self, faction: str, n: int) -> List[CardInst]:
         return self._draw(faction, n)
+
+    # ВЕКСЕЛЬНЫЙ ДВОР: the League buys its way out of a bad hand
+    BROKER, REDEAL_COST, BURN_COST = "league", 100, 50
+
+    def can_redeal(self, f: str) -> Tuple[bool, str]:
+        r = self.realms[f]
+        if f != self.BROKER:
+            return False, ""
+        if r.redealt == self.turn:
+            return False, "РУКУ УЖЕ ПЕРЕСДАВАЛИ В ЭТОТ ХОД"
+        if not r.hand:
+            return False, "РУКА ПУСТА"
+        if self.gold[f] < self.REDEAL_COST:
+            return False, "НЕ ХВАТАЕТ ЗОЛОТА"
+        return True, ""
+
+    def redeal(self, f: str) -> bool:
+        """For 100 gold the whole hand goes to the discard and as many new cards are drawn (once a turn)."""
+        if not self.can_redeal(f)[0]:
+            return False
+        r = self.realms[f]
+        n = len(r.hand)
+        self.gold[f] -= self.REDEAL_COST
+        r.discard.extend(r.hand)
+        r.hand.clear()
+        r.keep.clear()
+        r.redealt = self.turn
+        self._draw(f, n)
+        return True
+
+    def burnable_curse(self, f: str) -> Optional[CardInst]:
+        """The curse the League would buy off: the first one in hand (a debt is paid, never burnt)."""
+        return next((c for c in self.realms[f].hand if c.card.tier == "curse" and c.key != "debt"), None)
+
+    def can_burn_curse(self, f: str) -> Tuple[bool, str]:
+        if f != self.BROKER:
+            return False, ""
+        if self.burnable_curse(f) is None:
+            return False, "В РУКЕ НЕТ ПРОКЛЯТИЙ"
+        if self.gold[f] < self.BURN_COST:
+            return False, "НЕ ХВАТАЕТ ЗОЛОТА"
+        return True, ""
+
+    def burn_curse(self, f: str) -> Optional[str]:
+        """For 50 gold a curse in hand burns for good and a card is drawn in its place."""
+        if not self.can_burn_curse(f)[0]:
+            return None
+        inst = self.burnable_curse(f)
+        self.gold[f] -= self.BURN_COST
+        self.discard_card(f, inst, burn=True)
+        self._draw(f, 1)
+        return inst.card.name
 
     def discard_card(self, faction: str, inst: CardInst, burn: bool = False) -> None:
         r = self.realms[faction]
@@ -909,7 +995,7 @@ class Campaign:
                     del self.truce[k]
         for k, (turns, g) in list(self.trade.items()):
             if f in k:
-                self.earn(f, g, "trade")
+                self.earn(f, g - self._skim(f, k, g), "trade")
                 if turns - 0.5 <= 0:
                     del self.trade[k]
                 else:
@@ -942,6 +1028,7 @@ class Campaign:
                 r.hand.remove(c)
                 r.discard.append(c)
         r.keep = []
+        self.vows.pop(f, None)                          # a vow binds one turn: the one its hand is played in
         self._draw(f, max(0, self.hand_size(r.council) - len(r.hand)))
         self._next()
 
@@ -1057,8 +1144,10 @@ class Campaign:
             d *= 0.75
         if owner in self.realms and self.realms[owner].course == "defense":
             d *= 1.25
-        if owner == "sylvan" and CITY[city].faction == "sylvan":
-            d *= 1.2                                      # the forest hides its own
+        if self.forest_wrath(owner, city):
+            d *= WRATH_POWER                              # the forest fights for its own
+        if owner == HARDY:
+            d *= HARDY_POWER
         if self.chilled(owner, city):
             d *= FROST_POWER
         from .horde import side_mult
@@ -1071,6 +1160,8 @@ class Campaign:
             a *= 1.3
         if self.chilled(faction, city):
             a *= FROST_POWER                                   # numb hands, slow horses
+        if faction == HARDY:
+            a *= HARDY_POWER
         if self.owner[city] != "goblin" and self.relation(faction, self.owner[city]) <= 14:
             a *= 1.15                                         # blood feud
         return a
@@ -1108,6 +1199,8 @@ class Campaign:
         b.towers = count(self, city, "tower")
         b.frost = self.frosted(city)
         b.chill = tuple(FROST_PACE if self.chilled(f, city) else 1.0 for f in (b.attacker, b.defender))
+        b.hardy = (b.attacker == HARDY, b.defender == HARDY)
+        b.wrath = (1, WRATH_DPS * self.prosperity[city]) if self.forest_wrath(b.defender, city) else None
         b.att = [(o, t) for o in b.officers for t in self.squads[o]]
         b.deff = [(o, t) for o in b.defenders for t in self.squads[o]] + [(None, t) for t in self.free[city]]
         b.a = self.attack_power(b.attacker, b.officers, city, b.mult)
@@ -1148,6 +1241,11 @@ class Campaign:
         totem). Walls and townsfolk come as militia and towers instead."""
         raw_a = sum(t.power for _, t in b.att)
         fa = b.a / raw_a if raw_a else 1.0
+        # the frost and the highlanders' toughness act in the battle itself (Unit.chill / armour, health)
+        if self.chilled(b.attacker, b.city):
+            fa /= FROST_POWER
+        if b.attacker == HARDY:
+            fa /= HARDY_POWER
         owner = b.defender
         own = sum(self.power(o) for o in b.defenders)
         base = own + sum(t.power for t in self.free[b.city])
@@ -1160,9 +1258,7 @@ class Campaign:
             fd *= 0.75
         if owner in self.realms and self.realms[owner].course == "defense":
             fd *= 1.25
-        if owner == "sylvan" and CITY[b.city].faction == "sylvan":
-            fd *= 1.2
-        from .horde import side_mult
+        from .horde import side_mult                       # (the forest's roots fight in the battle itself)
         fd *= side_mult(self, owner)
         if (b.defender, b.attacker) in self.grudge:
             fd *= 1.3

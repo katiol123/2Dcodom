@@ -226,6 +226,8 @@ _CARDS: List[Card] = [
     _c("tiltyard", "РИСТАЛИЩЕ", 1, "rare", "recruit", "Ристалище в своём городе за 140 золота: "
        "конница державы нанимается там в любой ход без СБОРА ВОЙСК и на 15% дешевле, оборона x1.1.",
        ("tiltyard_city",)),
+    _c("green_vow", "ЗАРОК РОЩИ", 1, "unique", "intrigue", "В колоду соперника ложится ЛЕСНОЙ ЗАРОК: "
+       "вытянув его, соперник этот ход не может направлять против вас военные карты.", ("rival",)),
     _c("griffon_order", "ОРДЕН ГРИФОНА", 1, "unique", "military", "Свой офицер: +40% силы на 3 хода, и он "
        "снова готов.", ("own_officer",)),
     _c("peers_court", "СУД ПЭРОВ", 1, "faction", "council", "Совет: верность +15. Сжечь проклятия в руке, "
@@ -342,6 +344,8 @@ _CARDS: List[Card] = [
     _c("fatigue", "УСТАЛОСТЬ", 0, "curse", "curse", "Мёртвая карта на 3 хода.", unplayable=True, expires=3),
     _c("war_fatigue", "ВОЕННАЯ УСТАЛОСТЬ", 0, "curse", "curse", "Цена военного курса: каждый штурм. "
        "Мёртвая карта на 4 хода.", unplayable=True, expires=4),
+    _c("forest_vow", "ЛЕСНОЙ ЗАРОК", 0, "curse", "curse", "Вытянув: в этот ход военные карты не могут "
+       "целить в наславшую зарок державу. Зарок сгорает, взамен - новая карта.", on_draw=True, exhaust=True),
     _c("debt", "ДОЛГ", 0, "curse", "curse", "Вытянув - проценты 40 золота. Сыграть: вернуть 220 золота, "
        "и долг сгорает.", gold=220, on_draw=True, exhaust=True),
     _c("haze", "ГАЛЛЮЦИНАЦИИ", 0, "curse", "curse", "Вытянув - случайная другая карта уходит из руки в сброс.",
@@ -595,6 +599,17 @@ def _give_trades() -> None:
 
 
 _give_trades()
+
+
+def _vow_keeper() -> str:
+    """ЗАРОК РОЩИ goes to Veldmar's ablest counsellor by the sum of his skills (not the ruler)."""
+    offs = [o for o in OFFICERS["sylvan"] if o.rank > 0]
+    best = max(offs, key=lambda o: (sum(o.stats), o.key))
+    PERSONAL[best.key] = PERSONAL[best.key] + ("green_vow",)
+    return best.key
+
+
+UNIQUE_HOLDER["green_vow"] = _vow_keeper()
 
 
 def newcomer_cards(officer: Officer) -> List[str]:

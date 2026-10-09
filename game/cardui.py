@@ -290,6 +290,8 @@ class CardTable:
             return False                                # the city panel lies on top of the hand
         if self.watching():
             return ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self.spectator_click(mx, my)
+        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 and self._broker_click(mx, my):
+            return True
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button in (1, 3):
             if self.end_rect().collidepoint(mx, my):
                 if ev.button == 1:
@@ -807,8 +809,49 @@ class CardTable:
         if n:
             self.font.draw(s, keep, er.right - 3, er.y - 16,
                            "#fee761" if len(r.council) < COUNCIL_SEATS else "#63c74d", anchor="topright")
+        self._broker_draw(s, plate)
         if self.play and not self.picker:
             self._prompt(s)
+
+    def _broker_rects(self, plate: pygame.Rect) -> List[Tuple[pygame.Rect, str, str]]:
+        """ВЕКСЕЛЬНЫЙ ДВОР (the League): pay to redeal the hand or to burn a curse, above the hand info."""
+        if self.player != self.camp.BROKER or not self.my_turn():
+            return []
+        out, x = [], plate.right
+        for action, label in (("burn", f"СЖЕЧЬ ПРОКЛЯТИЕ {self.camp.BURN_COST}"),
+                              ("redeal", f"НОВАЯ РУКА {self.camp.REDEAL_COST}")):
+            w = text_width(label) + 8
+            out.append((pygame.Rect(x - w, plate.y - 13, w, 11), action, label))
+            x -= w + 3
+        return out
+
+    def _broker_draw(self, s: pygame.Surface, plate: pygame.Rect) -> None:
+        self._broker = self._broker_rects(plate)
+        for rect, action, label in self._broker:
+            ok, _ = self.camp.can_redeal(self.player) if action == "redeal" else self.camp.can_burn_curse(self.player)
+            hot = ok and rect.collidepoint(self.ms._mouse)
+            s.blit(self.ms.r.panel(rect.w, rect.h, base=("#c28a2e" if hot else "#7a5a1a") if ok else "#2a2f48",
+                                    border="#fee761" if ok else "#3a4466"), rect.topleft)
+            self.font.draw(s, label, rect.centerx, rect.centery, "#ffffff" if ok else "#5a6988", anchor="center")
+
+    def _broker_click(self, mx: int, my: int) -> bool:
+        for rect, action, _ in getattr(self, "_broker", []):
+            if rect.collidepoint(mx, my):
+                f = self.player
+                if action == "redeal":
+                    ok, why = self.camp.can_redeal(f)
+                    if ok:
+                        self.camp.redeal(f)
+                        self.ms._say(f"РУКА ПЕРЕСДАНА ЗА {self.camp.REDEAL_COST} ЗОЛОТА", "#fee761")
+                else:
+                    ok, why = self.camp.can_burn_curse(f)
+                    if ok:
+                        name = self.camp.burn_curse(f)
+                        self.ms._say(f"ВЫКУПЛЕНО: {name}", "#fee761")
+                if not ok and why:
+                    self.ms._say(why)
+                return True
+        return False
 
     def _prompt(self, s: pygame.Surface) -> None:
         step = self._step()

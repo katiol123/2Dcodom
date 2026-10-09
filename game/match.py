@@ -53,7 +53,8 @@ def campaign_battle(b, factory: SpriteFactory, progress=None) -> Tuple[World, Di
     anims = {name: anim_infos(meta) for name, meta in metas.items()}
     world = World(tagged, anims, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
                   fury=getattr(b, "fury", (1.0, 1.0)), chill=getattr(b, "chill", (1.0, 1.0)),
-                  frost=getattr(b, "frost", False))
+                  frost=getattr(b, "frost", False), hardy=getattr(b, "hardy", (False, False)),
+                  wrath=getattr(b, "wrath", None))
     from .factions import FACTION
     world.names = (FACTION[b.attacker].short, FACTION[b.defender].short)   # the realms, not the colours
     return world, metas
@@ -71,7 +72,8 @@ def headless_campaign_world(b) -> World:
                for owner in keys[team] for k in SUMMONS.get(owner, ())}
     return World(slots, _CLASS_ANIMS, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
                  fury=getattr(b, "fury", (1.0, 1.0)), chill=getattr(b, "chill", (1.0, 1.0)),
-                 frost=getattr(b, "frost", False))
+                 frost=getattr(b, "frost", False), hardy=getattr(b, "hardy", (False, False)),
+                 wrath=getattr(b, "wrath", None))
 
 
 def battle_outcome(world: World, b, rng: random.Random) -> None:
