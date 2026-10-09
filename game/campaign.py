@@ -23,8 +23,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from . import cards as _cards
 from . import reign
 from .cards import AP, AP_BONUS, CARDS, COURSES, COUNCIL_SEATS, FACTION_CARD, PERSONAL
-from .factions import (ALL_FACTIONS, CITIES, CITY, FACTION, FROST_CITIES, FROST_IMMUNE, PROSPERITY, City, neighbors,
-                       relation)
+from .factions import (ALL_FACTIONS, CITIES, CITY, FACTION, FROST_CITIES, FROST_IMMUNE, PROSPERITY, City, city_feat,
+                       neighbors, relation)
 from .officers import OFFICER, OFFICERS, SQUAD_SLOTS, STATS, Officer
 from .units import ROSTER
 
@@ -426,6 +426,16 @@ class Campaign:
             self.earn(z, cut, "skim")
         return cut
 
+    def _city_feats(self, faction: str) -> None:
+        """The features of some cities that act every turn of their owner (factions.CITY_FEATS)."""
+        for city in self.cities_of(faction):
+            feat = city_feat(city)
+            if feat == "tombs" and len(self.free[city]) < 12 and self.rng.random() < 0.3:
+                self.free[city].append(self._new("skeleton"))
+            elif feat == "hall":
+                for o in self.officers_in(city):
+                    self.change_loyalty(o.key, 2)
+
     def forest_wrath(self, owner: str, city: str) -> bool:
         """ЯРОСТЬ ЛЕСА: Veldmar defends one of its own forest cities."""
         return owner == WRATH and CITY[city].faction == WRATH
@@ -500,6 +510,8 @@ class Campaign:
                    default=0)
         from .order import tax_mult
         g = int((self.prosperity[city] * TAX + 2 * best) * tax_mult(self, city))   # a thieves' den skims it
+        if city_feat(city) == "market":
+            g = int(g * 1.3)                                   # РЫНОК ПРЯНОСТЕЙ
         return g * 2 // 5 if "drought" in self.active else g
 
     def army(self, faction: str) -> int:
@@ -900,6 +912,7 @@ class Campaign:
         r.ap_penalty = 0
         frozen = self.frozen.pop(faction, 0)
         self.ready = set() if frozen else {o.key for o in self.officers_of(faction)}
+        self._city_feats(faction)
         if frozen:
             self.log_event(faction, "Войска скованы льдом и не выходят из городов")
         for pile in (r.draw, r.hand, r.discard):              # curses fade
@@ -1146,6 +1159,8 @@ class Campaign:
             d *= 1.25
         if self.forest_wrath(owner, city):
             d *= WRATH_POWER                              # the forest fights for its own
+        if city_feat(city) == "walls":
+            d *= 1.3                                      # ВОСТОЧНАЯ ТВЕРДЫНЯ
         if owner == HARDY:
             d *= HARDY_POWER
         if self.chilled(owner, city):
@@ -1260,6 +1275,8 @@ class Campaign:
             fd *= 1.25
         from .horde import side_mult                       # (the forest's roots fight in the battle itself)
         fd *= side_mult(self, owner)
+        if city_feat(b.city) == "walls":
+            fd *= 1.3
         if (b.defender, b.attacker) in self.grudge:
             fd *= 1.3
         if "goblin" not in (b.attacker, b.defender) and self.relation(b.attacker, b.defender) <= 14:

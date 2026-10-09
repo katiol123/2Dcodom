@@ -134,6 +134,9 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Recruit pools belong to cities (3-6 units); keys not in `ROSTER` must be in `NEW_UNITS` (planned units).
 - `worldgen.py` is numpy-only (no pygame). Coast/lake/rivers are control points; ground culture = nearest
   non-goblin city (`Faction.culture`); goblin lairs get swamp pockets. The map PNG is cached by `map_key()`.
+- City features (`CITY_FEATS` in factions.py, `city_feat`): 8 cities with a rule of their own (2x +1 building
+  slot, walls x1.3, market +30% tax, hiring -20%, sacred grove free of sickness, tombs raising skeletons, mead
+  hall loyalty); shown first in the city panel and as a gold gem on the ribbon. Keep the texts true.
 - New city: `City` in `CITIES` + pairs in `ROADS`; tests check land, spacing, connectivity, no sea roads.
 - Docs in docs/CAMPAIGN.md are generated from this data - regenerate the tables when the data changes.
 

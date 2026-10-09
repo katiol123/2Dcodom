@@ -90,5 +90,32 @@ class PassivesTest(unittest.TestCase):
         self.assertNotIn("ashen", c.vows)
 
 
+class CityFeatsTest(unittest.TestCase):
+    def test_eight_cities_with_features(self):
+        from game.buildings import slots
+        from game.factions import CITY_FEATS
+        self.assertEqual(len(CITY_FEATS), 8)
+        self.assertEqual(sum(1 for k, _, _ in CITY_FEATS.values() if k == "slot"), 2)
+        self.assertEqual(slots("valmarra"), 4)
+        self.assertEqual(slots("ashford"), 2)
+        c = Campaign(None, seed=3)
+        d = c.defense_power("ashford")
+        import game.factions as F
+        saved = F.CITY_FEATS.pop("ashford")
+        try:
+            self.assertAlmostEqual(d, c.defense_power("ashford") * 1.3)
+        finally:
+            F.CITY_FEATS["ashford"] = saved
+        self.assertEqual(c.hire_price("steppecamp", c._pool("steppecamp")[0]),
+                         int(round(__import__("game.units").units.ROSTER[c._pool("steppecamp")[0]].cost * 0.8)))
+        from game.population import outbreak
+        outbreak(c, "sylvan", "worldroots")
+        self.assertNotIn("worldroots", c.sick)
+        n = len(c.free["kingbarrow"])
+        for _ in range(20):
+            c._city_feats("ashen")
+        self.assertGreater(len(c.free["kingbarrow"]), n)
+
+
 if __name__ == "__main__":
     unittest.main()

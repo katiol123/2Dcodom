@@ -80,6 +80,10 @@ def _plague(camp):
     for city, d in reach.items():
         camp.prosperity[city] = max(1, camp.prosperity[city] - (4 if d == 0 else 3 if d == 1 else 2))
         owner = camp.owner[city]
+        from .factions import city_feat
+        if city_feat(city) == "grove":                         # the sacred grove: the plague passes it by
+            hit[owner] = hit.get(owner, 0) + 1
+            continue
         _cull(camp, city, 0.6 if d == 0 else 0.4 if d == 1 else 0.25, spare_undead=True)   # the dead fear no plague
         hit[owner] = hit.get(owner, 0) + 1
     worst = max(hit, key=hit.get)

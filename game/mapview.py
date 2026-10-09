@@ -1047,6 +1047,12 @@ class WorldMapScreen:
                        (r.right + 5, r.y - 6))
                 self.font.draw(s, label, r.right + 8, r.y - 4, "#f6757a" if den else "#feae34")
 
+        from .factions import CITY_FEATS
+        if c.key in CITY_FEATS:                              # a city with a feature: a gold gem on the ribbon
+            gx, gy = r.right - 1, r.bottom - 1
+            pygame.draw.polygon(s, INK, [(gx, gy - 4), (gx + 4, gy), (gx, gy + 4), (gx - 4, gy)])
+            pygame.draw.polygon(s, _c("#ffd36b"), [(gx, gy - 3), (gx + 3, gy), (gx, gy + 3), (gx - 3, gy)])
+            s.set_at((gx - 1, gy - 1), _c("#ffffff"))
         if self.camp.frosted(c.key):                       # СТУЖА: a snowflake on the ribbon's left end
             fx, fy = r.x - 4, r.y - 4
             s.blit(_SNOWFLAKE, (fx, fy))
@@ -1162,6 +1168,10 @@ class WorldMapScreen:
         camp = self.camp
         owner = camp.owner[c.key]
         out = []
+        from .factions import CITY_FEATS
+        if c.key in CITY_FEATS:                                # the city's own feature, first and in gold
+            _, name, desc = CITY_FEATS[c.key]
+            out.append((f"{name}: {desc}".upper(), "#ffd36b"))
         tax = f"ПОДАТЬ {camp.income_of(c.key, owner)}"
         if c.key in camp.law and owner != "goblin":           # tax and order share a line, in their own colours
             law = camp.law[c.key]

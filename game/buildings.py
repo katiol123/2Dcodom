@@ -60,8 +60,9 @@ RUIN_RAID, RUIN_FAILED_STORM, RUIN_CAPTURE = 0.5, 0.2, 0.4
 
 
 def slots(city: str) -> int:
+    from .factions import city_feat
     kind = CITY[city].kind
-    return 3 if kind == "capital" else 1 if kind == "lair" else 2
+    return (3 if kind == "capital" else 1 if kind == "lair" else 2) + (city_feat(city) == "slot")
 
 
 def count(camp, city: str, key: str) -> int:
@@ -146,8 +147,11 @@ def defense_bonus(camp, city: str) -> float:
 
 
 def hire_price(camp, city: str, cost: int, key: str = "") -> int:
+    from .factions import city_feat
     if key and key == tiltyard_mount(camp, city):
         cost = cost * TILTYARD_PRICE
+    if city_feat(city) == "hire":
+        cost = cost * 0.8                                  # БИРЖА НАЁМНИКОВ
     return int(round(cost * 0.8)) if count(camp, city, "barracks") else int(round(cost))
 
 

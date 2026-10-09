@@ -39,8 +39,14 @@ def outbreak(camp, faction: str, city: Optional[str] = None) -> str:
     cities = camp.cities_of(faction)
     if not cities:
         return ""
+    from .factions import city_feat
     if city is None:                                     # crowded cities fall sick more often
         city = camp.rng.choices(cities, [1 + 2 * len(camp.officers_in(c)) for c in cities])[0]
+    if city_feat(city) == "grove":                       # СВЯЩЕННАЯ РОЩА: the sickness finds no hold
+        camp.stats["outbreaks_stopped"][faction] += 1
+        msg = f"БОЛЕЗНЬ обошла священную рощу: {CITY[city].name}"
+        camp.log_event(faction, msg)
+        return msg
     camp.stats["outbreaks"][faction] += 1
     block = 1.0 if city in camp.immune else sickness_block(camp, city)
     if block and camp.rng.random() < block:

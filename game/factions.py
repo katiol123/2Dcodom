@@ -16,7 +16,7 @@ MAP_W x MAP_H world map; a city's (x, y) is the foot of its tower.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .units import ROSTER
 
@@ -401,6 +401,28 @@ CITIES: Tuple[City, ...] = (
          ("goblin", "wolf_rider", "mad_goblin", "ogre"), "Логово наездников на лютоволках"),
 )
 CITY: Dict[str, City] = {c.key: c for c in CITIES}
+
+# Cities with a feature of their own (kind, name, description); shown in the city panel. The rules:
+# slot - one building slot more (buildings.slots); walls - defence x1.3 (campaign.defense_power and the real
+# battle's spirit); market - tax +30% (income_of); hire - hiring 20% cheaper (hire_price); grove - sickness
+# never takes hold (population); tombs - now and then a skeleton rises into the garrison; hall - officers
+# standing there gain loyalty every turn of the owner.
+CITY_FEATS: Dict[str, Tuple[str, str, str]] = {
+    "valmarra": ("slot", "МРАМОРНЫЕ КВАРТАЛЫ", "места хватает на одно здание больше"),
+    "durgheim": ("slot", "ВЕЛИКАЯ КУЗНЯ", "в скале вырублено место ещё под одно здание"),
+    "ashford": ("walls", "ВОСТОЧНАЯ ТВЕРДЫНЯ", "оборона города x1.3"),
+    "bahri": ("market", "РЫНОК ПРЯНОСТЕЙ", "подать здесь на 30% больше"),
+    "steppecamp": ("hire", "БИРЖА НАЁМНИКОВ", "найм в городе на 20% дешевле"),
+    "worldroots": ("grove", "СВЯЩЕННАЯ РОЩА", "болезнь здесь не вспыхивает и не убивает"),
+    "kingbarrow": ("tombs", "НЕСПОКОЙНЫЕ ГРОБНИЦЫ", "каждый ход с шансом 30% в гарнизон встаёт скелет"),
+    "hjoldgard": ("hall", "МЕДОВЫЙ ЗАЛ", "верность офицеров в городе +2 каждый ход"),
+}
+
+
+def city_feat(city: str) -> Optional[str]:
+    f = CITY_FEATS.get(city)
+    return f[0] if f else None
+
 
 # СТУЖА: the frozen north. In these cities the troops of every realm but the North cost 30% more upkeep
 # and fight and march 30% slower (campaign.py ``frosted``); the land around them is snow (worldgen.py).
