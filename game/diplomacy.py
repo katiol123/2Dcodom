@@ -487,26 +487,32 @@ def ai_turn(camp, f: str, ap_price: float) -> None:
         _, kind, other = wishes[0]
         r.ap -= ENVOY_COST
         propose(camp, f, other, kind)
-    # treachery: a truce partner who has become easy prey (never an ally)
+    pick = betrayal(camp, f)
+    if pick and camp.rng.random() < pick[1]:
+        declare_war(camp, f, pick[0])
+
+
+def betrayal(camp, f: str) -> Optional[Tuple[str, float]]:
+    """Whom the ruler is tempted to betray this turn and how likely he strikes: a truce partner who has
+    become easy prey (ВЕРОЛОМНЫЙ: an ally too, and the surer the storm the likelier the blow; БЛАГОРОДНЫЙ:
+    never)."""
     from . import reign
     if reign.has(camp, f, "honorable"):
-        return
+        return None
     sly = reign.has(camp, f, "treacherous")
     if camp.betrayals[f] >= (5 if sly else 2):
-        return
-    # the juiciest partner first: the surer the storm, the stronger the pull
-    marks = []
+        return None
+    marks = []                                       # the juiciest partner first
     for other in humans(camp):
         st = status(camp, f, other)
         if other == f or st not in (("truce", "alliance") if sly else ("truce",)):
             continue
         if st == "truce" and camp.relation(f, other) >= (75 if sly else 45):
-            continue                                     # (an ally is betrayed for gain alone, friend or not)
+            continue                                 # (an ally is betrayed for gain alone, friend or not)
         p = prey(camp, f, other)
         if p >= (TREACHERY_PREY_SLY if sly else TREACHERY_PREY):
             marks.append((p, other))
-    if marks:
-        p, other = max(marks)
-        chance = min(0.8, 0.2 + p * 0.6) if sly else 0.15  # ВЕРОЛОМНЫЙ: the surer the storm, the sooner the blow
-        if camp.rng.random() < chance:
-            declare_war(camp, f, other)
+    if not marks:
+        return None
+    p, other = max(marks)
+    return other, (min(0.8, 0.2 + p * 0.6) if sly else 0.15)
