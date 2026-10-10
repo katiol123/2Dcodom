@@ -180,7 +180,7 @@ def turn(camp, faction: str) -> None:
             continue
         gain_xp(camp, o, XP_SEAT)
         if camp.turn - camp.last_used.get(o, camp.turn) >= 5:
-            camp.change_loyalty(o, -2 if reign.has(camp, faction, "paranoid") else -1)   # nobody listens
+            camp.change_loyalty(o, -1)                   # nobody listens
         if camp.loyalty[o] < 35 and camp.rng.random() < 0.15:
             camp.add_curse(faction, "unrest")
             camp.log_event(faction, f"{OFFICER[o].name} ропщет в совете")
