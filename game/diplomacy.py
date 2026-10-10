@@ -46,6 +46,7 @@ TIER_EFFECTS = {
 }
 KIND_NAMES = {"truce": "ПЕРЕМИРИЕ", "alliance": "СОЮЗ", "trade": "ТОРГОВЛЯ"}
 HELP_SHARE, HELP_SHARE_BROTHER = 0.25, 0.4
+TREACHERY_PREY, TREACHERY_PREY_SLY = 0.8, 0.6   # storm odds that tempt a ruler to break his word
 
 
 def tier(v: int) -> Tuple[str, str, str]:
@@ -491,9 +492,21 @@ def ai_turn(camp, f: str, ap_price: float) -> None:
     if reign.has(camp, f, "honorable"):
         return
     sly = reign.has(camp, f, "treacherous")
+    if camp.betrayals[f] >= (5 if sly else 2):
+        return
+    # the juiciest partner first: the surer the storm, the stronger the pull
+    marks = []
     for other in humans(camp):
-        if other != f and status(camp, f, other) == "truce" and camp.relation(f, other) < (60 if sly else 45) \
-                and camp.betrayals[f] < (4 if sly else 2) and prey(camp, f, other) >= 0.8:
-            if camp.rng.random() < (0.45 if sly else 0.15):
-                declare_war(camp, f, other)
-                break
+        st = status(camp, f, other)
+        if other == f or st not in (("truce", "alliance") if sly else ("truce",)):
+            continue
+        if st == "truce" and camp.relation(f, other) >= (75 if sly else 45):
+            continue                                     # (an ally is betrayed for gain alone, friend or not)
+        p = prey(camp, f, other)
+        if p >= (TREACHERY_PREY_SLY if sly else TREACHERY_PREY):
+            marks.append((p, other))
+    if marks:
+        p, other = max(marks)
+        chance = min(0.8, 0.2 + p * 0.6) if sly else 0.15  # ВЕРОЛОМНЫЙ: the surer the storm, the sooner the blow
+        if camp.rng.random() < chance:
+            declare_war(camp, f, other)

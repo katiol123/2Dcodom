@@ -1,7 +1,7 @@
 """Reign types (pure Python, no pygame): how a ruler governs when the computer plays his realm.
 
 Every officer has a reign type (``reign_of``) - a name such as ТИРАН made of three behaviour
-traits (``TRAITS``, 38 of them; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
+traits (``TRAITS``, 38 of them, in 33 types; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
 the computer plays: the player's own ruler governs as the player does, and officers who do not
 rule keep their type hidden. A new ruler brings his own way of governing (succession.py).
 
@@ -33,7 +33,8 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "diplomat": ("ДИПЛОМАТ", "вдвое охотнее шлёт послов с миром и союзом"),
     "warmonger": ("ВОИНСТВЕННЫЙ", "мира не просит и неохотно его принимает (-15)"),
     "honorable": ("БЛАГОРОДНЫЙ", "никогда не нарушает договоров"),
-    "treacherous": ("ВЕРОЛОМНЫЙ", "разрывает перемирия втрое охотнее"),
+    "treacherous": ("ВЕРОЛОМНЫЙ", "рвёт перемирия и даже союзы, едва сосед становится лёгкой добычей: "
+                                  "чем вернее штурм, тем скорее удар"),
     "builder": ("СТРОИТЕЛЬ", "процветание городов ценит на 40% выше, бережёт их от поборов"),
     "defender": ("ОБОРОНЕЦ", "карты обороны ценит на 40% выше, тянется к курсу обороны"),
     "conqueror": ("ЗАВОЕВАТЕЛЬ", "вражеские города ценит на 25% выше, тянется к курсу войны"),
@@ -62,7 +63,7 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "hoarder": ("ЖАДНЫЙ ДО БЛЕСТЯШЕК", "вождь орды: копит всё золото на великую постройку"),
 }
 GOBLIN_ONLY = {"warchief", "hoard_king"}          # reign types only goblins have
-HUMAN_ONLY = {"slayer", "tributary", "hermit", "peacemaker"}   # ... and only people (the horde has no envoys)
+HUMAN_ONLY = {"slayer", "tributary", "hermit", "peacemaker", "usurper"}   # ... and only people (the horde has no envoys)
 
 # key: (name, traits)
 REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
@@ -96,6 +97,7 @@ REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
     "nomad": ("КОЧЕВОЙ ВОЖДЬ", ("rover", "reckless", "recruiter")),
     "slayer": ("ИСТРЕБИТЕЛЬ ОРД", ("hunter", "brave", "conqueror")),
     "tributary": ("ОТКУПЩИК", ("appeaser", "cautious", "trader")),
+    "usurper": ("КОВАРНЫЙ УЗУРПАТОР", ("treacherous", "ambitious", "aggressive")),
     "warchief": ("ВЕЛИКИЙ ВОЖАК", ("hoarder", "aggressive", "reckless")),
     "hoard_king": ("КОРОЛЬ КУЧИ", ("hoarder", "greedy", "cruel")),
 }
@@ -126,6 +128,7 @@ _LEAN: Dict[str, Tuple[float, ...]] = {
     "upstart": (0.3, 0.6, 0, 0, -0.3, 0.6),
     "benefactor": (0.8, 0, 0, 0, 0.8, -0.6),
     "mercenary": (0.4, 0.4, 0, 0, 0, 0.8),
+    "usurper": (0, 0.5, 0, 0.4, -0.6, 1.0),
     "hermit": (0.7, 0, 0.7, 0.3, -1.7, 0),
     "peacemaker": (0, -0.3, 0, 0, 1.4, -0.6),
     "chancellor": (1.3, 0, 0, 0.7, 0.5, 0),

@@ -171,7 +171,7 @@ class BuildingTest(unittest.TestCase):
             self.assertIn(k, CARDS)
 
     def test_thirty_two_reigns(self):
-        self.assertEqual(len(reign.REIGNS), 32)
+        self.assertEqual(len(reign.REIGNS), 33)
         used = {t for _, tr in reign.REIGNS.values() for t in tr}
         self.assertEqual(used, set(reign.TRAITS))
 
