@@ -1283,8 +1283,8 @@ class WorldMapScreen:
         key, owner = c.key, camp.owner[c.key]
         p, top = camp.prosperity[key], camp.max_prosperity(key)
         out = [(f"ПРОЦВЕТАНИЕ {p} ИЗ {top}", "#feae34"),
-               ("ДАЁТ: подать = процветание x20, богатые города кормят казну; но выше 6 оно тянет вниз порядок "
-                "(воры идут к богатству).", "#c0cbdc")]
+               ("ДАЁТ: каждый ход город сам приносит процветание x3 золота (карта ПОДАТЬ - ещё x11); но выше 6 "
+                "оно тянет вниз порядок (воры идут к богатству).", "#c0cbdc")]
         if owner != "goblin":
             r = camp.realms[owner]
             if camp.ravaged.get(key):
@@ -1310,7 +1310,12 @@ class WorldMapScreen:
         from .campaign import TAX
         camp = self.camp
         key, owner = c.key, camp.owner[c.key]
-        out = [(f"ПОДАТЬ {camp.tax_yield(key, owner)}: столько золота принесёт карта ПОДАТЬ в этом городе сейчас",
+        from .campaign import TRIBUTE
+        g, why = camp.tribute(key)
+        out = [(f"ДОХОД {g}: столько город приносит сам каждый ход (процветание x{TRIBUTE})"
+                + (f" - СЕЙЧАС НИЧЕГО: {why}" if why else ""), "#a7f070" if not why else "#f6757a"),
+               ("Город не платит в осаде, разорённый, при болезни и при порядке ниже 4.", "#8b9bb4"),
+               (f"ПОДАТЬ {camp.tax_yield(key, owner)}: столько золота сверх того принесёт карта ПОДАТЬ сейчас",
                 "#fee761"),
                (f"ПРОЦВЕТАНИЕ {camp.prosperity[key]} x{TAX} = {camp.prosperity[key] * TAX}", "#c0cbdc")]
         offs = [o for o in camp.officers_in(key) if camp.allegiance[o.key] == owner]
@@ -1376,7 +1381,8 @@ class WorldMapScreen:
         if c.key in CITY_FEATS:                                # the city's own feature, first and in gold
             _, name, desc = CITY_FEATS[c.key]
             out.append((f"{name}: {desc}".upper(), "#ffd36b"))
-        tax = f"ПОДАТЬ {camp.tax_yield(c.key, owner)}"
+        g, why = camp.tribute(c.key)
+        tax = f"ДОХОД {g}{' (' + why + ')' if why else ''} ПОДАТЬ {camp.tax_yield(c.key, owner)}"
         if c.key in camp.law and owner != "goblin":           # tax and order share a line, in their own colours
             law = camp.law[c.key]
             out.append(((tax, "#fee761"), (f"ПОРЯДОК {law}/10",
@@ -1438,7 +1444,7 @@ class WorldMapScreen:
             if isinstance(text, tuple):                       # two coloured parts on one line
                 font.draw(s, col[0], r.x + 5 + text_width(text[0]) + 12, y, col[1])
                 font.draw(s, text[0], r.x + 5, y, text[1])
-                if text[0].startswith("ПОДАТЬ"):                # tax and order: hover for how they work
+                if text[0].startswith("ДОХОД"):                 # income and order: hover for how they work
                     self._panel_tips.append((pygame.Rect(r.x + 3, y - 1, text_width(text[0]) + 6, 8), "tax"))
                     self._panel_tips.append((pygame.Rect(r.x + 5 + text_width(text[0]) + 10, y - 1,
                                                          text_width(col[0]) + 6, 8), "order"))

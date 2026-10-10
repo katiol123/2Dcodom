@@ -41,7 +41,8 @@ TOMBS_POWER = 1.1               # НЕСПОКОЙНЫЕ ГРОБНИЦЫ in a w
 TRADE_SKIM = 0.2                # ПЕРЕКУПЩИКИ: Zarkhad's cut of its partners' other trade (per path)
 DEFAULT_GOLD = 450
 START_SQUAD = (0.25, 0.4)       # starting squads: this share of the officer's leadership
-TAX = 20                        # gold per point of prosperity for a tax card
+TAX = 11                        # gold per point of prosperity for a tax card
+TRIBUTE = 3                     # gold per point of prosperity every city brings by itself each own turn
 GUARD = {"capital": 260, "castle": 220, "fort": 170, "town": 110, "port": 120, "lair": 190}
 WALLS = {"capital": 1.25, "castle": 1.3, "fort": 1.2, "town": 1.0, "port": 1.05, "lair": 1.2}
 BATTLE_K = 2.5                  # how decisive a power advantage is
@@ -526,6 +527,22 @@ class Campaign:
         if self.prosperity[city] >= PROSPERITY[city]:
             need *= 3
         return need
+
+    def tribute(self, city: str) -> Tuple[int, str]:
+        """What the city brings by itself each own turn (prosperity x ``TRIBUTE``), and why it brings
+        nothing: under a hostile siege, ravaged, sick or in disorder (order below SAFE)."""
+        from .order import SAFE, applies, tax_mult
+        owner = self.owner[city]
+        if city in self.siege and self.siege[city][0] != owner:
+            return 0, "В ОСАДЕ"
+        if self.ravaged.get(city):
+            return 0, "РАЗОРЁН"
+        if city in self.sick:
+            return 0, "БОЛЕЗНЬ"
+        if applies(self, city) and self.law.get(city, SAFE) < SAFE:
+            return 0, "БЕСПОРЯДКИ"
+        g = int(self.prosperity[city] * TRIBUTE * tax_mult(self, city))
+        return (g * 2 // 5 if "drought" in self.active else g), ""
 
     def income_of(self, city: str, faction: str) -> int:
         """What a tax card brings in this city now."""
@@ -1036,6 +1053,10 @@ class Campaign:
                     del self.trade[k]
                 else:
                     self.trade[k] = (turns - 0.5, g)
+        # every city brings its tribute by itself (sieges, ruin, sickness and disorder stop it)
+        levy = sum(self.tribute(city)[0] for city in self.cities_of(f))
+        if levy:
+            self.earn(f, levy, "levy")
         # pay the troops
         up = self.upkeep(f)
         self.gold[f] -= up
