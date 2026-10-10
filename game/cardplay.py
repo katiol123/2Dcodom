@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List
 
-from .cards import CARDS
+from .cards import CARDS, ECON
 from .factions import CITY, FACTION, neighbors
 from .officers import OFFICER
 from .units import ROSTER
@@ -378,26 +378,26 @@ def _pilgrimage(camp, f, t):
 @effect("fair")
 @effect("flea_market")
 def _fair(camp, f, t):
-    g = _gold(camp, f, camp.prosperity[t[0]] * 10, "trade")
+    g = _gold(camp, f, camp.prosperity[t[0]] * ECON["fair"], "trade")
     _prosper(camp, t[0], 1)
     return f"{CITY[t[0]].name} +{g} золота"
 
 
 @effect("caravan")
 def _caravan(camp, f, t):
-    g = _gold(camp, f, (camp.prosperity[t[0]] + camp.prosperity[t[1]]) * 9, "trade")
+    g = _gold(camp, f, (camp.prosperity[t[0]] + camp.prosperity[t[1]]) * ECON["caravan"], "trade")
     return f"{CITY[t[0]].name} - {CITY[t[1]].name}: +{g} золота"
 
 
 @effect("tithe")
 def _tithe(camp, f, t):
-    g = _gold(camp, f, sum(camp.prosperity[c] * 6 for c in camp.cities_of(f)), "tax")
+    g = _gold(camp, f, sum(camp.prosperity[c] * ECON["tithe"] for c in camp.cities_of(f)), "tax")
     return f"+{g} золота"
 
 
 @effect("edict")
 def _edict(camp, f, t):
-    g = _gold(camp, f, sum(camp.prosperity[c] * 6 for c in camp.cities_of(f)), "tax")
+    g = _gold(camp, f, sum(camp.prosperity[c] * ECON["edict"] for c in camp.cities_of(f)), "tax")
     return f"+{g} золота со всего королевства"
 
 
@@ -755,7 +755,7 @@ def _golden_age(camp, f, t):
     cities = camp.cities_of(f)
     for c in sorted(cities, key=lambda c: camp.prosperity[c])[:2]:
         _prosper(camp, c, 1)
-    g = sum(camp.prosperity[c] * 6 for c in cities)
+    g = sum(camp.prosperity[c] * ECON["golden_age"] for c in cities)
     return f"+{_gold(camp, f, g, 'tax')} золота, процветание растёт"
 
 
@@ -830,7 +830,7 @@ def _raise(camp, f, t):
 def _desert_caravans(camp, f, t):
     friends = [x for x in camp.alive() if x not in (f, "goblin")
                and (camp.at_peace(f, x) or camp.relation(f, x) >= 40)]
-    g = _gold(camp, f, 45 * len(friends), "trade")
+    g = _gold(camp, f, ECON["desert_caravans"] * len(friends), "trade")
     ports = [c for c in camp.cities_of(f) if CITY[c].kind == "port"]
     if ports:
         _prosper(camp, ports[0], 1)
@@ -901,7 +901,7 @@ def _company(camp, f, t):
 
 @effect("deep_vein")
 def _vein(camp, f, t):
-    return f"+{_gold(camp, f, 35 * len(camp.cities_of(f)))} золота"
+    return f"+{_gold(camp, f, ECON["deep_vein"] * len(camp.cities_of(f)))} золота"
 
 
 @effect("forge_golem")
@@ -1016,7 +1016,7 @@ def _goblin_bane(camp, f, t):
 @effect("golden_governor")
 def _golden_governor(camp, f, t):
     n = sum(1 for c in camp.cities_of(f) if camp.prosperity[c] >= 7)
-    return f"+{_gold(camp, f, 50 * n, 'tax')} золота"
+    return f"+{_gold(camp, f, ECON["golden_governor"] * n, 'tax')} золота"
 
 
 @effect("wall_first")

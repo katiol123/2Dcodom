@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .cardplay import MAX_GROUP, options
-from .cards import CARDS, COUNCIL_SEATS
+from .cards import CARDS, COUNCIL_SEATS, ECON
 from .factions import CITY, FACTION, neighbors
 from .officers import SQUAD_SLOTS
 from .units import ROSTER
@@ -483,23 +483,23 @@ def _v(camp, f, inst) -> Tuple[float, list]:
             return camp.income_of(c, f) - (PV * 1.3 if over else 0)
         return _best_city(camp, f, k, s)
     if k == "fair":
-        return _best_city(camp, f, k, lambda c: camp.prosperity[c] * 10 + (PV
+        return _best_city(camp, f, k, lambda c: camp.prosperity[c] * ECON["fair"] + (PV
                                                                             if camp.prosperity[c] < camp.max_prosperity(c)
                                                                             else 0))
     if k == "caravan":
         best = (-1.0, [])
         for a in options(camp, f, k, []):
             for b in options(camp, f, k, [a]):
-                v = (camp.prosperity[a] + camp.prosperity[b]) * 9
+                v = (camp.prosperity[a] + camp.prosperity[b]) * ECON["caravan"]
                 if v > best[0]:
                     best = (v, [a, b])
         return best
     if k in ("tithe", "edict"):
-        m = 6
+        m = ECON[k]
         return sum(camp.prosperity[c] * m for c in camp.cities_of(f)), []
     if k == "golden_age":
         poor = sorted(camp.cities_of(f), key=lambda c: camp.prosperity[c])[:2]
-        return sum(camp.prosperity[c] * 6 for c in camp.cities_of(f)) + sum(
+        return sum(camp.prosperity[c] * ECON["golden_age"] for c in camp.cities_of(f)) + sum(
             PV + 6 for c in poor if camp.prosperity[c] < camp.max_prosperity(c)), []
     if k in ("build", "reform", "charter"):
         n = {"build": 2, "reform": 2, "charter": 3}[k]
@@ -519,7 +519,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     if k == "old_debt":
         return _best_rival(camp, f, k, lambda r: 45 - (8 if camp.relation(f, r) > 40 else 0))
     if k == "deep_vein":
-        return 35 * len(camp.cities_of(f)), []
+        return ECON["deep_vein"] * len(camp.cities_of(f)), []
     if k == "thievery":
         return _best_rival(camp, f, k, lambda r: min(80, camp.gold[r]))
     if k == "tribute":
@@ -580,7 +580,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     if k == "desert_caravans":
         friends = [x for x in camp.alive() if x not in (f, "goblin")
                    and (camp.at_peace(f, x) or camp.relation(f, x) >= 40)]
-        return 45 * len(friends) + 20, []
+        return ECON["desert_caravans"] * len(friends) + 20, []
     # --- recruiting
     budgets = {"levy": 90, "guard": 90, "militia_call": 130, "raise_dead": 220,
                "mercenary_company": 350, "forge_golem": 270, "troll_wakes": 400}
@@ -842,7 +842,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
         score, city = _recruit_city(camp, f, options(camp, f, k, []))
         return (150 + 120 * POWER_VALUE * max(econ, 0.2)), [city]
     if k == "golden_governor":
-        return 50 * sum(1 for c in camp.cities_of(f) if camp.prosperity[c] >= 7), []
+        return ECON["golden_governor"] * sum(1 for c in camp.cities_of(f) if camp.prosperity[c] >= 7), []
     if k == "wall_first":
         return _attack_plan(camp, f, k, 1.25)
     if k == "war_legend":

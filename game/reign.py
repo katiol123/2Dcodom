@@ -25,7 +25,7 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "cautious": ("ОСТОРОЖНЫЙ", "штурмует только при шансе 65% и выше"),
     "reckless": ("БЕЗРАССУДНЫЙ", "идёт на штурм уже при шансе 45%"),
     "cruel": ("ЖЕСТОКИЙ", "пленных офицеров обычно казнит"),
-    "merciful": ("МИЛОСЕРДНЫЙ", "пленных отпускает домой, их держава за это благодарна (+5)"),
+    "merciful": ("МИЛОСЕРДНЫЙ", "пленных почти всегда отпускает домой (а держава отпущенного благодарна, +5)"),
     "greedy": ("АЛЧНЫЙ", "карты хозяйства ценит на 30% выше, тянется к курсу хозяйства"),
     "paranoid": ("ПОДОЗРИТЕЛЬНЫЙ", "защиту от интриг ценит вдвое"),
     "schemer": ("ИНТРИГАН", "карты интриги ценит на 40% выше, тянется к тайной политике"),
@@ -48,7 +48,7 @@ TRAITS: Dict[str, Tuple[str, str]] = {
                                "к его границе и мира с ним не заключает"),
     "vulture": ("СТЕРВЯТНИК", "добивает ослабленных (смута, потерянные города): рвёт с ними перемирие и "
                              "штурмует их при меньших шансах"),
-    "pious": ("НАБОЖНЫЙ", "подлых интриг избегает (-50%), отношения с соседями медленно растут"),
+    "pious": ("НАБОЖНЫЙ", "подлых интриг избегает (-50%), охотно строит храмы"),
     "traditionalist": ("ТРАДИЦИОНАЛИСТ", "меняет курс державы лишь при большой выгоде"),
     "ambitious": ("ЧЕСТОЛЮБИВЫЙ", "союзов не ищет, метит в сильнейших (+30% к штурмам их городов)"),
     "isolationist": ("ЗАТВОРНИК", "карты дипломатии ценит вдвое ниже и почти не придерживает их в руке"),
@@ -401,11 +401,18 @@ def hire_ok(camp, faction: str, key: str) -> bool:
     return True
 
 
+RELEASE, RELEASE_MERCIFUL, EXECUTE_CRUEL = 0.2, 0.9, 0.7
+
+
 def prisoner_fate(camp, victor: str) -> Optional[str]:
-    """What the victor's ruler does with a captured officer: 'execute', 'release' or None (as usual)."""
+    """What the victor's ruler does with a captured officer: 'execute', 'release' (his realm is grateful,
+    +5, whoever lets him go) or None (he swears to the victor or slips home). Any computer ruler sometimes
+    lets a prisoner go; МИЛОСЕРДНЫЙ nearly always, ЖЕСТОКИЙ usually executes."""
+    if victor == camp.player or victor == "goblin":
+        return None
     t = ruler_traits(camp, victor)
-    if "cruel" in t and camp.rng.random() < 0.7:
+    if "cruel" in t and camp.rng.random() < EXECUTE_CRUEL:
         return "execute"
-    if "merciful" in t:
+    if camp.rng.random() < (RELEASE_MERCIFUL if "merciful" in t else RELEASE):
         return "release"
     return None

@@ -41,7 +41,7 @@ class Building:
 BUILDINGS = {b.key: b for b in (
     Building("infirmary", "ЛАЗАРЕТ", 150, "Останавливает болезнь в этом и соседних своих городах с шансом 50% "
                                           "(два лазарета рядом - 75%, три - 87%)."),
-    Building("market", "РЫНОК", 200, "ПОДАТЬ, собранная в этом городе, приносит на 50% больше."),
+    Building("market", "РЫНОК", 200, "Доход города и ПОДАТЬ, собранная в нём, - на 50% больше."),
     Building("tower", "БАШНЯ", 220, "В бою за город стреляет по штурмующим как усиленный лучник; в расчётном бою "
                                     "+110 к обороне."),
     Building("barracks", "КАЗАРМЫ", 180, "Найм здесь на 20% дешевле, СБОР ВОЙСК длится на ход дольше."),
@@ -186,7 +186,7 @@ def _ai_value(camp, faction: str, city: str, key: str, front: bool) -> float:
     pros = camp.prosperity[city]
     officers = len(camp.officers_in(city))
     if key == "market":
-        return pros * 25 + (60 if CITY[city].kind == "capital" else 0)
+        return pros * 22 + (60 if CITY[city].kind == "capital" else 0)
     if key == "walls":
         return 300 if front else 40
     if key == "tower":
@@ -197,7 +197,9 @@ def _ai_value(camp, faction: str, city: str, key: str, front: bool) -> float:
         sick = sum(1 for c in camp.sick if camp.owner[c] == faction)
         return 120 + 80 * sick + 20 * officers
     if key == "temple":
-        return 40 * officers
+        from . import reign
+        return 40 * officers * (3.0 if reign.has(camp, faction, "pious") else 1.0) + \
+            (120 if reign.has(camp, faction, "pious") else 0)          # НАБОЖНЫЙ: a temple in every town
     if key == "academy":
         return 50 * officers + (120 if CITY[city].kind == "capital" else 0)
     return 0

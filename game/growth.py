@@ -184,11 +184,6 @@ def turn(camp, faction: str) -> None:
         if camp.loyalty[o] < 35 and camp.rng.random() < 0.15:
             camp.add_curse(faction, "unrest")
             camp.log_event(faction, f"{OFFICER[o].name} ропщет в совете")
-    if reign.has(camp, faction, "pious") and camp.turn % 4 == 0:
-        from .diplomacy import borders, humans
-        for x in humans(camp):
-            if x != faction and borders(camp, faction, x):
-                camp.change_relation(faction, x, 1)
     for o in [x.key for x in camp.officers_of(faction)]:
         camp.idle[o] = camp.idle.get(o, 0) + 1
         from .buildings import count

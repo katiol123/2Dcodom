@@ -542,7 +542,9 @@ class Campaign:
             return 0, "БОЛЕЗНЬ"
         if applies(self, city) and self.law.get(city, SAFE) < SAFE:
             return 0, "БЕСПОРЯДКИ"
-        g = int(self.prosperity[city] * TRIBUTE * tax_mult(self, city) * (LAIR_TRIBUTE if owner == "goblin" else 1))
+        from .buildings import count
+        g = int(self.prosperity[city] * TRIBUTE * tax_mult(self, city) * (LAIR_TRIBUTE if owner == "goblin" else 1)
+                * (1.5 if count(self, city, "market") else 1))
         return (g * 2 // 5 if "drought" in self.active else g), ""
 
     def income_of(self, city: str, faction: str) -> int:
