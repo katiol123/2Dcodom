@@ -33,12 +33,14 @@ def card_value(camp, f: str, inst) -> float:
 
 
 def cards_to_keep(camp, f: str, n: int) -> list:
+    from .reign import keep_mult
     hand = [c for c in camp.realms[f].hand if c.card.tier not in ("curse", "vice") and not c.card.unplayable]
+    worth = lambda c: card_value(camp, f, c) * keep_mult(camp, f, c.card)
     if frontier(camp, f) and any(threat(camp, f, c) > 0 for c in frontier(camp, f)):
         # answers are worth keeping while enemies stand at the gates
-        hand.sort(key=lambda c: -(card_value(camp, f, c) + (60 if c.card.reaction == "attacked" else 0)))
+        hand.sort(key=lambda c: -(worth(c) + (60 if c.card.reaction == "attacked" else 0)))
         return hand[:n]
-    return sorted(hand, key=lambda c: -card_value(camp, f, c))[:n]
+    return sorted(hand, key=lambda c: -worth(c))[:n]
 
 
 def frontier(camp, f: str) -> List[str]:

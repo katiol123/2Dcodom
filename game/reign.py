@@ -1,7 +1,7 @@
 """Reign types (pure Python, no pygame): how a ruler governs when the computer plays his realm.
 
 Every officer has a reign type (``reign_of``) - a name such as ТИРАН made of three behaviour
-traits (``TRAITS``, 34 of them; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
+traits (``TRAITS``, 38 of them; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
 the computer plays: the player's own ruler governs as the player does, and officers who do not
 rule keep their type hidden. A new ruler brings his own way of governing (succession.py).
 
@@ -51,6 +51,10 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "traditionalist": ("ТРАДИЦИОНАЛИСТ", "меняет курс державы лишь при большой выгоде"),
     "reformer": ("РЕФОРМАТОР", "меняет курс, как только это выгоднее"),
     "ambitious": ("ЧЕСТОЛЮБИВЫЙ", "союзов не ищет, метит в сильнейших (+30% к штурмам их городов)"),
+    "isolationist": ("ЗАТВОРНИК", "карты дипломатии ценит вдвое ниже и почти не придерживает их в руке"),
+    "courtly": ("ЛЮБИТЕЛЬ ЦЕРЕМОНИЙ", "карты дипломатии ценит на 40% выше и охотно придерживает до удобного часа"),
+    "chancellor": ("КАНЦЛЕР", "карты совета ценит на 40% выше и придерживает их"),
+    "rover": ("НЕУТОМИМЫЙ", "карты походов ценит на 50% выше: его войска не засиживаются на месте"),
     "fist": ("ЖЕЛЕЗНЫЙ КУЛАК", "стягивает отряды к самой опасной границе, оставляя в тылу лишь полгарнизона"),
     # the horde
     "hunter": ("ГРОЗА ГОБЛИНОВ", "логова штурмует охотнее (+50%), от орды не откупается"),
@@ -58,7 +62,7 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "hoarder": ("ЖАДНЫЙ ДО БЛЕСТЯШЕК", "вождь орды: копит всё золото на великую постройку"),
 }
 GOBLIN_ONLY = {"warchief", "hoard_king"}          # reign types only goblins have
-HUMAN_ONLY = {"slayer", "tributary"}              # ... and only people
+HUMAN_ONLY = {"slayer", "tributary", "hermit", "peacemaker"}   # ... and only people (the horde has no envoys)
 
 # key: (name, traits)
 REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
@@ -86,6 +90,10 @@ REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
     "upstart": ("ВЫСКОЧКА", ("ambitious", "reckless", "meritocrat")),
     "benefactor": ("ОТЕЦ НАРОДА", ("generous", "builder", "merciful")),
     "mercenary": ("НАЁМНЫЙ КНЯЗЬ", ("greedy", "treacherous", "elitist")),
+    "hermit": ("ОТШЕЛЬНИК НА ТРОНЕ", ("isolationist", "defender", "miser")),
+    "peacemaker": ("МИРОТВОРЕЦ", ("courtly", "diplomat", "merciful")),
+    "chancellor": ("ВЕЛИКИЙ КАНЦЛЕР", ("chancellor", "meritocrat", "builder")),
+    "nomad": ("КОЧЕВОЙ ВОЖДЬ", ("rover", "reckless", "recruiter")),
     "slayer": ("ИСТРЕБИТЕЛЬ ОРД", ("hunter", "brave", "conqueror")),
     "tributary": ("ОТКУПЩИК", ("appeaser", "cautious", "trader")),
     "warchief": ("ВЕЛИКИЙ ВОЖАК", ("hoarder", "aggressive", "reckless")),
@@ -118,6 +126,10 @@ _LEAN: Dict[str, Tuple[float, ...]] = {
     "upstart": (0.3, 0.6, 0, 0, -0.3, 0.6),
     "benefactor": (0.8, 0, 0, 0, 0.8, -0.6),
     "mercenary": (0.4, 0.4, 0, 0, 0, 0.8),
+    "hermit": (0.7, 0, 0.7, 0.3, -1.7, 0),
+    "peacemaker": (0, -0.3, 0, 0, 1.4, -0.6),
+    "chancellor": (1.3, 0, 0, 0.7, 0.5, 0),
+    "nomad": (0, 0.8, 1.0, 0, -0.3, 0),
     "slayer": (0, 0.8, 0.6, 0.4, -0.4, 0),
     "tributary": (0.6, 0, 0, 0, 0.8, 0),
     "warchief": (0, 1.0, 0.4, 0, 0, 0),
@@ -208,6 +220,8 @@ def shown(camp, officer: str) -> bool:
 # --- effects ---------------------------------------------------------------------------------------
 DEFENSE_CARDS = {"fortify", "sortie", "militia_call", "thicket_spirits", "rune_gates"}
 GUARD_CARDS = {"counterspy", "intercept", "purge", "peers_court", "denounce"}
+ENVOY_CARDS = {"embassy", "trade_pact", "truce", "grand_embassy", "buyout", "peacemaker"}   # (not the horde's buy-off)
+MARCH_CARDS = {"march", "forced_march", "mother_tree", "blitz", "longships", "ancient_map"}
 
 
 def card_mult(camp, faction: str, card) -> float:
@@ -228,6 +242,25 @@ def card_mult(camp, faction: str, card) -> float:
     if "defender" in t and card.key in DEFENSE_CARDS:
         m *= 1.4
     if "recruiter" in t and card.kind == "recruit":
+        m *= 1.4
+    if "isolationist" in t and card.key in ENVOY_CARDS:
+        m *= 0.5
+    if "courtly" in t and card.key in ENVOY_CARDS:
+        m *= 1.4
+    if "chancellor" in t and card.kind == "council":
+        m *= 1.4
+    if "rover" in t and card.key in MARCH_CARDS:
+        m *= 1.5
+    return m
+
+
+def keep_mult(camp, faction: str, card) -> float:
+    """How eagerly the ruler keeps a card in hand for the next turn."""
+    t = ruler_traits(camp, faction)
+    m = 1.0
+    if card.key in ENVOY_CARDS:
+        m *= (0.2 if "isolationist" in t else 1.0) * (1.6 if "courtly" in t else 1.0)
+    if "chancellor" in t and card.kind == "council":
         m *= 1.4
     return m
 
