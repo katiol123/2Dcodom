@@ -131,6 +131,12 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Map overlays: city badges (officers, garrison), storm arrows since the player's last turn
   (`camp.attacks`), В ОСАДЕ plaque. The camera may slide half a screen past the map edge; zooming back in
   restores the view left when zooming out (`zoom_back`).
+- New rulers are announced (`succession.announce` -> `camp.successions`, goblins too): the player gets a card
+  (`mapview._ruler_card`, old ruler greyed -> new one crowned, cause, legacy); a spectator sees it in the flow
+  of shows. Rulers' faces carry a gold double frame with a crown everywhere (`OfficerCard.ruler_frame`).
+- Sieges in the AI (`campaign_ai.besieged_by`): a storm on a city we besiege is worth `SIEGE_STORM` more (and a
+  little lower odds do); a besieged city of ours keeps its men and draws marches (`SIEGE_RELIEF`); our sieges are
+  staging points; ОСАДА is valued where our troops next door could storm afterwards.
 - Rulers (`camp.leader`, `succession.py`): never defect; may die (battle, fallen city, illness, realm's fall).
   Heir = best `heir_score` (court merit `camp.claim` + presence/level/loyalty), never chosen directly. New
   ruler's cards become the ruler's cards, the dead ruler's stay as `Realm.legacy` (one ruler only); then

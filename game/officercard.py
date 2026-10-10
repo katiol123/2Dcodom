@@ -98,8 +98,23 @@ class OfficerCard:
             pygame.draw.rect(s, _c(f.dark), rect)                       # still painting: a silhouette
             pygame.draw.ellipse(s, _c(f.color), (rect.centerx - rect.w // 4, rect.y + rect.h // 5,
                                                  rect.w // 2, rect.h // 2))
+        if self.camp.is_leader(key) and key not in self.camp.dead:
+            self.ruler_frame(s, rect, hot)
         if click:
             self.hits.append((rect.inflate(2, 2), key))
+
+    @staticmethod
+    def ruler_frame(s: pygame.Surface, rect: pygame.Rect, hot: bool = False) -> None:
+        """A ruler's portrait: a double gold frame and a little crown in its top left corner."""
+        gold, dark = _c("#ffffff" if hot else "#fee761"), _c("#c9a24a")
+        pygame.draw.rect(s, gold, rect.inflate(2, 2), 1)
+        pygame.draw.rect(s, dark, rect.inflate(4, 4), 1)
+        x, y = rect.x, rect.y
+        pygame.draw.rect(s, (24, 20, 37), (x, y, 7, 5))                 # the crown on an ink plate
+        for dx in (1, 3, 5):
+            s.set_at((x + dx, y + 1), gold)
+        pygame.draw.line(s, gold, (x + 1, y + 2), (x + 5, y + 2))
+        pygame.draw.line(s, dark, (x + 1, y + 3), (x + 5, y + 3))
 
     def name(self, s: pygame.Surface, key: str, x: int, y: int, color: str = "#fee761",
                      anchor: str = "topleft", scale: int = 1) -> pygame.Rect:

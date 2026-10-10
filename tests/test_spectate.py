@@ -66,13 +66,44 @@ class SpectateTest(unittest.TestCase):
             frames += 1
             if m.show is not None:
                 shows.add(id(m.show))
-                if len(shows) == 3:                    # a click moves on
+                if len(shows) == 2:                    # a click moves on
                     m.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(5, 5)), (5, 5))
-                if len(shows) == 5:                    # Esc: the rest goes by unseen
+                if len(shows) == 3:                    # Esc: the rest goes by unseen
                     m.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE), (5, 5))
         self.assertFalse(m.runner.busy())
-        self.assertEqual(len(shows), 5)
+        self.assertEqual(len(shows), 3)
         self.assertFalse(m.runner.show_plays)
+
+    def test_every_new_ruler_is_announced_goblins_too(self):
+        from game.succession import die
+        c = Campaign("aldern", seed=3)
+        shown = []
+        c.show_hook = lambda camp, what: shown.append(what)
+        for f in ("goblin", "aldern"):
+            old = c.leader[f]
+            die(c, old, "пал в бою")
+            rec = c.successions[-1]
+            self.assertEqual((rec["faction"], rec["old"], rec["new"]), (f, old, c.leader[f]))
+            self.assertEqual(shown[-1]["what"], "ruler")
+        self.assertEqual([r["idx"] for r in c.successions], [0, 1])
+
+    def test_the_player_sees_the_new_ruler_card(self):
+        import pygame
+        from game.assets import ensure_unit_sheets
+        from game.mapview import WorldMapScreen
+        from game.render import Renderer
+        from game.sim import H, W
+        from game.succession import die
+        pygame.init()
+        pygame.display.set_mode((W, H))
+        c = Campaign("aldern", seed=3)
+        m = WorldMapScreen(Renderer(ensure_unit_sheets()), campaign=c)
+        die(c, c.leader["goblin"], "пал в бою")
+        m.update(0.05, (5, 5))
+        m.draw(pygame.Surface((W, H)))
+        self.assertEqual(m.ruler_show["faction"], "goblin")
+        m.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(5, 5)), (5, 5))
+        self.assertIsNone(m.ruler_show)
 
 
 if __name__ == "__main__":

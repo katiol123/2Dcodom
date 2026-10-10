@@ -240,6 +240,7 @@ class Campaign:
         self.show_hook = None       # (camp, dict) -> a card played / envoys sent, shown to a spectator
         self._envoys = None         # envoys sent by the card being played (shown with the card)
         self._playing = False
+        self.successions: List[dict] = []   # every new ruler (succession.announce): shown to the player
         self.trade: Dict[frozenset, Tuple[int, int]] = {}     # pair -> (turns left, gold each)
         self.buffs: Dict[str, List[List[float]]] = {}         # officer -> [[mult, turns]]
         self.frozen: Dict[str, int] = {}                      # faction -> its next turns frozen

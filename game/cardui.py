@@ -836,6 +836,7 @@ class CardTable:
         if self.dealing:
             self.dealt_at = self.ms.time
         if self.chron_pending is not None and not self.dealing and self.ms.event_show is None and \
+                self.ms.ruler_show is None and \
                 self.ms.time - max(self.chron_pending, self.dealt_at) > self.NEWS_AFTER:
             self.chron_pending = None
             if len(self.camp.log) > self.chron_from and not self.busy() and not self.play:

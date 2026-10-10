@@ -353,6 +353,9 @@ class WorldMapScreen:
         from .diploui import DiploWindow
         self.diplo = DiploWindow(self)
         self.events_seen = len(self.camp.world_events)
+        self.succ_seen = len(getattr(self.camp, "successions", []))   # new rulers already announced
+        self.ruler_show: Optional[dict] = None             # a new ruler shown as a card (``_ruler_card``)
+        self.ruler_t = 0.0
         from .fx import FX
         self.fx = FX()                                     # interface animations (and their sounds)
         p = self.camp.player
@@ -512,6 +515,10 @@ class WorldMapScreen:
             if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
                 self.event_show = None
             return None
+        if self.ruler_show is not None:                  # a new ruler's card: any click or key closes it
+            if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
+                self.ruler_show = None
+            return None
         if self.unit_card is not None:                   # the unit card: any click or key closes it
             if ev.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
                 self.unit_card = None
@@ -647,6 +654,13 @@ class WorldMapScreen:
             self.event_t = self.time
             from .audio import ui
             ui("gong")
+        succ = self.camp.successions
+        if self.event_show is None and self.ruler_show is None and self.succ_seen < len(succ):
+            self.ruler_show = succ[self.succ_seen]          # a realm has a new ruler: the player is told
+            self.succ_seen += 1
+            self.ruler_t = self.time
+            from .audio import ui
+            ui("fanfare")
         self._watch_changes()
         self.table.update(dt, mouse)
         if self.window is not None:
@@ -767,6 +781,9 @@ class WorldMapScreen:
         self.cards.draw(s)
         if self.event_show is not None:
             self._event_card(s)
+        elif self.ruler_show is not None:
+            s.blit(self.dim, (0, 0))
+            self._ruler_card(s, self.ruler_show, self.time - self.ruler_t, "КЛИК - ДАЛЬШЕ")
         if self.unit_card is not None:
             self._unit_card_draw(s)
         if self.flash > 0:
@@ -928,6 +945,51 @@ class WorldMapScreen:
         glint = int(((self.time - self.event_t) * 120) % (final.w + 60)) - 30
         if 0 <= glint < final.w - 4:
             pygame.draw.line(s, _c("#ffffff"), (final.x + glint, final.y + 2), (final.x + glint + 5, final.y + 2))
+
+    def _ruler_card(self, s: pygame.Surface, rec: dict, age: float, hint: str = "") -> None:
+        """A realm's new ruler: the old one (greyed when dead) hands the crown to the new one, with the
+        cause, the legacy cards and the unrest that follows."""
+        from .fx import ease_back
+        f = FACTION[rec["faction"]]
+        mine = rec["faction"] == self.camp.player
+        k = min(1.0, age / 0.4)
+        sc = 0.3 + 0.7 * ease_back(k)
+        w, h = round(250 * sc), round(132 * sc)
+        r = pygame.Rect(W // 2 - w // 2, TOP + 30 + (132 - h) // 2, w, h)
+        s.blit(self.r.panel(r.w, r.h, base="#1c1830", border="#fee761"), r.topleft)
+        if k < 1:
+            return
+        pygame.draw.rect(s, _c(f.color), r.inflate(-4, -4), 1)
+        font = self.font
+        font.draw(s, "ВАШ НОВЫЙ ПРАВИТЕЛЬ" if mine else "СМЕНА ПРАВИТЕЛЯ", r.centerx, r.y + 6, "#8b9bb4", anchor="midtop")
+        s.blit(self.shields[f.key], (r.centerx - text_width(f.name) // 2 - 18, r.y + 15))
+        font.draw(s, f.name, r.centerx + 2, r.y + 16, f.light, anchor="midtop")
+        old, new = rec.get("old"), rec["new"]
+        if old in OFFICER:                                  # the old ruler, small and faded
+            face = pygame.Rect(r.x + 26, r.y + 36, 30, 36)
+            self.cards.face(s, face, old, click=False)
+            font.draw(s, OFFICER[old].name, face.centerx, face.bottom + 4, "#8b9bb4", anchor="midtop")
+        x0, x1 = r.x + 66, r.right - 98                     # the crown passes on
+        y = r.y + 54
+        for i in range(x0, x1, 4):
+            pygame.draw.rect(s, _c("#c9a24a"), (i, y, 2, 1))
+        pygame.draw.polygon(s, _c("#fee761"), [(x1, y - 4), (x1 + 6, y), (x1, y + 4)])
+        face = pygame.Rect(r.right - 82, r.y + 30, 44, 53)
+        pygame.draw.rect(s, _c("#fee761"), face.inflate(8, 8), 1)
+        self.cards.face(s, face, new, click=False)
+        font.draw(s, OFFICER[new].name if new in OFFICER else new, face.centerx, face.bottom + 6, "#fee761",
+                  anchor="midtop")
+        y = r.y + 96
+        cause = rec.get("cause") or ""
+        lines = [((f"{OFFICER[old].name} {cause}" if old in OFFICER and cause else cause), "#c0cbdc")] if cause else []
+        if rec.get("legacy") is not None and old in OFFICER and "знамя" not in cause:
+            lines.append(("ПОЛИТИЧЕСКАЯ НЕСТАБИЛЬНОСТЬ; НАСЛЕДИЕ: " + (", ".join(rec["legacy"]) or "НЕТ"), "#f6757a"))
+        for text, col in lines:
+            for line in wrap(text.upper(), r.w - 16)[:2]:
+                font.draw(s, line, r.centerx, y, col, anchor="midtop")
+                y += 7
+        if hint:
+            font.draw(s, hint, r.centerx, r.bottom - 9, "#5a6988", anchor="midtop")
 
     def _event_face(self, s: pygame.Surface, r: pygame.Rect, e, turn: int, text: str) -> None:
         s.blit(self.r.panel(r.w, r.h, base="#1c1830", border=e.color), r.topleft)

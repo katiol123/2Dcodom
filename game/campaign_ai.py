@@ -146,7 +146,7 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
                     cands, p, a, d = others, p2, a2, d2
                 elif not (_desperate(camp, f, target) and p >= need):
                     continue
-        if p < need:
+        if p < need - (0.08 if besieged_by(camp, target) == f else 0.0):   # our siege: a bolder storm
             continue
         hostility = 1.0 + (40 - min(40, camp.relation(f, camp.owner[target]))) / 80
         if camp.realms[camp.owner[target]].course == "economy":
@@ -157,6 +157,8 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
             hostility *= 1.25                    # a throne that shakes invites the sword
         hostility *= reign.hostility(camp, f, camp.owner[target])
         hostility *= frost_reluctance(camp, f, target)
+        if besieged_by(camp, target) == f:
+            hostility *= SIEGE_STORM             # our own siege has softened it: finish the job
         v = p * _city_worth(camp, target) * reign.worth_mult(camp, f) * hostility - (1 - p) * a * 0.5 \
             - p * 0.3 * min(a, d) * POWER_VALUE
         if ruler in cands:                       # the price of risking the ruler's life
@@ -167,6 +169,14 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
 
 
 GUARD_RATIO = 1.1               # a frontier city wants this much defence against the army next door
+SIEGE_STORM = 1.4               # a city we besiege: the storm that finishes the job is worth this much more
+SIEGE_RELIEF = 30.0             # a march into our own besieged city: worth this much more (and its guard stays)
+
+
+def besieged_by(camp, city: str) -> Optional[str]:
+    """The hostile realm besieging the city (ОСАДА: defence x0.75, prosperity bleeds), or None."""
+    s = camp.siege.get(city)
+    return s[0] if s and s[0] != camp.owner[city] else None
 
 
 def guard_gap(camp, f: str, city: str) -> float:
@@ -191,6 +201,8 @@ def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
         t_src = threat(camp, f, src)
         d_src = camp.defense_power(src)
         need = t_src * GUARD_RATIO * keep
+        if besieged_by(camp, src):
+            need *= 1.4                               # a besieged city keeps its men
         here = sorted(options(camp, f, key, [src]), key=lambda o: -camp.power(o))
         posts = rear_posts(camp, f)
         armed = [o for o in here if camp.power(o) > 0 and posts.get(o) != src]   # a rear post stays put
@@ -218,8 +230,10 @@ def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
             v = 15 + min(gap, removed) / 8 + 0.02 * power - left_open / 8
             if fist:
                 v += threat(camp, f, dest) / 30        # the iron fist goes where the enemy is strongest
-            elif gap <= 0:
+            elif gap <= 0 and not besieged_by(camp, dest):
                 v = min(v, 8.0)                        # already held: hardly worth the march
+            if besieged_by(camp, dest):
+                v += SIEGE_RELIEF + camp.prosperity[dest] * 2   # relieve our besieged city
             v += _staging(camp, f, dest, power) * (1.0 if fist else 0.5)
             if v > best[0]:
                 best = (v, [src, tuple(movers), dest])
@@ -235,7 +249,10 @@ def _staging(camp, f: str, dest: str, moved: float) -> float:
         other = camp.owner[n]
         if other == f or camp.at_peace(f, other):
             continue
-        if here > camp.defense_power(n) * 0.8:
+        if besieged_by(camp, n) == f:                    # our siege: gather the storm next to it
+            if here > camp.defense_power(n) * 0.6:
+                best = max(best, 45 + camp.prosperity[n] * 6)
+        elif here > camp.defense_power(n) * 0.8:
             best = max(best, 20 + camp.prosperity[n] * 4)
     return best
 
@@ -628,8 +645,13 @@ def _v(camp, f, inst) -> Tuple[float, list]:
              and any(n in own for n in neighbors(c))]
         return sum(camp.prosperity[c] * 8 + 20 for c in t), []
     if k == "siege":
-        return _best_city(camp, f, k, lambda c: 50 + camp.prosperity[c] * 8
-                          + (60 if camp.defense_power(c) > _frontline_officer(camp, f) else 0))
+        def near(c):                                     # our troops standing next to it, ready to storm
+            return sum(camp.power(o.key) * camp.officer_mult(o.key) for n in neighbors(c)
+                       if camp.owner[n] == f for o in camp.officers_in(n))
+        return _best_city(camp, f, k, lambda c: -1 if besieged_by(camp, c) == f else
+                          50 + camp.prosperity[c] * 8
+                          + (60 if camp.defense_power(c) > _frontline_officer(camp, f) else 0)
+                          + (70 if near(c) > camp.defense_power(c) * 0.75 * 0.8 else 0))   # a storm can follow
     if k in ("fortify", "thicket_spirits", "rune_gates"):
         m = {"fortify": 1.4, "thicket_spirits": 1.8, "rune_gates": 2.0}[k]
 

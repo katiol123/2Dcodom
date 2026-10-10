@@ -87,14 +87,24 @@ def die(camp, officer: str, cause: str) -> None:
     if was_leader:
         camp.log_event(f, f"СМЕРТЬ ПРАВИТЕЛЯ: {name} {cause}")
         if r and r.alive:
-            succeed(camp, f, officer)
+            succeed(camp, f, officer, cause)
         return
     camp.log_event(f, f"{name} {cause}")
     if r and officer in r.council:
         camp.set_council(f, [o for o in r.council if o != officer], quiet=True)
 
 
-def succeed(camp, faction: str, dead: str) -> Optional[str]:
+def announce(camp, faction: str, old: Optional[str], new: str, cause: str, legacy=()) -> None:
+    """A new ruler: kept for the screen (``camp.successions``: the player and the spectator see a card)
+    and shown to a spectator at once (``show_hook``)."""
+    rec = {"turn": camp.turn, "faction": faction, "old": old, "new": new, "cause": cause,
+           "legacy": [CARDS[k].name for k in legacy], "idx": len(camp.successions)}
+    camp.successions.append(rec)
+    if camp.show_hook:
+        camp.show_hook(camp, dict(rec, what="ruler"))
+
+
+def succeed(camp, faction: str, dead: str, cause: str = "") -> Optional[str]:
     r = camp.realms[faction]
     heir = heir_of(camp, faction, dead)
     legacy = [k for k in leader_cards(camp, faction, dead) if CARDS[k].tier != "vice"]
@@ -124,6 +134,7 @@ def succeed(camp, faction: str, dead: str) -> Optional[str]:
     camp.add_curse(faction, "unrest", 2)
     camp.log_event(faction, f"НОВЫЙ ПРАВИТЕЛЬ: {OFFICER[heir].name}. ПОЛИТИЧЕСКАЯ НЕСТАБИЛЬНОСТЬ на "
                             f"{UNREST_TURNS} х. Наследие: " + (", ".join(CARDS[k].name for k in legacy) or "нет"))
+    announce(camp, faction, dead, heir, cause, legacy)
     return heir
 
 
@@ -158,6 +169,7 @@ def ensure_ruler(camp, faction: str) -> None:
     r.council = [heir] + [o for o in r.council if o != heir]
     camp._sync_thresholds(faction)
     camp.log_event(faction, f"НОВЫЙ ПРАВИТЕЛЬ: {OFFICER[heir].name} поднял{_g(heir, '', 'а')} павшее знамя")
+    announce(camp, faction, ruler, heir, f"поднял{_g(heir, '', 'а')} павшее знамя")
 
 
 def turn(camp, faction: str) -> None:

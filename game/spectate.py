@@ -74,6 +74,9 @@ class Show:
             self.parts.append("card")
         if req["what"] == "diplo" or req.get("envoys"):
             self.parts.append("envoys")
+        if req["what"] == "ruler":                          # a new ruler: the same card the player gets
+            self.parts.append("ruler")
+            ms.succ_seen = max(ms.succ_seen, req["idx"] + 1)
         self.part = 0
         self.part_t = 0.0
         self.env = req if req["what"] == "diplo" else req.get("envoys")
@@ -88,7 +91,7 @@ class Show:
 
     # --- timing ------------------------------------------------------------------------------
     def _len(self, part: str) -> float:
-        return sum(self.CARD if part == "card" else self.ENVOYS)
+        return 3.0 if part == "ruler" else sum(self.CARD if part == "card" else self.ENVOYS)
 
     @property
     def done(self) -> bool:
@@ -120,6 +123,10 @@ class Show:
 
     def _cues(self, part: str) -> None:
         fx = self.ms.fx
+        if part == "ruler":
+            if self._once("fanfare", 0.0):
+                audio.ui("fanfare")
+            return
         if part == "card":
             fly = self.CARD[0]
             if self._once("play", 0.0):
@@ -199,6 +206,9 @@ class Show:
         part = self.parts[self.part]
         if part == "card":
             self._draw_card(s)
+        elif part == "ruler":
+            self.ms._ruler_card(s, self.req, self.part_t)
+            self.plate = None
         else:
             self._draw_envoys(s)
         r = self.plate
