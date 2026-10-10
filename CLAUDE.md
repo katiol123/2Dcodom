@@ -76,7 +76,9 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   battles in `campaign.py`, AI values in `campaign_ai.py` (`VALUE`), UI in `cardui.py`. New card: `_c(...)` in
   `_CARDS` + `@effect` + AI value + put it in a pool/unique list; then `python -m game.cardsim 64 40` and check
   per-realm cities/income and the card's play rate; regenerate docs/CARDS.md tables.
-- City prosperity (`PROSPERITY` in factions.py, 1..10) sets tax income; AI realms must stay pygame-free.
+- City prosperity (`PROSPERITY` in factions.py, 1..10) sets income: every city brings `TRIBUTE` x prosperity by
+  itself each own turn (`camp.tribute`: nothing under a hostile siege, ravaged, sick or below order SAFE; lairs
+  `LAIR_TRIBUTE` times more) and the ПОДАТЬ card `TAX` x prosperity on top; AI realms must stay pygame-free.
   Battles scar cities (`Campaign._scar`: chance by the council ЛОГИСТИКА of whoever holds the city after the
   battle; 2 battles in 5 rounds = ravaged). Cities of men have ПОРЯДОК (`order.py`, `camp.law` - `camp.order`
   is the turn order!): low order breeds crime that eats prosperity; the horde's passive shadow lowers order next
