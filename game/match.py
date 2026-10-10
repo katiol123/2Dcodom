@@ -26,11 +26,8 @@ MAX_BANDS = 3                   # squads a side fights in, each in its own (invi
                                 # (the allies' detachments come on top as a strip of their own)
 
 
-def campaign_squads(b) -> Tuple[List[List[str]], List[List[int]], List[List[int]]]:
-    """Unit keys, troop ids and squad bands of both sides of a campaign storm (strongest first, capped);
-    the defenders get their town militia (walls and townsfolk) on top. A band is one officer's squad
-    (the garrison and the town militia are one more, the allies' detachments another); a side keeps at
-    most ``MAX_BANDS`` of them, the smallest ones merged into the rest."""
+def _sides(b):
+    """Unit keys, troop ids and owners (officer key, "garrison" or "allies") of both sides of a storm."""
     att = sorted(b.att, key=lambda ot: -ot[1].power)[:FIELD_CAP]
     deff = sorted(b.deff, key=lambda ot: -ot[1].power)[:FIELD_CAP]
     keys = [[t.key for _, t in att], [t.key for _, t in deff]]
@@ -47,7 +44,44 @@ def campaign_squads(b) -> Tuple[List[List[str]], List[List[int]], List[List[int]
         owners[1].append("garrison")
     if not keys[1]:
         keys[1], tags[1], owners[1] = ["militia"], [0], ["garrison"]
+    return keys, tags, owners
+
+
+def campaign_squads(b) -> Tuple[List[List[str]], List[List[int]], List[List[int]]]:
+    """Unit keys, troop ids and squad bands of both sides of a campaign storm (strongest first, capped);
+    the defenders get their town militia (walls and townsfolk) on top. A band is one officer's squad
+    (the garrison and the town militia are one more, the allies' detachments another); a side keeps at
+    most ``MAX_BANDS`` of them, the smallest ones merged into the rest."""
+    keys, tags, owners = _sides(b)
     return keys, tags, [_bands(side) for side in owners]
+
+
+def squad_bands(b) -> List[Dict[str, int]]:
+    """Owner ("garrison", "allies" or an officer's key) -> band, for both sides of a storm."""
+    _, _, owners = _sides(b)
+    return [dict(zip(side, _bands(side))) for side in owners]
+
+
+def squad_names(b) -> Tuple[Dict[int, str], Dict[int, str]]:
+    """Band -> the name the battle screen shows for that squad (its officer, ГАРНИЗОН, СОЮЗНИКИ);
+    a band that took in smaller squads names its biggest one and adds "+N"."""
+    from .officers import OFFICER
+    _, _, owners = _sides(b)
+    out = []
+    for side in owners:
+        bands = _bands(side)
+        size: Dict[str, int] = {}
+        for o in side:
+            size[o] = size.get(o, 0) + 1
+        names: Dict[int, str] = {}
+        for band in set(bands):
+            who = sorted({o for o, n in zip(side, bands) if n == band}, key=lambda o: (-size[o], o))
+            head = who[0]
+            name = ("ГАРНИЗОН" if head == "garrison" else "СОЮЗНИКИ" if head == "allies"
+                    else OFFICER[head].name if head in OFFICER else head)
+            names[band] = name + (f" +{len(who) - 1}" if len(who) > 1 else "")
+        out.append(names)
+    return out[0], out[1]
 
 
 ALLIES = "allies"
@@ -89,6 +123,7 @@ def campaign_battle(b, factory: SpriteFactory, progress=None) -> Tuple[World, Di
                   wrath=getattr(b, "wrath", None), tombs=1 if tombs else None)
     from .factions import FACTION
     world.names = (FACTION[b.attacker].short, FACTION[b.defender].short)   # the realms, not the colours
+    world.squads = squad_names(b)
     return world, metas
 
 
@@ -105,10 +140,12 @@ def headless_campaign_world(b) -> World:
     tombs = getattr(b, "tombs", False)
     if tombs:
         summons[(1, "skeleton")] = f"skeleton_{TEAMS[1].key}"
-    return World(slots, _CLASS_ANIMS, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
-                 fury=getattr(b, "fury", (1.0, 1.0)), chill=getattr(b, "chill", (1.0, 1.0)),
-                 frost=getattr(b, "frost", False), hardy=getattr(b, "hardy", (False, False)),
-                 wrath=getattr(b, "wrath", None), tombs=1 if tombs else None)
+    world = World(slots, _CLASS_ANIMS, b.seed % 100000, summons, towers=[1] * getattr(b, "towers", 0),
+                  fury=getattr(b, "fury", (1.0, 1.0)), chill=getattr(b, "chill", (1.0, 1.0)),
+                  frost=getattr(b, "frost", False), hardy=getattr(b, "hardy", (False, False)),
+                  wrath=getattr(b, "wrath", None), tombs=1 if tombs else None)
+    world.squads = squad_names(b)
+    return world
 
 
 def battle_outcome(world: World, b, rng: random.Random) -> None:

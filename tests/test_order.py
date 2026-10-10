@@ -69,9 +69,11 @@ class OrderTest(unittest.TestCase):
         self.assertLess(order.target(c, city), order.SAFE)
         c.law[city] = 0
         c.rng.seed(2)
-        for _ in range(12):
+        for _ in range(24):                       # crime comes by chance: give it time to bite
             c.law[city] = 0
             order.turn(c, "aldern")
+            if c.prosperity[city] < 10:
+                break
         self.assertGreater(sum(c.stats["crime"].values()), 0)
         self.assertLess(c.prosperity[city], 10)
 

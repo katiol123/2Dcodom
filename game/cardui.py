@@ -459,6 +459,9 @@ class CardTable:
     # --- requests from a running action: watch a battle? answer a storm? ------------------------
     def _req_rect(self) -> pygame.Rect:
         from .mapview import TOP
+        req = self.ms.runner.request
+        if req and req["kind"] == "ask":                  # under the window with both sides' squads
+            return pygame.Rect(6, H - 44, W - 12, 40)
         if self.ms.focus is not None:                     # a storm on the map: the question sits beside the city
             req = self.ms.runner.request
             h = 66 if req and req["kind"] == "ask" else 180
@@ -473,7 +476,8 @@ class CardTable:
                     (pygame.Rect(r.right - 150, r.bottom - 22, 110, 15), False)]
         if req["kind"] == "ask":
             labels = [("СМОТРЕТЬ БОЙ", "watch"), ("РАССЧИТАТЬ", "calc"), ("ВСЕГДА СЧИТАТЬ", "never")]
-            return [(pygame.Rect(r.x + 8 + i * 102, r.bottom - 22, 98, 15), v) for i, (_, v) in enumerate(labels)]
+            return [(pygame.Rect(r.centerx - 151 + i * 102, r.bottom - 19, 98, 15), v)
+                    for i, (_, v) in enumerate(labels)]
         out = [(pygame.Rect(r.x + 8 + i * 70, r.y + 42, 66, 96), c) for i, c in enumerate(req["cards"][:3])]
         out.append((pygame.Rect(r.x + 8, r.bottom - 22, 98, 15), None))
         return out
@@ -506,6 +510,8 @@ class CardTable:
             return
         if req["kind"] == "diplo":
             return self._draw_diplo(s, req)
+        if req["kind"] == "ask":
+            return self._draw_ask(s, req)
         b = req["battle"]
         camp = self.camp
         font = self.font
@@ -554,6 +560,159 @@ class CardTable:
             font.draw(s, "КЛИК ПО КАРТЕ - ОТВЕТИТЬ ЕЮ", r.x + 8, r.bottom - 32, "#8b9bb4")
             if preview is not None:
                 s.blit(self.art.full(preview.key, "ОТВЕТ", self.player), (r.right - CARD_W - 8, r.y + 40))
+
+    def _draw_ask(self, s: pygame.Surface, req) -> None:
+        """A storm between computer realms: a window with both sides' squads (each officer with his
+        soldiers in a row) and, under it, the question - watch it or work it out?"""
+        b = req["battle"]
+        camp, font = self.camp, self.font
+        s.blit(self.ms.dim, (0, 0))
+        r = self._req_rect()
+        self._draw_rosters(s, b, pygame.Rect(r.x, 17, r.w, r.y - 20))
+        s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#c9a24a"), r.topleft)
+        att, deff = FACTION[b.attacker], FACTION[b.defender]
+        a = camp.attack_power(b.attacker, b.officers, b.city, b.mult)
+        d = camp.defense_power(b.city) * b.def_mult
+        p = camp.win_chance(a, d)
+        font.draw(s, f"БОЙ ДРУГИХ ДЕРЖАВ: {att.short} ШТУРМУЕТ {CITY[b.city].name} ({deff.short})", r.centerx,
+                  r.y + 4, "#fee761", anchor="midtop")
+        font.draw(s, f"СИЛА {int(a)} ПРОТИВ {int(d)}: ШАНС ШТУРМА {int(p * 100)}%", r.centerx, r.y + 13,
+                  "#c0cbdc", anchor="midtop")
+        mouse = self.ms._mouse
+        for rect, value in self._req_buttons(req):
+            hot = rect.collidepoint(mouse)
+            label = {"watch": "СМОТРЕТЬ БОЙ", "calc": "РАССЧИТАТЬ", "never": "ВСЕГДА СЧИТАТЬ"}[value]
+            base = "#3e8948" if value == "watch" else "#3a4466"
+            s.blit(self.ms.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
+            font.draw(s, label, rect.centerx, rect.centery, "#ffffff", anchor="center")
+
+    def _squad_rows(self, b) -> List[List[Tuple[str, List[str]]]]:
+        """Both sides of a storm as rows (owner, unit keys): an officer (key) with his squad, the
+        garrison (the city's free troops and the town militia) and the allies' detachments."""
+        sides = []
+        for side, troops, officers in ((0, b.att, b.officers), (1, b.deff, b.defenders)):
+            rows = [(o, [t.key for oo, t in troops if oo == o]) for o in officers]
+            free = [t.key for oo, t in troops if oo is None]
+            if side == 1 and getattr(b, "militia", 0):
+                free += ["militia"] * b.militia
+            if free or (side == 1 and not rows):
+                rows.append(("garrison", free))
+            aux = getattr(b, "aux", ([], []))[side]
+            if aux:
+                rows.append(("allies", list(aux)))
+            sides.append(rows)
+        return sides
+
+    @staticmethod
+    def _grouped(keys: List[str]) -> List[Tuple[str, int]]:
+        """Soldiers of one kind in one cell with a count, in the order they first come."""
+        kinds: Dict[str, int] = {}
+        for k in keys:
+            kinds[k] = kinds.get(k, 0) + 1
+        return list(kinds.items())
+
+    def _roster_layout(self, sides, avail: int, width: int):
+        """(columns, cells per row, sprite height, row pitch): the biggest sprites that fit; squads go
+        in two columns (a kind with its count in one cell) when every squad has at most 3 kinds."""
+        plain = [[[(k, 1) for k in keys] for _, keys in rows] for rows in sides]
+        grouped = [[self._grouped(keys) for _, keys in rows] for rows in sides]
+        two = all(len(c) <= 3 for rows in grouped for c in rows)
+        for tall in (36, 26, 0):
+            pitch = tall + 14 if tall else 27
+            for cols in (1, 2):
+                if cols == 2 and not two:
+                    continue
+                lines = sum(-(-len(rows) // cols) for rows in sides)
+                if lines * pitch <= avail:
+                    cells = plain if cols == 1 and all(len(c) <= 7 for rows in plain for c in rows) else grouped
+                    return cols, cells, tall, pitch
+        return (2 if two else 1), grouped, 0, 27
+
+    def _draw_rosters(self, s: pygame.Surface, b, r: pygame.Rect) -> None:
+        """Every squad of both sides in a horizontal row: the officer at the left edge (face and name),
+        then his soldiers (sprite and name); the coloured pennant is the squad's mark in the battle."""
+        from .match import squad_bands
+        from .render import Renderer
+        from .sim import BAND_COLORS
+        from .units import TEAMS
+        from .factions import unit_exists, unit_name
+        from .mapview import wrap
+        font = self.font
+        s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#5a6988"), r.topleft)
+        sides = self._squad_rows(b)
+        try:
+            bands = squad_bands(b)
+        except Exception:                                 # no troops on a side: no pennants
+            bands = [{}, {}]
+        avail = r.h - 8 - 2 * 11
+        cols, cells, tall, pitch = self._roster_layout(sides, avail, r.w - 12)
+        colw = (r.w - 12) // cols
+        cw = min(54, (colw - 80) // (7 if cols == 1 else 3))
+        cap = max(2, avail // pitch)                      # lines; too many squads: the rest as "+N"
+        need = [-(-len(rows) // cols) for rows in sides]
+        if sum(need) > cap:
+            la = min(need[0], max(1, cap - min(need[1], max(1, cap // 2))))
+            need = [la, min(need[1], cap - la)]
+        y = r.y + 4
+        for side, fac in enumerate((b.attacker, b.defender)):
+            f = FACTION[fac]
+            team = TEAMS[side]
+            rows = sides[side]
+            s.blit(self.ms.shields[f.key], (r.x + 6, y))
+            n = sum(len(keys) for _, keys in rows)
+            font.draw(s, f"{'НАПАДАЮТ' if side == 0 else 'ОБОРОНЯЮТ'}: {f.name} ({n} ВОИН.)", r.x + 24, y + 2, f.light)
+            y += 11
+            shown = min(len(rows), need[side] * cols)
+            multi = len(set(bands[side].values())) > 1
+            for i in range(shown):
+                owner, _ = rows[i]
+                x0 = r.x + 6 + (i % cols) * colw
+                ry = y + (i // cols) * pitch
+                band = bands[side].get(owner, -1)
+                if multi and band >= 0:
+                    Renderer._pennant(s, x0, ry + 2, BAND_COLORS[band % len(BAND_COLORS)])
+                x = x0 + 8
+                if owner in ("garrison", "allies"):
+                    if owner == "allies":
+                        for k, h in enumerate(b.helpers[side][:2]):
+                            s.blit(self.ms.shields[h], (x + k * 9, ry + 1))
+                    else:
+                        pygame.draw.rect(s, _c(f.dark), (x, ry + 1, 15, 18))
+                        pygame.draw.rect(s, _c(f.color), (x, ry + 1, 15, 18), 1)
+                        font.draw(s, "Г", x + 8, ry + 10, "#ffffff", anchor="center")
+                    lines, color = ["ГАРНИЗОН" if owner == "garrison" else "СОЮЗНИКИ"], "#c0cbdc"
+                else:
+                    self.ms.cards.face(s, pygame.Rect(x, ry + 1, 15, 18), owner, click=False)
+                    lines, color = wrap(OFFICER[owner].name if owner in OFFICER else owner, 52)[:2], "#fee761"
+                for k, line in enumerate(lines):
+                    font.draw(s, line, x + 18, ry + 3 + k * 7, color)
+                x = x0 + 80
+                row = cells[side][i]
+                if not row:
+                    font.draw(s, "БЕЗ ВОИНОВ", x, ry + 6, "#5a6988")
+                for key, count in row[:7 if cols == 1 else 3]:
+                    cx = x + cw // 2
+                    if unit_exists(key):
+                        look = f"{key}_{team.key}"
+                        if tall:
+                            idle = self.ms.r.art(look).frames["idle"][0]
+                            if side == 1:
+                                idle = pygame.transform.flip(idle, True, False)
+                            bb = idle.get_bounding_rect()
+                            bb.h = min(bb.h, tall)            # too tall: the upper part (head to waist)
+                            s.blit(idle, (cx - bb.w // 2, ry + tall - bb.h), area=bb)
+                        else:
+                            s.blit(self.ms.r.portrait(look, flip=side == 1), (cx - 9, ry))
+                    ny = ry + (tall + 1 if tall else 14)
+                    for k, line in enumerate(wrap(unit_name(key), cw)[:2]):
+                        font.draw(s, line, cx, ny + k * 6, "#c0cbdc", anchor="midtop")
+                    if count > 1:
+                        font.draw(s, f"x{count}", x + cw - 1, ry + 1, "#ffffff", anchor="topright")
+                    x += cw
+            y += need[side] * pitch
+            if len(rows) > shown:
+                font.draw(s, f"+ ЕЩЁ ОТРЯДОВ: {len(rows) - shown}", r.right - 8, y - pitch + 2, "#8b9bb4",
+                          anchor="topright")
 
     def _draw_diplo(self, s: pygame.Surface, req) -> None:
         """A realm's envoys: their offer and what they say for it; accept or refuse."""

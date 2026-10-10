@@ -306,12 +306,14 @@ class Campaign:
     def _starting_squad(self, off: Officer, city: City) -> None:
         target = off.leadership * self.rng.uniform(*START_SQUAD)
         squad = self.squads[off.key]
-        for _ in range(4):
+        for picks in range(4, 0, -1):                     # every pick aims at its share of what is left
             room = off.leadership - self.power(off.key)
             cands = [k for k in self._pool(city.key) if ROSTER[k].cost <= room and not ROSTER[k].boss]
             if not cands or self.power(off.key) >= target:
                 break
-            squad.append(self._new(self.rng.choice(cands)))
+            share = (target - self.power(off.key)) / picks
+            near = sorted(cands, key=lambda k: abs(ROSTER[k].cost - share))[:3]   # a great captain, strong men
+            squad.append(self._new(self.rng.choice(near)))
 
     def enlist(self, off: Officer, city: str) -> None:
         """A new officer joins the faction owning ``city`` (a young talent, population.py)."""

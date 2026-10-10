@@ -16,7 +16,7 @@ from pixelforge.color import mix, ramp, rgba
 from pixelforge.text import FONT, glyph
 
 from . import assets
-from .sim import FIELD, H, W, World, Unit
+from .sim import BAND_COLORS, FIELD, H, TALL_TOP, W, World, Unit
 from .units import ORDER, ROSTER
 
 INK = (24, 20, 37)
@@ -153,11 +153,11 @@ class Renderer:
         self.metas: Dict[str, dict] = dict(metas)
         self._art: Dict[str, UnitArt] = {}
         self._portraits: Dict[tuple, pygame.Surface] = {}
-        bg_path = assets.cache_dir() / "background_v2.png"
+        bg_path = assets.cache_dir() / "background_v3.png"
         if bg_path.exists():
             self.bg = pygame.image.load(str(bg_path)).convert()
         else:
-            canvas = assets.background(W, H, 120)
+            canvas = assets.background(W, H, int(TALL_TOP) - 14)
             canvas.save(str(bg_path))
             self.bg = to_surface(canvas)
         self.arrows = [to_surface(assets.arrow_canvas(a * 360 / 32)) for a in range(32)]
@@ -232,6 +232,7 @@ class Renderer:
         if getattr(world, "frost", False):
             self._blizzard(ws, real_time)
         self._bars(world, ws, real_time)
+        self._squad_labels(world, ws, real_time)
         self._texts(world, ws, real_time)
         screen.blit(ws, (0, 0))
         self._hud(world, screen, real_time)
@@ -246,7 +247,7 @@ class Renderer:
             snow = self.bg.copy()
             veil = pygame.Surface(snow.get_size(), pygame.SRCALPHA)
             veil.fill((232, 240, 250, 150))
-            veil.fill((205, 220, 238, 90), pygame.Rect(0, 0, snow.get_width(), FIELD[1] - 8))   # the sky stays grey
+            veil.fill((205, 220, 238, 90), pygame.Rect(0, 0, snow.get_width(), TALL_TOP - 8))   # the sky stays grey
             snow.blit(veil, (0, 0))
             self._snow_bg, self._snow_src = snow, self.bg
         return self._snow_bg
@@ -542,6 +543,8 @@ class Renderer:
             y = round(u.y) - self._height(u) - 6
             self._bar(s, x, y, 19, 4, u.hp / u.max_hp, u.chip / u.max_hp, team.accent,
                       ticks=int(u.max_hp // 50), real_time=real_time)
+            if self._banded(world, u):
+                self._pennant(s, x - 5, y - 2, BAND_COLORS[u.band % len(BAND_COLORS)])
             # status pips above the bar
             icons = []
             if u.has("burn"):
@@ -576,6 +579,50 @@ class Renderer:
                 pygame.draw.rect(s, INK, (x + i * 4, y - 4, 4, 4))
                 pygame.draw.rect(s, col, (x + 1 + i * 4, y - 3, 2, 2))
 
+    @staticmethod
+    def _banded(world: World, u: Unit) -> bool:
+        """Does his side fight in several squads (campaign strips)? Then his squad's pennant shows."""
+        return u.band >= 0 and len(getattr(world, "squads", ({}, {}))[u.team]) > 1
+
+    def _wrap(self, text: str, width: int) -> List[str]:
+        lines: List[str] = []
+        for word in text.split():
+            if lines and self.font.render(lines[-1] + " " + word, "#ffffff").get_width() <= width:
+                lines[-1] += " " + word
+            else:
+                lines.append(word)
+        return lines
+
+    @staticmethod
+    def _pennant(s: pygame.Surface, x: int, y: int, color: str) -> None:
+        """A squad's little flag: an ink pole with a coloured cloth (4x3) blowing away from it."""
+        pygame.draw.line(s, INK, (x, y), (x, y + 7))
+        pygame.draw.rect(s, INK, (x + 1, y, 5, 5))
+        pygame.draw.rect(s, _c(color), (x + 1, y + 1, 4, 3))
+
+    def _squad_labels(self, world: World, s: pygame.Surface, real_time: float) -> None:
+        """At the start of a campaign battle every squad's strip carries its name (officer, garrison,
+        allies) at its side's edge of the field, with the pennant its soldiers wear."""
+        if world.time > 4.0 or (world.time > 3.0 and int(real_time * 20) % 2 == 0):
+            return
+        for team in (0, 1):
+            names = getattr(world, "squads", ({}, {}))[team]
+            if len(names) < 2:
+                continue
+            for band, name in names.items():
+                ys = [u.y for u in world.units if u.team == team and u.band == band and u.alive]
+                if not ys:
+                    continue
+                y = round((min(ys) + max(ys)) / 2) - 12
+                col = BAND_COLORS[band % len(BAND_COLORS)]
+                lines = self._wrap(name, 52)[:2]
+                for i, line in enumerate(lines):
+                    if team == 0:
+                        self.font.draw(s, line, 10, y + i * 7, col)
+                    else:
+                        self.font.draw(s, line, W - 10, y + i * 7, col, anchor="topright")
+                self._pennant(s, 3 if team == 0 else W - 8, y - 1, col)
+
     def _texts(self, world: World, s: pygame.Surface, real_time: float) -> None:
         for t in world.texts:
             k = t.t / t.life
@@ -607,6 +654,9 @@ class Renderer:
                            anchor="topleft" if right else "topright")
             chip = sum(u.chip for u in units)
             self._bar(s, px + 5, 14, 148, 5, hp / mx, chip / mx, tm.accent, ticks=7, real_time=real_time)
+            self._tile_squads = getattr(world, "squads", ({}, {}))[team]
+            if len(self._tile_squads) > 1:
+                units = sorted(units, key=lambda u: u.band)          # squad by squad, each with its colour
             # portraits (big squads of a campaign storm: two rows of small tiles)
             if len(units) > 7:
                 self._hud_tiles(s, units, px, right, tm, real_time)
@@ -624,6 +674,8 @@ class Renderer:
                 pygame.draw.rect(s, (38, 43, 68), (cx + 1, cy + 1, 18, 16))
                 por = self.portrait(u.look, dead=u.dead, flip=right)
                 s.blit(por, (cx + 1, cy + 1), area=pygame.Rect(0, 0, 18, 13))
+                if u.band >= 0 and len(self._tile_squads) > 1:
+                    pygame.draw.rect(s, _c(BAND_COLORS[u.band % len(BAND_COLORS)]), (cx + 1, cy + 1, 3, 3))
                 if u.alive:
                     self._bar(s, cx + 1, cy + 14, 18, 3, u.hp / u.max_hp, u.chip / u.max_hp, tm.accent,
                               real_time=real_time)
@@ -679,6 +731,8 @@ class Renderer:
             por = self.portrait(u.look, dead=u.dead, flip=right)
             off = max(0, (18 - (tw - 2)) // 2)
             s.blit(por, (cx + 1, cy + 1), area=pygame.Rect(off, 2, tw - 2, 6))
+            if u.band >= 0 and len(self._tile_squads) > 1:                # his squad's colour in the corner
+                pygame.draw.rect(s, _c(BAND_COLORS[u.band % len(BAND_COLORS)]), (cx + 1, cy + 1, 2, 3))
             if u.alive:
                 self._bar(s, cx + 1, cy + 7, tw - 2, 2, u.hp / u.max_hp, u.chip / u.max_hp, tm.accent,
                           real_time=real_time)

@@ -30,7 +30,7 @@ class PassivesTest(unittest.TestCase):
     def test_the_forest_roots_its_stormers(self):
         c = Campaign(None, seed=3)
         city = next(x for x in c.cities_of("sylvan") if CITY[x].faction == "sylvan")
-        att = [o.key for o in c.officers_of("ashen") if c.squads[o.key]][:2]
+        att = [o.key for o in c.officers_of("ashen") if c.squads[o.key]][:4]   # a storm that lasts
         b = Battle("ashen", "sylvan", city, att, [o.key for o in c.officers_in(city)])
         c._forces(b)
         self.assertEqual(b.wrath, (1, WRATH_DPS * c.prosperity[city]))
@@ -160,6 +160,56 @@ class RearTest(unittest.TestCase):
         g = c.gold["aldern"]
         EFFECTS["tax"](c, "aldern", [city])
         self.assertEqual(c.gold["aldern"] - g, shown)
+
+    def test_squads_fight_in_separate_strips_and_are_named(self):
+        from game.match import squad_names
+        from game.sim import FIELD, TALL_TOP
+        c = Campaign(None, seed=3)
+        f = next(f for f in ("north", "aldern", "highland") if len([o for o in c.officers_of(f) if c.squads[o.key]]) >= 3)
+        att = [o.key for o in c.officers_of(f) if c.squads[o.key]][:3]
+        tgt = next(x for x in c.owner if c.owner[x] not in (f, "goblin") and c.officers_in(x))
+        b = Battle(f, c.owner[tgt], tgt, att, [o.key for o in c.officers_in(tgt)])
+        c._forces(b)
+        w = headless_campaign_world(b)
+        self.assertEqual(w.y0, TALL_TOP)                          # a taller field for strips
+        strips = sorted({u.strip for u in w.units if u.team == 0})
+        self.assertEqual(len(strips), 3)
+        for (a0, a1), (b0, b1) in zip(strips, strips[1:]):
+            self.assertGreaterEqual(b0 - a1, 20)                  # bare ground between the squads
+        names = squad_names(b)[0]
+        self.assertEqual(sorted(names), [0, 1, 2])
+        self.assertTrue(all(OFFICER[o].name in " ".join(names.values()) for o in att))
+        self.assertTrue(all(u.band in names for u in w.units if u.team == 0))
+        quick = headless_campaign_world(Battle(f, c.owner[tgt], tgt, att[:1], []))
+        self.assertEqual(quick.y0, FIELD[1])                     # one squad a side: the usual field
+
+    def test_ai_gives_strong_men_to_great_captains(self):
+        from game.campaign_ai import staff, _hire_pick
+        c = Campaign(None, seed=3)
+        city = c.cities_of("aldern")[0]
+        offs = c.officers_in(city)
+        big, small = offs[0].key, offs[1].key
+        for o in offs:
+            c.squads[o.key] = []
+        c.olead[big], c.olead[small] = 900, 300
+        for o in offs[2:]:
+            c.officer_city[o.key] = c.cities_of("aldern")[1]
+        c.free[city] = [c._new("militia") for _ in range(3)] + [c._new("paladin"), c._new("uhlan")]
+        staff(c, city)
+        self.assertEqual({t.key for t in c.squads[big]}, {"paladin", "uhlan"})   # the strong to the great
+        self.assertTrue(all(t.key == "militia" for t in c.squads[small]))
+        # a full squad of cheap men trades its weakest for a strong recruit standing in the city
+        c.officer_city[small] = c.cities_of("aldern")[1]           # (no one else here to lead him)
+        c.squads[big] = [c._new("militia") for _ in range(7)]
+        c.free[city] = [c._new("paladin")]
+        staff(c, city)
+        self.assertIn("paladin", [t.key for t in c.squads[big]])
+        self.assertEqual(len(c.squads[big]), 7)
+        # hiring: worth per place, not the cheapest crowd
+        c.squads[big] = [c._new("paladin") for _ in range(5)]
+        self.assertEqual(_hire_pick(c, "aldern", big, city, ["militia", "knight"], False), "knight")
+        self.assertIsNone(_hire_pick(c, "aldern", big, city, ["militia"], False))   # save for a worthy one
+        self.assertEqual(_hire_pick(c, "aldern", big, city, ["militia"], True), "militia")   # unless in danger
 
 
 if __name__ == "__main__":

@@ -182,6 +182,11 @@ def score(world: "World", u: "Unit", e: "Unit") -> float:
     return s + u.bias * 3.0
 
 
+def _mid(u: "Unit") -> float:
+    """The middle of the ground he fights on: his squad's strip, or the whole field."""
+    return (u.strip[0] + u.strip[1]) / 2 if u.strip is not None else (FIELD[1] + FIELD[3]) / 2
+
+
 def in_line(u: "Unit") -> bool:
     """Does this soldier keep the soft formation?"""
     return (u.row is not None and not u.ranged and u.key not in DIVERS and u.key not in FREE_OF_LINE
@@ -755,7 +760,7 @@ def think(world: "World", u: "Unit", dt: float) -> None:
         fx, fy = _norm(u.x - sx_, (u.y - sy_) * 1.5)
         fx += -0.8 if u.team == 0 else 0.8
         if (u.x < FIELD[0] + 12 and fx < 0) or (u.x > FIELD[2] - 12 and fx > 0):
-            fx, fy = 0.0, (1.0 if u.y < (FIELD[1] + FIELD[3]) / 2 else -1.0)
+            fx, fy = 0.0, (1.0 if u.y < _mid(u) else -1.0)
         nx, ny = _norm(fx, fy)
         _move(u, nx, ny, dt)
         return
@@ -811,7 +816,7 @@ def think(world: "World", u: "Unit", dt: float) -> None:
             # cornered against an edge: slide along it instead
             if (u.x < FIELD[0] + 12 and fx < 0) or (u.x > FIELD[2] - 12 and fx > 0):
                 fx = 0.0
-                fy = 1.0 if u.y < (FIELD[1] + FIELD[3]) / 2 else -1.0
+                fy = 1.0 if u.y < _mid(u) else -1.0
             if u.key == "horse_archer" and u.cd <= 0 and in_range(u, t):
                 _shoot(world, u, t)       # shooting at full gallop: keeps riding away
                 u.vx, u.vy = fx * u.speed() * 0.9, fy * u.speed() * 0.6
@@ -849,8 +854,8 @@ def think(world: "World", u: "Unit", dt: float) -> None:
             want_y = u.row + (want_y - u.row) * k
         if u.key in DIVERS and t.ranged and abs(t.x - u.x) > 70 and not u.type.incorporeal:
             # flank: run along the nearest field edge before diving in
-            edge = FIELD[1] + 4 if u.y < (FIELD[1] + FIELD[3]) / 2 else FIELD[3] - 4
-            want_y = edge
+            lo, hi = u.strip if u.strip is not None else (FIELD[1], FIELD[3])   # the edge of his squad's strip
+            want_y = lo + 4 if u.y < (lo + hi) / 2 else hi - 4
     dx, dy = want_x - u.x, want_y - u.y
     if math.hypot(dx, dy) < 1.5:
         _move(u, 0, 0, dt)
@@ -1536,12 +1541,12 @@ def _special_move(world, u, t, dt) -> bool:
         _move(u, u.facing, math.sin(world.time * 3 + u.id) * 0.4, dt)
         return True
     if u.has("bats"):                          # vampire bats flutter back to their own side
-        _move(u, _home(u), 0.3 if u.y < (FIELD[1] + FIELD[3]) / 2 else -0.3, dt)
+        _move(u, _home(u), 0.3 if u.y < _mid(u) else -0.3, dt)
         return True
     if u.has("regroup") and t is not None:     # lancer rides off for another charge
         fx, fy = _norm(u.x - t.x, (u.y - t.y) * 0.5)
         if (u.x < FIELD[0] + 12 and fx < 0) or (u.x > FIELD[2] - 12 and fx > 0):
-            fx, fy = 0.0, (1.0 if u.y < (FIELD[1] + FIELD[3]) / 2 else -1.0)
+            fx, fy = 0.0, (1.0 if u.y < _mid(u) else -1.0)
         _move(u, fx, fy, dt)
         return True
     return False

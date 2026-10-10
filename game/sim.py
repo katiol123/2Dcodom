@@ -18,6 +18,9 @@ from .units import ROSTER, TEAMS, Team, UnitType
 
 W, H = 480, 270
 FIELD = (16.0, 140.0, 464.0, 256.0)   # x0, y0, x1, y1 for unit feet
+TALL_TOP = 104.0                       # campaign battles in squad strips reach this far up the field
+BAND_COLORS = ("#fee761", "#63c74d", "#f4f4f4", "#c28bd9")   # squad pennants (the 4th: the allies' strip)
+STRIP_GAP = {2: 36.0, 3: 26.0, 4: 16.0}   # empty ground between squad strips (a sprite is ~25 px tall)
 COUNTDOWN = 2.6
 SUMMON_HP = 100
 REVIVE_DELAY = 2.5
@@ -143,6 +146,7 @@ class Unit:
         self.armor_bonus = 0.0        # ГОРНАЯ ЗАКАЛКА: extra physical armour (added to the class's)
         self.wrath_dps = 0.0          # ЯРОСТЬ ЛЕСА: damage a second while the roots hold him
         self.strip: Optional[Tuple[float, float]] = None   # his squad's strip of the field (y0, y1), see ai.py
+        self.band = -1                # campaign battles: his squad (officer) - its pennant colour in render.py
         self.team = team
         self.team_key = TEAMS[team].key
         self.look = look
@@ -326,7 +330,9 @@ class World:
         self.slowmo = 0.0
         self.winner: Optional[int] = None
         self.end_time = 0.0
+        self.squads: Tuple[Dict[int, str], Dict[int, str]] = ({}, {})   # campaign: band -> squad name per team
         self.sounds: List[str] = []   # event names for an optional audio layer
+        self.y0 = FIELD[1]            # the top of the field (TALL_TOP when the squads fight in strips)
         mid = (FIELD[1] + FIELD[3]) / 2
         self.towers: List[Tower] = [Tower(t, FIELD[2] - 8 if t == 1 else FIELD[0] + 8, mid) for t in towers]
         self._spawn(slots)
@@ -335,16 +341,19 @@ class World:
     def _spawn(self, slots: Sequence[Slot]) -> None:
         """Each side's squads (campaign bands) line up in strips of the field, one above the other; every
         strip gets the usual formation (melee in front, shooters behind, flankers on its edges)."""
-        top, bottom = FIELD[1] + 6, FIELD[3] - 6
+        if any(len({getattr(s, "band", -1) for s in slots if s.team == t}) > 1 for t in (0, 1)):
+            self.y0 = TALL_TOP                         # squads in strips: a taller field
+        top, bottom = self.y0 + 6, FIELD[3] - 4
         for team in (0, 1):
             mine = [s for s in slots if s.team == team]
             bands = sorted({getattr(s, "band", -1) for s in mine})
             if len(bands) <= 1:
-                self._form(team, mine, top, bottom, None)
+                self._form(team, mine, FIELD[1] + 6, FIELD[3] - 6, None)
                 continue
-            h = (bottom - top) / len(bands)
+            gap = STRIP_GAP.get(len(bands), 12.0)
+            h = (bottom - top - gap * (len(bands) - 1)) / len(bands)
             for i, b in enumerate(bands):
-                y0 = top + i * h
+                y0 = top + i * (h + gap)
                 self._form(team, [s for s in mine if getattr(s, "band", -1) == b], y0, y0 + h, (y0, y0 + h))
 
     def _form(self, team: int, mine: Sequence[Slot], y0: float, y1: float,
@@ -375,6 +384,7 @@ class World:
             u.anim_t = self.rng.uniform(0, 1)
             u.chill = self.chill[team]
             u.strip = strip
+            u.band = getattr(s, "band", -1)
             self._harden(u)
             self.units.append(u)
 
@@ -384,7 +394,7 @@ class World:
         look = self.summon_looks.get((owner.team, key))
         if look is None:
             return None
-        u = Unit(ROSTER[key], owner.team, min(FIELD[2], max(FIELD[0], x)), min(FIELD[3], max(FIELD[1], y)),
+        u = Unit(ROSTER[key], owner.team, min(FIELD[2], max(FIELD[0], x)), min(FIELD[3], max(self.y0, y)),
                  self.anims[look], look)
         u.summoned = True
         u.summoner = owner
@@ -397,6 +407,7 @@ class World:
         u.bias = self.rng.random()
         u.chill = self.chill[owner.team]
         u.strip = owner.strip                          # a summon fights in its master's strip
+        u.band = owner.band
         self._harden(u)
         self.units.append(u)
         return u
@@ -427,7 +438,7 @@ class World:
         if look is None:
             return
         x = FIELD[2] - 40 if team == 1 else FIELD[0] + 40
-        y = self.rng.uniform(FIELD[1] + 8, FIELD[3] - 8)
+        y = self.rng.uniform(self.y0 + 8, FIELD[3] - 8)
         u = Unit(ROSTER["skeleton"], team, x, y, self.anims[look], look)
         u.summoned = True
         u.revived = True
@@ -920,7 +931,7 @@ class World:
             u.x += u.vx * dt
             u.y += u.vy * dt
             u.x = min(FIELD[2], max(FIELD[0], u.x))
-            u.y = min(FIELD[3], max(FIELD[1], u.y))
+            u.y = min(FIELD[3], max(self.y0, u.y))
 
     # --- projectiles -----------------------------------------------------------------
     def shoot_arrow(self, u: Unit, target: Unit, dmg_mult: float = 1.0, spread: float = 0.0,

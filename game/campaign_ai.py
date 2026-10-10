@@ -17,6 +17,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from .cardplay import MAX_GROUP, options
 from .cards import CARDS, COUNCIL_SEATS
 from .factions import CITY, FACTION, neighbors
+from .officers import SQUAD_SLOTS
 from .units import ROSTER
 
 AP_PRICE = 35                   # what one action point is worth, in gold
@@ -883,14 +884,75 @@ def choose_answer(camp, b, cards):
 
 
 # --- turn ----------------------------------------------------------------------------------------
+def _room(camp, o: str) -> float:
+    return camp.leadership(o) - camp.power(o)
+
+
+def _slots(camp, o: str) -> int:
+    return SQUAD_SLOTS - len(camp.squads[o])
+
+
+def _worth(camp, o: str) -> float:
+    """What a place in his squad is worth: his spare leadership over his free places."""
+    return _room(camp, o) / max(1, _slots(camp, o))
+
+
+def staff(camp, c: str) -> None:
+    """Hand the city's free troops to its officers: the strongest first, each to the officer whose free
+    place is worth about as much (``_worth``: big captains lead the strong men, small ones the cheap; a
+    man far below that worth stays in the garrison rather than take one of the last places); a troop no one
+    can take any more replaces the weakest soldier of a full squad that could lead it instead (the
+    soldier steps down to the garrison and may serve someone else)."""
+    offs = camp.officers_in(c)
+    if not offs:
+        return
+    for _ in range(3 * SQUAD_SLOTS):
+        free = sorted(camp.free[c], key=lambda t: -t.power)
+        moved = False
+        for t in free:
+            fit = [o.key for o in offs if _slots(camp, o.key) > 0 and _room(camp, o.key) >= t.power
+                   and not (_slots(camp, o.key) <= 3 and t.power < _worth(camp, o.key) * 0.45)]
+            if fit:                                      # whose place is worth about this man
+                camp.assign(min(fit, key=lambda o: (abs(_worth(camp, o) - t.power), -_room(camp, o))), t.id)
+                moved = True
+                break
+            swaps = []
+            for o in offs:                               # a full squad trades its weakest for this one
+                if _slots(camp, o.key) > 0 or not camp.squads[o.key]:
+                    continue
+                weak = min(camp.squads[o.key], key=lambda x: x.power)
+                if t.power > weak.power * 1.25 and _room(camp, o.key) + weak.power >= t.power:
+                    swaps.append((t.power - weak.power, o.key, weak))
+            if swaps:
+                _, o, weak = max(swaps, key=lambda x: x[0])
+                camp.unassign(o, weak.id)
+                camp.assign(o, t.id)
+                moved = True
+                break
+        if not moved:
+            return
+
+
+def _hire_pick(camp, f: str, o: str, c: str, cands: List[str], urgent: bool) -> Optional[str]:
+    """The unit to hire for officer ``o``: his spare leadership spread over his free places sets the
+    worth he should get per man (a great captain gets strong troops, not a crowd of cheap ones). A man
+    far below that worth would only take a place: better to save for one worth it - unless the city
+    is in danger or the squad still has plenty of places."""
+    slots = max(1, _slots(camp, o))
+    want = _worth(camp, o)
+    fair = [k for k in cands if ROSTER[k].cost <= want * 1.15]
+    best = max(fair, key=lambda k: ROSTER[k].cost) if fair else min(cands, key=lambda k: ROSTER[k].cost)
+    if ROSTER[best].cost < want * 0.45 and slots <= 3 and not urgent:
+        return None
+    return best
+
+
 def manage(camp, f: str) -> None:
-    """Fill squads with the free troops in their city, hire with spare gold."""
+    """Fill squads with the free troops in their city (``staff``), hire with spare gold: for the
+    officer with the most leadership to spare first, the unit worth his place (``_hire_pick``); a
+    full squad of cheap men takes a strong recruit in place of the weakest (who joins the garrison)."""
     for c in camp.cities_of(f):
-        offs = sorted(camp.officers_in(c), key=lambda o: -camp.leadership(o.key))
-        for t in sorted(camp.free[c], key=lambda t: -t.power):
-            for o in offs:
-                if camp.assign(o.key, t.id):
-                    break
+        staff(camp, c)
     up = camp.upkeep(f)
     reserve = 80 + 2 * up
     margin = camp.expected_income(f) - up
@@ -906,18 +968,30 @@ def manage(camp, f: str) -> None:
     for c in sorted(front, key=lambda c: -threat(camp, f, c)):
         pool = (camp._pool(c) if camp.muster.get(c, 0) > 0 else []) + (["wolf_rider"] if c in pen else []) + \
             ([yard[c]] if c in yard and (camp.muster.get(c, 0) <= 0 or yard[c] not in camp._pool(c)) else [])
-        for o in camp.officers_in(c):
+        urgent = threat(camp, f, c) > camp.defense_power(c) * 0.8
+        for o in sorted(camp.officers_in(c), key=lambda o: -_room(camp, o.key)):
             while camp.gold[f] > reserve:
-                room = camp.leadership(o.key) - camp.power(o.key)
-                cands = [k for k in pool if ROSTER[k].cost <= room and camp.hire_price(c, k) <= camp.gold[f] - reserve
+                room = _room(camp, o.key)
+                full = _slots(camp, o.key) <= 0
+                weak = min(camp.squads[o.key], key=lambda x: x.power) if full and camp.squads[o.key] else None
+                if full and weak is None:
+                    break
+                cap = room + weak.power if full else room
+                cands = [k for k in pool if ROSTER[k].cost <= cap and camp.hire_price(c, k) <= camp.gold[f] - reserve
                          and not ROSTER[k].boss and camp.troop_upkeep(f, k, c) <= max(0, margin - 0.1 * up)
                          and reign.hire_ok(camp, f, k)]
-                if not cands or len(camp.squads[o.key]) >= 7:
+                if full:                                  # upgrade: only a man well worth the place
+                    cands = [k for k in cands if ROSTER[k].cost >= 2 * weak.power]
+                    k = max(cands, key=lambda k: ROSTER[k].cost) if cands else None
+                else:
+                    k = _hire_pick(camp, f, o.key, c, cands, urgent) if cands else None
+                if k is None:
                     break
-                k = max(cands, key=lambda k: ROSTER[k].cost / camp.hire_price(c, k) + ROSTER[k].cost / 1000)
                 t = camp.hire(c, k)
                 if t is None:
                     break
+                if full:
+                    camp.unassign(o.key, weak.id)        # the weakest steps down to the garrison
                 camp.assign(o.key, t.id)
                 margin -= camp.troop_upkeep(f, k, c)
 

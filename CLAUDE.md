@@ -36,7 +36,12 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   garrison and militia one more; at most `MAX_BANDS` per side, the allies' detachments a strip of their own);
   `World._spawn` forms each band in its own invisible horizontal strip (`Unit.strip`, summons inherit it) and
   `ai.pick_target` keeps a soldier on the foes of the facing strip (`facing_strips`) until none are left there,
-  then he helps the others. Quick battles have no bands (one strip, as before).
+  then he helps the others. Quick battles have no bands (one strip, as before). With bands the field is taller
+  (`World.y0` = `TALL_TOP`, quick battles keep `FIELD[1]`) and strips are parted by bare ground (`STRIP_GAP`,
+  a sprite is ~25 px tall); every squad wears a pennant colour (`BAND_COLORS`, `Unit.band`) by its hp bar and
+  HUD tile, and its name (`match.squad_names`: officer / ГАРНИЗОН / СОЮЗНИКИ) labels its strip for 4 s.
+- AI storms the player is asked to watch: `cardui._draw_ask` shows both sides' squads in rows (officer face
+  and name, then each soldier's sprite and name; two columns when squads have <= 3 kinds) above the question.
 - Charges (`status["charge"]`) are countered by `COUNTERS` (spearman, halberdier, militia) whenever the rusher
   comes within reach, not only when it targets them. Cornered shooters (`cornered`) stop kiting and shoot.
 - Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait
@@ -72,6 +77,10 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   to lairs (`order.haunted`) and fences the loot. Aim (cardsim line ПРОЦВЕТАНИЕ): the
   campaign ends near the starting total (~+10%), often within +5%. AI curse cards weigh `arrives` (interception).
 - Hiring is open only in cities with an active СБОР ВОЙСК (`camp.muster`, turns from council ВЕРБОВКА).
+  AI squads (`campaign_ai.staff` / `_hire_pick`): a troop goes to the officer whose free place is worth about
+  as much (`_worth` = spare leadership / free places), cheap men never take the last places of a great
+  captain (they stay in the garrison), a full squad trades its weakest for a much stronger recruit; starting
+  squads aim each pick at its share of the target too.
 - Officers change during a campaign (`growth.py`): XP/levels (weak officers learn faster, by *starting*
   presence), wounds/complacency, feats (one of each per campaign, `cards.FEATS`), loyalty events and
   defections. Use `camp.ostats/olead/stat()/leadership()/presence()/personal()` and the council wrappers
