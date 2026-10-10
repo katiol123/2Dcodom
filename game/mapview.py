@@ -585,18 +585,18 @@ class WorldMapScreen:
             mini = self._mini_rect()
             if mini.collidepoint(mx, my):
                 self._mini_jump(mx, my)
-                self.drag = (mx, my, -1.0, -1.0)
+                self.drag = (mx, my, None, None)          # None: a drag on the minimap, not the map
                 return None
             self.drag = (mx, my, self.cam[0], self.cam[1])
             self.dragged = False
         elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and self.drag:
-            if not self.dragged and self.drag[2] >= 0 and not self.table.play:
+            if not self.dragged and self.drag[2] is not None and not self.table.play:
                 self.selected = self._city_at(mx, my)
             self.drag = None
         elif ev.type == pygame.MOUSEMOTION and self.drag:
             x0, y0, cx, cy = self.drag
             mini = self._mini_rect()
-            if cx < 0:                                   # dragging inside the minimap
+            if cx is None:                               # dragging inside the minimap (the camera itself may be < 0)
                 if mini.collidepoint(mx, my):
                     self._mini_jump(mx, my)
                 return None

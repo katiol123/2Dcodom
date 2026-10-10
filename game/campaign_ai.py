@@ -163,24 +163,59 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
     return best
 
 
+GUARD_RATIO = 1.1               # a frontier city wants this much defence against the army next door
+
+
+def guard_gap(camp, f: str, city: str) -> float:
+    """How much defence the city lacks against the strongest hostile army next to it (0: it holds)."""
+    return max(0.0, threat(camp, f, city) * GUARD_RATIO - camp.defense_power(city))
+
+
 def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
-    """Bring interior officers towards the front."""
+    """Bring officers where the frontier is thinnest. A city's worth as a destination is the gap
+    between the hostile army next to it and its own defence: an empty city under threat comes first,
+    an overmanned one is hardly worth the march. The source city is never stripped below what its own
+    border needs, and its last defender stays. ЖЕЛЕЗНЫЙ КУЛАК (reign trait) instead masses the troops at
+    the most dangerous border and leaves only half the guard behind."""
+    from . import reign
     front = frontier(camp, f)
     if not front:
         return -1.0, []
+    fist = reign.has(camp, f, "fist") or f == "goblin"      # the horde always comes as one mass
+    keep = 0.5 if fist else 1.0
     best = (-1.0, [])
     for src in options(camp, f, key, []):
+        t_src = threat(camp, f, src)
+        d_src = camp.defense_power(src)
+        need = t_src * GUARD_RATIO * keep
         here = sorted(options(camp, f, key, [src]), key=lambda o: -camp.power(o))
-        movers = [o for o in here if camp.power(o) > 0][:MAX_GROUP]
+        armed = [o for o in here if camp.power(o) > 0]
+        stay = [o.key for o in camp.officers_in(src) if camp.squads[o.key] and o.key not in armed]
+        movers, removed = [], 0.0
+        for o in armed:
+            share = camp.power(o) * camp.officer_mult(o)
+            if t_src > 0:
+                if d_src - removed - share < need:
+                    continue                          # the city would fall open behind us
+                if not stay and len(movers) == len(armed) - 1:
+                    continue                          # the last defender stays
+            movers.append(o)
+            removed += share
+            if len(movers) >= MAX_GROUP:
+                break
         if not movers:
             continue
+        power = sum(camp.power(o) for o in movers)
+        left_open = max(0.0, t_src * GUARD_RATIO - (d_src - removed))
         for dest in options(camp, f, key, [src, tuple(movers)]):
             if dest not in front:
                 continue
-            if src in front and threat(camp, f, dest) <= threat(camp, f, src):
-                continue
-            power = sum(camp.power(o) for o in movers)
-            v = 25 + 0.06 * power + threat(camp, f, dest) / 40
+            gap = guard_gap(camp, f, dest)
+            v = 15 + min(gap, removed) / 8 + 0.02 * power - left_open / 8
+            if fist:
+                v += threat(camp, f, dest) / 30        # the iron fist goes where the enemy is strongest
+            elif gap <= 0:
+                v = min(v, 8.0)                        # already held: hardly worth the march
             if v > best[0]:
                 best = (v, [src, tuple(movers), dest])
     return best

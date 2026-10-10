@@ -1,7 +1,7 @@
 """Reign types (pure Python, no pygame): how a ruler governs when the computer plays his realm.
 
 Every officer has a reign type (``reign_of``) - a name such as ТИРАН made of three behaviour
-traits (``TRAITS``, 33 of them; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
+traits (``TRAITS``, 34 of them; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
 the computer plays: the player's own ruler governs as the player does, and officers who do not
 rule keep their type hidden. A new ruler brings his own way of governing (succession.py).
 
@@ -51,6 +51,7 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "traditionalist": ("ТРАДИЦИОНАЛИСТ", "меняет курс державы лишь при большой выгоде"),
     "reformer": ("РЕФОРМАТОР", "меняет курс, как только это выгоднее"),
     "ambitious": ("ЧЕСТОЛЮБИВЫЙ", "союзов не ищет, метит в сильнейших (+30% к штурмам их городов)"),
+    "fist": ("ЖЕЛЕЗНЫЙ КУЛАК", "стягивает отряды к самой опасной границе, оставляя в тылу лишь полгарнизона"),
     # the horde
     "hunter": ("ГРОЗА ГОБЛИНОВ", "логова штурмует охотнее (+50%), от орды не откупается"),
     "appeaser": ("ДАННИК ОРДЫ", "откуп от орды ценит вдвое: лучше платить, чем воевать с гоблинами"),
@@ -72,9 +73,9 @@ REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
     "avenger": ("МСТИТЕЛЬ", ("vengeful", "reckless", "warmonger")),
     "patron": ("ПОКРОВИТЕЛЬ", ("generous", "pious", "nepotist")),
     "despot": ("ВЛАСТОЛЮБЕЦ", ("ambitious", "elitist", "aggressive")),
-    "strategist": ("СТРАТЕГ", ("vulture", "careful_self", "reformer")),
-    "warlord": ("ПОЛКОВОДЕЦ", ("aggressive", "brave", "recruiter")),
-    "raider": ("ЗАХВАТЧИК", ("conqueror", "reckless", "cruel")),
+    "strategist": ("СТРАТЕГ", ("vulture", "careful_self", "fist")),
+    "warlord": ("ПОЛКОВОДЕЦ", ("aggressive", "brave", "fist")),
+    "raider": ("ЗАХВАТЧИК", ("conqueror", "reckless", "fist")),
     "autocrat": ("ДЕСПОТ", ("cruel", "paranoid", "nepotist")),
     "envoy": ("КУПЕЦ-ДИПЛОМАТ", ("trader", "diplomat", "greedy")),
     "architect": ("ЗОДЧИЙ ДЕРЖАВЫ", ("builder", "defender", "miser")),
