@@ -9,7 +9,7 @@ from game.officers import OFFICER
 
 class ReignTest(unittest.TestCase):
     def test_thirty_three_traits_all_used(self):
-        self.assertEqual(len(reign.TRAITS), 38)
+        self.assertEqual(len(reign.TRAITS), 37)
         used = {t for _, traits in reign.REIGNS.values() for t in traits}
         self.assertEqual(used, set(reign.TRAITS))
         for name, desc in reign.TRAITS.values():
@@ -40,7 +40,7 @@ class ReignTest(unittest.TestCase):
         self.assertGreater(reign.card_mult(c, "khanate", CARDS["assault"]), 0)
         self.assertEqual(reign.min_odds(c, "sultanate"), 0.65)           # a sage: cautious
         self.assertEqual(reign.min_odds(c, "highland"), 0.45)            # an avenger: reckless
-        self.assertEqual(reign.leader_odds(c, "sylvan"), 0.9)            # a keeper guards herself
+        self.assertGreater(reign.leader_odds(c, "sylvan"), 1.0)         # a keeper never rides out herself
         self.assertEqual(reign.leader_odds(c, "aldern"), 0.65)           # a noble rides in front
         self.assertGreater(reign.card_mult(c, "ashen", CARDS["assault"]), 1.0)   # aggressive
         self.assertGreater(reign.course_bias(c, "league").get("economy", 0), 0)
@@ -62,13 +62,13 @@ class ReignTest(unittest.TestCase):
         return c, ruler, target
 
     def test_ai_spares_its_ruler(self):
-        c, ruler, target = self._lone_ruler("sylvan")             # a keeper: only at 90%
+        c, ruler, target = self._lone_ruler("sylvan")             # a keeper: never, unless desperate
         c.win_chance = lambda a, d: 0.85
         v, plan = _attack_plan(c, "sylvan", "assault")
         self.assertFalse(plan and ruler in plan[1])
-        c.win_chance = lambda a, d: 0.95
+        c.win_chance = lambda a, d: 0.99
         v, plan = _attack_plan(c, "sylvan", "assault")
-        self.assertTrue(plan and ruler in plan[1])
+        self.assertFalse(plan and ruler in plan[1])               # not even at 99%: she stays home
         c, ruler, target = self._lone_ruler("aldern")             # a brave noble: from 65%
         c.win_chance = lambda a, d: 0.7
         v, plan = _attack_plan(c, "aldern", "assault")
@@ -87,6 +87,46 @@ class ReignTest(unittest.TestCase):
         fates = [reign.prisoner_fate(c, "ashen") for _ in range(200)]
         self.assertGreater(fates.count("execute"), 100)
         self.assertEqual(reign.prisoner_fate(c, "aldern"), "release")   # merciful noble
+
+    def test_new_and_sharpened_traits(self):
+        from game.campaign_ai import best_play, staff
+        from game.diplomacy import betrayal, envoy_ease, evaluate, hegemon
+        c = Campaign(None, seed=1)
+        c.seat_councils()
+        orig = reign.ruler_traits
+        try:
+            reign.ruler_traits = lambda camp, f: ("vengeful",) if f == "khanate" else ()
+            c.last_attack[("sultanate", "khanate")] = c.turn
+            self.assertTrue(reign.offender(c, "khanate", "sultanate"))
+            self.assertGreater(reign.odds_relief(c, "khanate", "sultanate"), 0)
+            self.assertIn("ИХ ПРАВИТЕЛЬ ЖАЖДЕТ МЕСТИ", [t for t, _ in evaluate(c, "sultanate", "khanate", "truce")[1]])
+            reign.ruler_traits = lambda camp, f: ("diplomat", "trader") if f == "khanate" else ()
+            self.assertLess(envoy_ease(c, "khanate", "truce"), 1)
+            self.assertLess(envoy_ease(c, "khanate", "trade"), 1)
+            reign.ruler_traits = lambda camp, f: ("careful_self",) if f == "khanate" else ()
+            ruler = c.leader["khanate"]
+            self.assertTrue(reign.homebody(c, "khanate", ruler))
+            city = c.officer_city[ruler]
+            c.squads[ruler] = []
+            c.free[city] = [c._new("knight"), c._new("militia")]
+            staff(c, city)
+            self.assertIn("knight", [t.key for t in c.squads[ruler]])      # the best man guards the ruler
+            reign.ruler_traits = lambda camp, f: ("honorable",) if f == "khanate" else ()
+            from game.cards import CARDS
+            spy = next(k for k, cd in CARDS.items() if cd.kind == "intrigue" and k not in reign.GUARD_CARDS)
+            self.assertLess(reign.card_mult(c, "khanate", CARDS[spy]), 0.2)
+            reign.ruler_traits = lambda camp, f: ("attentive",) if f == "khanate" else ()
+            adviser = c.realms["khanate"].council[1] if len(c.realms["khanate"].council) > 1 else None
+            c.loyalty[adviser] = 20
+            inst = c._inst(c.personal(adviser)[0], adviser)
+            self.assertGreater(reign.coaxing(c, "khanate", inst), 1.5)   # a sulking adviser's card first
+            reign.ruler_traits = lambda camp, f: ("admirer",) if f == "khanate" else ()
+            h = hegemon(c)
+            if h and h != "khanate":
+                self.assertTrue(reign.admires(c, "khanate", h))
+                self.assertLess(reign.hostility(c, "khanate", h), 1.0)
+        finally:
+            reign.ruler_traits = orig
 
 
 if __name__ == "__main__":

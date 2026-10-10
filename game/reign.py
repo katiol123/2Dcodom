@@ -1,7 +1,7 @@
 """Reign types (pure Python, no pygame): how a ruler governs when the computer plays his realm.
 
 Every officer has a reign type (``reign_of``) - a name such as ТИРАН made of three behaviour
-traits (``TRAITS``, 38 of them, in 33 types; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
+traits (``TRAITS``, 37 of them, in 33 types; ``GOBLIN_ONLY`` types only for goblins, ``HUMAN_ONLY`` only for people). It only matters - and is only shown - while he rules a realm that
 the computer plays: the player's own ruler governs as the player does, and officers who do not
 rule keep their type hidden. A new ruler brings his own way of governing (succession.py).
 
@@ -27,12 +27,10 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "cruel": ("ЖЕСТОКИЙ", "пленных офицеров обычно казнит"),
     "merciful": ("МИЛОСЕРДНЫЙ", "пленных отпускает домой, их держава за это благодарна (+5)"),
     "greedy": ("АЛЧНЫЙ", "карты хозяйства ценит на 30% выше, тянется к курсу хозяйства"),
-    "generous": ("ЩЕДРЫЙ", "раз в 3 хода верность всех его офицеров +1"),
     "paranoid": ("ПОДОЗРИТЕЛЬНЫЙ", "защиту от интриг ценит вдвое; верность забытых советников падает вдвое быстрее"),
     "schemer": ("ИНТРИГАН", "карты интриги ценит на 40% выше, тянется к тайной политике"),
-    "diplomat": ("ДИПЛОМАТ", "вдвое охотнее шлёт послов с миром и союзом"),
+    "diplomat": ("ДИПЛОМАТ", "шлёт послов с миром и союзом даже ради малой выгоды"),
     "warmonger": ("ВОИНСТВЕННЫЙ", "мира не просит и неохотно его принимает (-15)"),
-    "honorable": ("БЛАГОРОДНЫЙ", "никогда не нарушает договоров"),
     "treacherous": ("ВЕРОЛОМНЫЙ", "рвёт перемирия и даже союзы, едва сосед становится лёгкой добычей: "
                                   "чем вернее штурм, тем скорее удар"),
     "builder": ("СТРОИТЕЛЬ", "процветание городов ценит на 40% выше, бережёт их от поборов"),
@@ -40,22 +38,29 @@ TRAITS: Dict[str, Tuple[str, str]] = {
     "conqueror": ("ЗАВОЕВАТЕЛЬ", "вражеские города ценит на 25% выше, тянется к курсу войны"),
     "miser": ("СКРЯГА", "держит в казне запас на 3 хода содержания, нанимает меньше"),
     "recruiter": ("ВЕРБОВЩИК", "найм и сбор войск ценит на 40% выше"),
-    "elitist": ("ЦЕНИТЕЛЬ ЛУЧШИХ", "нанимает только сильных воинов, ополченцев и псов не берёт"),
-    "trader": ("ТОРГОВЕЦ", "вдвое охотнее предлагает торговлю и охотнее её принимает (+10)"),
+    "trader": ("ТОРГОВЕЦ", "предлагает торговлю даже ради малой выгоды и охотнее её принимает (+10)"),
     "brave": ("ХРАБРЫЙ", "сам ведёт войска в бой уже при шансе 65%"),
-    "careful_self": ("БЕРЕЖЁТ СЕБЯ", "сам идёт в бой лишь при шансе 90% или в безвыходном положении"),
+    "careful_self": ("БЕРЕЖЁТ СЕБЯ", "не покидает своего города (в бой - лишь в безвыходном положении) и "
+                                     "держит при себе сильнейших воинов как личную гвардию"),
     "nepotist": ("КУМОВСТВО", "в совет сажает самых верных, а не самых способных"),
     "meritocrat": ("МЕРИТОКРАТ", "в совет сажает самых способных и пересматривает его вдвое чаще"),
-    "vengeful": ("МСТИТЕЛЬНЫЙ", "того, кто штурмовал его города, бьёт в первую очередь (+50%)"),
-    "vulture": ("СТЕРВЯТНИК", "бьёт ослабленных: державы в смуте и терявшие города (+40%)"),
+    "vengeful": ("МСТИТЕЛЬНЫЙ", "обидчика (штурмовавшего его города) бьёт и при меньших шансах, стягивает войска "
+                               "к его границе и мира с ним не заключает"),
+    "vulture": ("СТЕРВЯТНИК", "добивает ослабленных (смута, потерянные города): рвёт с ними перемирие и "
+                             "штурмует их при меньших шансах"),
     "pious": ("НАБОЖНЫЙ", "подлых интриг избегает (-50%), отношения с соседями медленно растут"),
     "traditionalist": ("ТРАДИЦИОНАЛИСТ", "меняет курс державы лишь при большой выгоде"),
-    "reformer": ("РЕФОРМАТОР", "меняет курс, как только это выгоднее"),
     "ambitious": ("ЧЕСТОЛЮБИВЫЙ", "союзов не ищет, метит в сильнейших (+30% к штурмам их городов)"),
     "isolationist": ("ЗАТВОРНИК", "карты дипломатии ценит вдвое ниже и почти не придерживает их в руке"),
     "courtly": ("ЛЮБИТЕЛЬ ЦЕРЕМОНИЙ", "карты дипломатии ценит на 40% выше и охотно придерживает до удобного часа"),
     "chancellor": ("КАНЦЛЕР", "карты совета ценит на 40% выше и придерживает их"),
     "rover": ("НЕУТОМИМЫЙ", "карты походов ценит на 50% выше: его войска не засиживаются на месте"),
+    "attentive": ("ЧУТКИЙ", "охотнее разыгрывает карты советников, чья верность низка: так он их задабривает, "
+                           "даже ценой менее выгодного хода"),
+    "admirer": ("ПОЧИТАТЕЛЬ СИЛЫ", "гегемона не боится, а уважает: отношения с ним растут, его послов принимает "
+                                  "охотно, нападать на него не рвётся"),
+    "honorable": ("БЛАГОРОДНЫЙ", "карт интриги почти не разыгрывает: подлость ему претит (защита от интриг - "
+                                "не в счёт)"),
     "fist": ("ЖЕЛЕЗНЫЙ КУЛАК", "стягивает отряды к самой опасной границе, оставляя в тылу лишь полгарнизона"),
     # the horde
     "hunter": ("ГРОЗА ГОБЛИНОВ", "логова штурмует охотнее (+50%), от орды не откупается"),
@@ -74,26 +79,26 @@ REIGNS: Dict[str, Tuple[str, Tuple[str, str, str]]] = {
     "schemer": ("ИНТРИГАН", ("schemer", "treacherous", "vulture")),
     "noble": ("БЛАГОРОДНЫЙ ВОЖДЬ", ("honorable", "brave", "merciful")),
     "keeper": ("ХРАНИТЕЛЬ", ("defender", "traditionalist", "careful_self")),
-    "reformer": ("РЕФОРМАТОР", ("reformer", "meritocrat", "builder")),
+    "reformer": ("РЕФОРМАТОР", ("attentive", "meritocrat", "builder")),
     "avenger": ("МСТИТЕЛЬ", ("vengeful", "reckless", "warmonger")),
-    "patron": ("ПОКРОВИТЕЛЬ", ("generous", "pious", "nepotist")),
-    "despot": ("ВЛАСТОЛЮБЕЦ", ("ambitious", "elitist", "aggressive")),
+    "patron": ("ПОКРОВИТЕЛЬ", ("merciful", "pious", "nepotist")),
+    "despot": ("ВЛАСТОЛЮБЕЦ", ("ambitious", "vulture", "aggressive")),
     "strategist": ("СТРАТЕГ", ("vulture", "careful_self", "fist")),
     "warlord": ("ПОЛКОВОДЕЦ", ("aggressive", "brave", "fist")),
     "raider": ("ЗАХВАТЧИК", ("conqueror", "reckless", "fist")),
     "autocrat": ("ДЕСПОТ", ("cruel", "paranoid", "nepotist")),
-    "envoy": ("КУПЕЦ-ДИПЛОМАТ", ("trader", "diplomat", "greedy")),
+    "envoy": ("КУПЕЦ-ДИПЛОМАТ", ("trader", "diplomat", "admirer")),
     "architect": ("ЗОДЧИЙ ДЕРЖАВЫ", ("builder", "defender", "miser")),
-    "zealot": ("РЕВНИТЕЛЬ ВЕРЫ", ("pious", "honorable", "aggressive")),
+    "zealot": ("РЕВНИТЕЛЬ ВЕРЫ", ("pious", "vengeful", "aggressive")),
     "shadow": ("ТЕНЕВОЙ ПРАВИТЕЛЬ", ("schemer", "paranoid", "careful_self")),
     "crusader": ("КРЕСТОНОСЕЦ", ("honorable", "conqueror", "brave")),
     "miserly": ("СКУПОЙ ВЛАДЫКА", ("miser", "traditionalist", "cautious")),
     "upstart": ("ВЫСКОЧКА", ("ambitious", "reckless", "meritocrat")),
-    "benefactor": ("ОТЕЦ НАРОДА", ("generous", "builder", "merciful")),
-    "mercenary": ("НАЁМНЫЙ КНЯЗЬ", ("greedy", "treacherous", "elitist")),
+    "benefactor": ("ОТЕЦ НАРОДА", ("diplomat", "builder", "merciful")),
+    "mercenary": ("НАЁМНЫЙ КНЯЗЬ", ("greedy", "treacherous", "admirer")),
     "hermit": ("ОТШЕЛЬНИК НА ТРОНЕ", ("isolationist", "defender", "miser")),
     "peacemaker": ("МИРОТВОРЕЦ", ("courtly", "diplomat", "merciful")),
-    "chancellor": ("ВЕЛИКИЙ КАНЦЛЕР", ("chancellor", "meritocrat", "builder")),
+    "chancellor": ("ВЕЛИКИЙ КАНЦЛЕР", ("chancellor", "attentive", "builder")),
     "nomad": ("КОЧЕВОЙ ВОЖДЬ", ("rover", "reckless", "recruiter")),
     "slayer": ("ИСТРЕБИТЕЛЬ ОРД", ("hunter", "brave", "conqueror")),
     "tributary": ("ОТКУПЩИК", ("appeaser", "cautious", "trader")),
@@ -240,6 +245,8 @@ def card_mult(camp, faction: str, card) -> float:
         m *= 1.4
     if "pious" in t and card.kind == "intrigue" and card.key not in GUARD_CARDS:
         m *= 0.5
+    if "honorable" in t and card.kind == "intrigue" and card.key not in GUARD_CARDS:
+        m *= 0.1
     if "paranoid" in t and card.key in GUARD_CARDS:
         m *= 2.0
     if "defender" in t and card.key in DEFENSE_CARDS:
@@ -281,12 +288,64 @@ def min_odds(camp, faction: str) -> float:
 
 
 def leader_odds(camp, faction: str) -> float:
-    """How sure the computer must be before it risks its ruler in a storm."""
+    """How sure the computer must be before it risks its ruler in a storm (БЕРЕЖЁТ СЕБЯ: never, unless
+    desperate)."""
     if has(camp, faction, "brave"):
         return 0.65
     if has(camp, faction, "careful_self"):
-        return 0.9
+        return 1.01
     return 0.8
+
+
+def homebody(camp, faction: str, officer: str) -> bool:
+    """БЕРЕЖЁТ СЕБЯ: the ruler stays in his city (no marches, no posts away)."""
+    return camp.leader.get(faction) == officer and has(camp, faction, "careful_self")
+
+
+def offender(camp, faction: str, other: str) -> bool:
+    """МСТИТЕЛЬНЫЙ: ``other`` has stormed this ruler's cities lately."""
+    return has(camp, faction, "vengeful") and camp.last_attack.get((other, faction), -99) >= camp.turn - 8
+
+
+def weakened(camp, other: str) -> bool:
+    """A realm in unrest or that has lost cities lately (СТЕРВЯТНИК's prey)."""
+    from .diplomacy import lost_lately
+    return bool(camp.realms[other].unrest) or lost_lately(camp, other) > 0
+
+
+def odds_relief(camp, faction: str, target_owner: str) -> float:
+    """How much lower storm odds will do: МСТИТЕЛЬНЫЙ against his offender, СТЕРВЯТНИК against the weak."""
+    if target_owner in (faction, "goblin") or target_owner not in camp.realms:
+        return 0.0
+    d = 0.0
+    if offender(camp, faction, target_owner):
+        d += 0.15
+    if has(camp, faction, "vulture") and weakened(camp, target_owner):
+        d += 0.08
+    return d
+
+
+def admires(camp, faction: str, other: str) -> bool:
+    """ПОЧИТАТЕЛЬ СИЛЫ: ``other`` is the hegemon and this ruler looks up to it."""
+    from .diplomacy import hegemon
+    return has(camp, faction, "admirer") and other == hegemon(camp)
+
+
+COAX_BELOW = 75                 # ЧУТКИЙ: advisers below this loyalty are coaxed with their own cards
+
+
+def coaxing(camp, faction: str, inst) -> float:
+    """ЧУТКИЙ: a card brought by an adviser of low loyalty is worth more to play (it mends him, +2)."""
+    o = inst.origin
+    if not has(camp, faction, "attentive") or o not in camp.loyalty or o not in camp.realms[faction].council:
+        return 1.0
+    return 1.0 + max(0, COAX_BELOW - camp.loyalty[o]) / 25
+
+
+def coax_bonus(camp, faction: str, inst) -> float:
+    """... and even a card of little use is played for the adviser's sake (value in gold)."""
+    m = coaxing(camp, faction, inst)
+    return (m - 1.0) * 40
 
 
 def worth_mult(camp, faction: str) -> float:
@@ -301,11 +360,15 @@ def hostility(camp, faction: str, target: str) -> float:
         return 1.0
     m = 1.0
     if "vengeful" in t and camp.last_attack.get((target, faction), -99) >= camp.turn - 8:
-        m *= 1.5
+        m *= 2.0
     if "vulture" in t:
         from .diplomacy import lost_lately
         if camp.realms[target].unrest or lost_lately(camp, target):
             m *= 1.4
+    if "admirer" in t:
+        from .diplomacy import hegemon
+        if target == hegemon(camp):
+            m *= 0.5                                # the strongest is looked up to, not attacked
     if "ambitious" in t:
         from .diplomacy import humans, standing
         rivals = [x for x in humans(camp) if x != faction]
@@ -327,8 +390,6 @@ def course_bias(camp, faction: str) -> Dict[str, float]:
 def course_margin(camp, faction: str) -> float:
     if has(camp, faction, "traditionalist"):
         return 1.2
-    if has(camp, faction, "reformer"):
-        return 0.2
     return 0.5
 
 
@@ -337,8 +398,7 @@ def reserve(camp, faction: str, base: float) -> float:
 
 
 def hire_ok(camp, faction: str, key: str) -> bool:
-    from .units import ROSTER
-    return not has(camp, faction, "elitist") or ROSTER[key].tier in ("average", "above")
+    return True
 
 
 def prisoner_fate(camp, victor: str) -> Optional[str]:

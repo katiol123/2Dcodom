@@ -142,10 +142,14 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   ruler's cards become the ruler's cards, the dead ruler's stay as `Realm.legacy` (one ruler only); then
   political instability (`Realm.unrest`). Use `camp.is_leader(o)`, never `rank == 0`, for "the ruler".
   Dead officers stay in `camp.dead` (excluded from `officers_of/officers_in`).
-- Reign types (`reign.py`): every officer has a reign type of 3 traits (38 traits, 33 types; `GOBLIN_ONLY` /
+- Reign types (`reign.py`): every officer has a reign type of 3 traits (37 traits, 33 types; `GOBLIN_ONLY` /
   `HUMAN_ONLY` types); it acts only
   while he rules a computer realm (`ruler_traits` is empty for the player's realm) and is shown only then.
   Traits hook card values, attack odds, leader risk, hiring, council, course, diplomacy, prisoners, loyalty.
+  Traits are *preferences in decisions*, never stat bonuses (user rule). Check that each one actually changes
+  decisions (scratch script: force the trait on every computer ruler, compare choices with and without it);
+  hooks: `odds_relief` (МСТИТЕЛЬНЫЙ/СТЕРВЯТНИК), `homebody` (БЕРЕЖЁТ СЕБЯ), `coaxing/coax_bonus` (ЧУТКИЙ),
+  `admires` (ПОЧИТАТЕЛЬ СИЛЫ), `diplomacy.betrayal` / `envoy_ease`; БЛАГОРОДНЫЙ shuns intrigue cards.
   The AI risks its ruler in a storm only above `leader_odds` or when desperate (`campaign_ai._attack_plan`).
 - Population (`population.py`): the БОЛЕЗНЬ В ГОРОДЕ card (tier `fate`, in every deck) sickens a city
   (`camp.sick`); officers there may die each own turn. Newcomers (`officers.newcomer`, keys

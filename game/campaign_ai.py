@@ -146,7 +146,8 @@ def _attack_plan(camp, f: str, key: str, mult: float = 1.0) -> Tuple[float, list
                     cands, p, a, d = others, p2, a2, d2
                 elif not (_desperate(camp, f, target) and p >= need):
                     continue
-        if p < need - (0.08 if besieged_by(camp, target) == f else 0.0):   # our siege: a bolder storm
+        bold = (0.08 if besieged_by(camp, target) == f else 0.0) + reign.odds_relief(camp, f, camp.owner[target])
+        if p < need - bold:                      # our siege, a vengeance, carrion: a bolder storm
             continue
         hostility = 1.0 + (40 - min(40, camp.relation(f, camp.owner[target]))) / 80
         if camp.realms[camp.owner[target]].course == "economy":
@@ -205,7 +206,8 @@ def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
             need *= 1.4                               # a besieged city keeps its men
         here = sorted(options(camp, f, key, [src]), key=lambda o: -camp.power(o))
         posts = rear_posts(camp, f)
-        armed = [o for o in here if camp.power(o) > 0 and posts.get(o) != src]   # a rear post stays put
+        armed = [o for o in here if camp.power(o) > 0 and posts.get(o) != src   # a rear post stays put
+                 and not reign.homebody(camp, f, o)]                             # БЕРЕЖЁТ СЕБЯ: so does he
         stay = [o.key for o in camp.officers_in(src) if camp.squads[o.key] and o.key not in armed]
         movers, removed = [], 0.0
         for o in armed:
@@ -234,6 +236,8 @@ def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
                 v = min(v, 8.0)                        # already held: hardly worth the march
             if besieged_by(camp, dest):
                 v += SIEGE_RELIEF + camp.prosperity[dest] * 2   # relieve our besieged city
+            if any(reign.offender(camp, f, camp.owner[n]) for n in neighbors(dest)):
+                v += 15                                # МСТИТЕЛЬНЫЙ: gather on the offender's border
             v += _staging(camp, f, dest, power) * (1.0 if fist else 0.5)
             if v > best[0]:
                 best = (v, [src, tuple(movers), dest])
@@ -340,7 +344,8 @@ def _can_spare(camp, f: str, o: str) -> bool:
     """The officer may leave his city: it is not threatened beyond what stays, and he is not its last
     defender against a hostile neighbour."""
     city = camp.officer_city.get(o)
-    if city is None:
+    from . import reign
+    if city is None or reign.homebody(camp, f, o):
         return False
     t = threat(camp, f, city)
     if t <= 0:
@@ -924,7 +929,9 @@ def staff(camp, c: str) -> None:
     place is worth about as much (``_worth``: big captains lead the strong men, small ones the cheap; a
     man far below that worth stays in the garrison rather than take one of the last places); a troop no one
     can take any more replaces the weakest soldier of a full squad that could lead it instead (the
-    soldier steps down to the garrison and may serve someone else)."""
+    soldier steps down to the garrison and may serve someone else). БЕРЕЖЁТ СЕБЯ: the ruler takes the best
+    men as his guard."""
+    from . import reign
     offs = camp.officers_in(c)
     if not offs:
         return
@@ -934,8 +941,10 @@ def staff(camp, c: str) -> None:
         for t in free:
             fit = [o.key for o in offs if _slots(camp, o.key) > 0 and _room(camp, o.key) >= t.power
                    and not (_slots(camp, o.key) <= 3 and t.power < _worth(camp, o.key) * 0.45)]
+            guard = [o for o in fit if reign.homebody(camp, camp.owner[c], o)]   # БЕРЕЖЁТ СЕБЯ: the best men first
             if fit:                                      # whose place is worth about this man
-                camp.assign(min(fit, key=lambda o: (abs(_worth(camp, o) - t.power), -_room(camp, o))), t.id)
+                pick = guard[0] if guard else min(fit, key=lambda o: (abs(_worth(camp, o) - t.power), -_room(camp, o)))
+                camp.assign(pick, t.id)
                 moved = True
                 break
             swaps = []
@@ -991,7 +1000,7 @@ def manage(camp, f: str) -> None:
         pool = (camp._pool(c) if camp.muster.get(c, 0) > 0 else []) + (["wolf_rider"] if c in pen else []) + \
             ([yard[c]] if c in yard and (camp.muster.get(c, 0) <= 0 or yard[c] not in camp._pool(c)) else [])
         urgent = threat(camp, f, c) > camp.defense_power(c) * 0.8
-        for o in sorted(camp.officers_in(c), key=lambda o: -_room(camp, o.key)):
+        for o in sorted(camp.officers_in(c), key=lambda o: (not reign.homebody(camp, f, o.key), -_room(camp, o.key))):
             while camp.gold[f] > reserve:
                 room = _room(camp, o.key)
                 full = _slots(camp, o.key) <= 0
@@ -1117,11 +1126,16 @@ def best_play(camp, f: str, ap_price: float = AP_PRICE) -> Optional[Tuple[float,
         if not camp.can_play(f, inst)[0]:
             continue
         v, targets = VALUE(camp, f, inst)
-        if v is None or v <= 0:
+        if v is not None and v <= 0 and reign.coax_bonus(camp, f, inst) > 0 and \
+                inst.card.kind in ("economy", "council", "diplomacy", "recruit") and inst.card.tier != "vice" and \
+                (targets or not inst.card.targets):
+            v = 0.0                                      # ЧУТКИЙ: played for the sulking adviser's sake
+        if v is None or v < 0 or v == 0 and reign.coax_bonus(camp, f, inst) <= 0:
             continue
+        v += reign.coax_bonus(camp, f, inst)
         if peace_mult(camp, f, inst.key, targets) < 1:
             continue                                     # no hostile acts against friends, not even with spare points
-        v *= reign.card_mult(camp, f, inst.card)
+        v *= reign.card_mult(camp, f, inst.card) * reign.coaxing(camp, f, inst)
         cost = camp.card_cost(f, inst)
         net = v - cost * ap_price
         if net <= 0:

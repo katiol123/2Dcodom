@@ -216,6 +216,10 @@ def evaluate(camp, frm: str, to: str, kind: str, bonus: int = 0) -> Tuple[int, L
     from . import reign
     if kind == "truce" and reign.has(camp, to, "warmonger"):
         add("ИХ ПРАВИТЕЛЬ ВОИНСТВЕН", -15)
+    if reign.offender(camp, to, frm):
+        add("ИХ ПРАВИТЕЛЬ ЖАЖДЕТ МЕСТИ", -60)
+    if reign.admires(camp, to, frm):
+        add("ИХ ПРАВИТЕЛЬ ЧТИТ ВАШУ СИЛУ", 25)
     if kind == "trade" and reign.has(camp, to, "trader"):
         add("ИХ ПРАВИТЕЛЬ - ТОРГОВЕЦ", 10)
     if kind == "alliance" and reign.has(camp, to, "ambitious"):
@@ -411,9 +415,10 @@ def round_tick(camp) -> None:
     if h:
         camp.stats["hegemon"][h] += 1
         near = [x for x in alive if x != h and borders(camp, x, h)]
+        from . import reign
         for x in alive:
-            if x != h:
-                camp.change_relation(h, x, -1)              # fear of the strongest
+            if x != h:                                      # fear of the strongest (ПОЧИТАТЕЛЬ СИЛЫ: respect)
+                camp.change_relation(h, x, 1 if reign.admires(camp, x, h) else -1)
         for i, a in enumerate(near):
             for b in near[i + 1:]:
                 if camp.turn % 2 == 0:
@@ -435,10 +440,16 @@ def ai_wishes(camp, f: str) -> List[Tuple[float, str, str]]:
     alive = humans(camp)
     h = hegemon(camp)
     my_army = camp.army(f) + 1
+    from . import reign
     for r in alive:
-        if r == f:
+        if r == f or reign.offender(camp, f, r):         # МСТИТЕЛЬНЫЙ: no deals with the offender
             continue
         st = status(camp, f, r)
+        fan = reign.admires(camp, f, r)                  # ПОЧИТАТЕЛЬ СИЛЫ courts the hegemon
+        if fan and st == "war" and can_propose(camp, f, r, "truce")[0]:
+            out.append((70.0, "truce", r))
+        if fan and st != "alliance" and can_propose(camp, f, r, "alliance")[0]:
+            out.append((90.0, "alliance", r))
         if st == "war" and can_propose(camp, f, r, "truce")[0] and borders(camp, f, r):
             danger = camp.army(r) / my_army
             want = 60 * (danger - 0.8) + 25 * lost_lately(camp, f) + 12 * hostile_fronts(camp, f, r)
@@ -449,6 +460,8 @@ def ai_wishes(camp, f: str) -> List[Tuple[float, str, str]]:
             want -= 120 * prey(camp, f, r)             # don't make peace with easy prey
             if r == h:
                 want -= 30
+            if reign.has(camp, f, "diplomat"):
+                want += 45                             # ДИПЛОМАТ: peace is worth a letter anyway
             if want > 0:
                 out.append((want, "truce", r))
         if st != "alliance" and can_propose(camp, f, r, "alliance")[0] and not allies(camp, f):
@@ -456,10 +469,12 @@ def ai_wishes(camp, f: str) -> List[Tuple[float, str, str]]:
             if h and h not in (f, r) and (borders(camp, f, h) or borders(camp, r, h)):
                 want += 90
             want += 6 * sum(1 for x in alive if x not in (f, r) and borders(camp, f, x) and borders(camp, r, x))
-            if want > 60:
-                out.append((want, "alliance", r))
+            if want > (15 if reign.has(camp, f, "diplomat") else 60):
+                out.append((max(want, 40), "alliance", r))
         trades = sum(1 for k in camp.trade if f in k)
-        if trades < 2 and can_propose(camp, f, r, "trade")[0] and camp.relation(f, r) >= 50:
+        merchant = reign.has(camp, f, "trader")          # ТОРГОВЕЦ: more partners, warmer or cooler
+        if trades < (4 if merchant else 2) and can_propose(camp, f, r, "trade")[0] \
+                and camp.relation(f, r) >= (30 if merchant else 50):
             out.append((trade_gold(camp, f, r) * 3, "trade", r))
     from . import reign
     t = reign.ruler_traits(camp, f)
@@ -483,7 +498,7 @@ def ai_turn(camp, f: str, ap_price: float) -> None:
         return
     r = camp.realms[f]
     wishes = ai_wishes(camp, f)
-    if wishes and r.ap >= ENVOY_COST and wishes[0][0] > ap_price * ENVOY_COST * 1.2:
+    if wishes and r.ap >= ENVOY_COST and wishes[0][0] > ap_price * ENVOY_COST * 1.2 * envoy_ease(camp, f, wishes[0][1]):
         _, kind, other = wishes[0]
         r.ap -= ENVOY_COST
         propose(camp, f, other, kind)
@@ -492,13 +507,20 @@ def ai_turn(camp, f: str, ap_price: float) -> None:
         declare_war(camp, f, pick[0])
 
 
+def envoy_ease(camp, f: str, kind: str) -> float:
+    """ДИПЛОМАТ (peace, alliance) and ТОРГОВЕЦ (trade) send envoys even for a small gain."""
+    from . import reign
+    if kind in ("truce", "alliance") and reign.has(camp, f, "diplomat") or \
+            kind == "trade" and reign.has(camp, f, "trader"):
+        return 0.35
+    return 1.0
+
+
 def betrayal(camp, f: str) -> Optional[Tuple[str, float]]:
     """Whom the ruler is tempted to betray this turn and how likely he strikes: a truce partner who has
-    become easy prey (ВЕРОЛОМНЫЙ: an ally too, and the surer the storm the likelier the blow; БЛАГОРОДНЫЙ:
-    never)."""
+    become easy prey (ВЕРОЛОМНЫЙ: an ally too, and the surer the storm the likelier the blow; СТЕРВЯТНИК: a
+    weakened partner, in unrest or losing cities)."""
     from . import reign
-    if reign.has(camp, f, "honorable"):
-        return None
     sly = reign.has(camp, f, "treacherous")
     if camp.betrayals[f] >= (5 if sly else 2):
         return None
@@ -507,12 +529,14 @@ def betrayal(camp, f: str) -> Optional[Tuple[str, float]]:
         st = status(camp, f, other)
         if other == f or st not in (("truce", "alliance") if sly else ("truce",)):
             continue
-        if st == "truce" and camp.relation(f, other) >= (75 if sly else 45):
+        carrion = st == "truce" and reign.has(camp, f, "vulture") and reign.weakened(camp, other)
+        if st == "truce" and not carrion and camp.relation(f, other) >= (75 if sly else 45):
             continue                                 # (an ally is betrayed for gain alone, friend or not)
         p = prey(camp, f, other)
-        if p >= (TREACHERY_PREY_SLY if sly else TREACHERY_PREY):
-            marks.append((p, other))
+        if p >= (TREACHERY_PREY_SLY if sly or carrion else TREACHERY_PREY):
+            chance = min(0.8, 0.2 + p * 0.6) if sly else 0.4 if carrion else 0.15
+            marks.append((p, chance, other))
     if not marks:
         return None
-    p, other = max(marks)
-    return other, (min(0.8, 0.2 + p * 0.6) if sly else 0.15)
+    p, chance, other = max(marks)
+    return other, chance
