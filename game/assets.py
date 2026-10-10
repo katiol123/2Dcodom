@@ -105,6 +105,7 @@ class Slot:
     key: str
     look: str
     tag: int = 0                # campaign battles: the troop this unit stands for
+    band: int = -1              # campaign battles: the squad (officer) it fights in; -1 = no bands
 
 
 def look_name(key: str, team_key: str, spec: Look) -> str:

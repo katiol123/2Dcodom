@@ -197,7 +197,18 @@ def pick_target(world: "World", u: "Unit") -> Optional["Unit"]:
     cands = [e for e in world.enemies(u) if not e.has("stealth")]
     if not cands:
         return None
-    return max(cands, key=lambda e: score(world, u, e))
+    facing = [e for e in cands if facing_strips(u, e)]
+    return max(facing or cands, key=lambda e: score(world, u, e))   # my squad's foes first, then help
+
+
+def facing_strips(u: "Unit", e: "Unit") -> bool:
+    """Squads in a campaign battle fight in invisible strips of the field: a soldier takes on the foes of
+    the strip facing his own while any are left there; then he is free to help the neighbours."""
+    a, b = u.strip, e.strip
+    if a is None or b is None:
+        return True
+    overlap = min(a[1], b[1]) - max(a[0], b[0])
+    return overlap > 0.3 * min(a[1] - a[0], b[1] - b[0])
 
 
 def heal_target(world: "World", u: "Unit", reach: float) -> Optional["Unit"]:

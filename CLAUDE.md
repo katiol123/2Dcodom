@@ -32,6 +32,11 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
 - Soft formation (ai.py `in_line`, `ROW_PULL`, `LINE_CLOSE`): melee soldiers remember their spawn row (`Unit.row`),
   march holding it, prefer the foe facing them and fight from their own side (no wrap-around); divers, shooters,
   healers, brutes and summons are free of it. Check crowding/balance after changing it.
+- Squad strips (campaign battles): `match.campaign_squads` gives every unit a band = its officer's squad (the
+  garrison and militia one more; at most `MAX_BANDS` per side, the allies' detachments a strip of their own);
+  `World._spawn` forms each band in its own invisible horizontal strip (`Unit.strip`, summons inherit it) and
+  `ai.pick_target` keeps a soldier on the foes of the facing strip (`facing_strips`) until none are left there,
+  then he helps the others. Quick battles have no bands (one strip, as before).
 - Charges (`status["charge"]`) are countered by `COUNTERS` (spearman, halberdier, militia) whenever the rusher
   comes within reach, not only when it targets them. Cornered shooters (`cornered`) stop kiting and shoot.
 - Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait

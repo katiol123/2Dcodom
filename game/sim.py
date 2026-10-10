@@ -17,7 +17,7 @@ from .assets import AnimInfo, Slot
 from .units import ROSTER, TEAMS, Team, UnitType
 
 W, H = 480, 270
-FIELD = (16.0, 150.0, 464.0, 256.0)   # x0, y0, x1, y1 for unit feet
+FIELD = (16.0, 140.0, 464.0, 256.0)   # x0, y0, x1, y1 for unit feet
 COUNTDOWN = 2.6
 SUMMON_HP = 100
 REVIVE_DELAY = 2.5
@@ -142,6 +142,7 @@ class Unit:
         self.chill = 1.0              # СТУЖА: speed of march and blow (0.7 in a frozen city, the North 1.0)
         self.armor_bonus = 0.0        # ГОРНАЯ ЗАКАЛКА: extra physical armour (added to the class's)
         self.wrath_dps = 0.0          # ЯРОСТЬ ЛЕСА: damage a second while the roots hold him
+        self.strip: Optional[Tuple[float, float]] = None   # his squad's strip of the field (y0, y1), see ai.py
         self.team = team
         self.team_key = TEAMS[team].key
         self.look = look
@@ -332,34 +333,50 @@ class World:
 
     # formation: melee line in front, flankers on the edges, shooters behind.
     def _spawn(self, slots: Sequence[Slot]) -> None:
-        y0, y1 = FIELD[1] + 6, FIELD[3] - 6
+        """Each side's squads (campaign bands) line up in strips of the field, one above the other; every
+        strip gets the usual formation (melee in front, shooters behind, flankers on its edges)."""
+        top, bottom = FIELD[1] + 6, FIELD[3] - 6
         for team in (0, 1):
             mine = [s for s in slots if s.team == team]
-            lanes = {"front": [], "flank": [], "back": []}
-            for s in mine:
-                lanes[ROSTER[s.key].lane].append(s)
-            placed = []
-            for lane, x in (("front", 148.0), ("back", 74.0)):
-                group = lanes[lane]
-                n = len(group)
-                ys = [y0 + 8 + (y1 - y0 - 16) * (i + 0.5) / n for i in range(n)]
-                self.rng.shuffle(ys)
-                placed += [(s, x + self.rng.uniform(-6, 6), y) for s, y in zip(group, ys)]
-            edges = [y0, y1]
-            self.rng.shuffle(edges)
-            for i, s in enumerate(lanes["flank"]):
-                placed.append((s, 118.0 - (i // 2) * 14, edges[i % 2] + (i // 2) * (8 if edges[i % 2] == y0 else -8)))
-            for s, x, y in placed:
-                if team == 1:
-                    x = W - x
-                u = Unit(ROSTER[s.key], team, x, y + self.rng.uniform(-3, 3), self.anims[s.look], s.look)
-                u.tag = getattr(s, "tag", 0)
-                u.row = u.y                # the soldier's row in the line (soft formation, ai.py)
-                u.bias = self.rng.random()
-                u.anim_t = self.rng.uniform(0, 1)
-                u.chill = self.chill[team]
-                self._harden(u)
-                self.units.append(u)
+            bands = sorted({getattr(s, "band", -1) for s in mine})
+            if len(bands) <= 1:
+                self._form(team, mine, top, bottom, None)
+                continue
+            h = (bottom - top) / len(bands)
+            for i, b in enumerate(bands):
+                y0 = top + i * h
+                self._form(team, [s for s in mine if getattr(s, "band", -1) == b], y0, y0 + h, (y0, y0 + h))
+
+    def _form(self, team: int, mine: Sequence[Slot], y0: float, y1: float,
+              strip: Optional[Tuple[float, float]]) -> None:
+        lanes = {"front": [], "flank": [], "back": []}
+        for s in mine:
+            lanes[ROSTER[s.key].lane].append(s)
+        placed = []
+        for lane, x in (("front", 148.0), ("back", 74.0)):
+            group = lanes[lane]
+            n = len(group)
+            pad = min(8.0, (y1 - y0) / 4)
+            ys = [y0 + pad + (y1 - y0 - 2 * pad) * (i + 0.5) / n for i in range(n)]
+            self.rng.shuffle(ys)
+            placed += [(s, x + self.rng.uniform(-6, 6), y) for s, y in zip(group, ys)]
+        edges = [y0, y1]
+        self.rng.shuffle(edges)
+        for i, s in enumerate(lanes["flank"]):
+            step = min(8.0, (y1 - y0) / 4)
+            placed.append((s, 118.0 - (i // 2) * 14, edges[i % 2] + (i // 2) * (step if edges[i % 2] == y0 else -step)))
+        for s, x, y in placed:
+            if team == 1:
+                x = W - x
+            u = Unit(ROSTER[s.key], team, x, y + self.rng.uniform(-3, 3), self.anims[s.look], s.look)
+            u.tag = getattr(s, "tag", 0)
+            u.row = u.y                # the soldier's row in the line (soft formation, ai.py)
+            u.bias = self.rng.random()
+            u.anim_t = self.rng.uniform(0, 1)
+            u.chill = self.chill[team]
+            u.strip = strip
+            self._harden(u)
+            self.units.append(u)
 
     def summon(self, owner: Unit, x: float, y: float, key: str = "skeleton", hp: Optional[float] = None,
                rising: float = 0.0) -> Optional[Unit]:
@@ -379,6 +396,7 @@ class World:
         u.facing = owner.facing
         u.bias = self.rng.random()
         u.chill = self.chill[owner.team]
+        u.strip = owner.strip                          # a summon fights in its master's strip
         self._harden(u)
         self.units.append(u)
         return u
