@@ -4,8 +4,9 @@ screen: a real battle to be fought, or the player's answer card (pure Python, no
 The map screen calls ``start`` for anything that may lead to a battle (playing a card, ending
 the turn, a spectator round). While the worker runs, the screen shows a frozen frame and only
 serves ``request`` - ``ask`` (watch an AI battle or work it out?), ``answer`` (the player's city
-is stormed and he holds answer cards), ``diplo`` (a realm sends envoys to the player: yes or no?)
-or ``battle`` (fight it now); ``reply`` lets the worker go on.
+is stormed and he holds answer cards), ``diplo`` (a realm sends envoys to the player: yes or no?),
+``battle`` (fight it now) or ``show`` (a spectator watches a realm play a card or send envoys: the
+screen animates it and replies when done); ``reply`` lets the worker go on.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ class Runner:
     def __init__(self, camp):
         self.camp = camp
         self.watch_ai = "ask"
+        self.show_plays = True                       # a spectator sees every card played and every embassy
         self.request: Optional[dict] = None
         self._reply = None
         self._event = threading.Event()
@@ -31,6 +33,7 @@ class Runner:
         camp.battle_hook = self._battle_hook
         camp.answer_hook = self._answer_hook
         camp.diplo_hook = self._diplo_hook
+        camp.show_hook = self._show_hook
 
     # --- main thread ---------------------------------------------------------------------------
     def busy(self) -> bool:
@@ -89,6 +92,13 @@ class Runner:
         if not self._in_worker():
             return None
         return self._wait({"kind": "answer", "battle": b, "cards": cards})
+
+    def _show_hook(self, camp, what: dict) -> None:
+        if not self._in_worker() or not self.show_plays:
+            return
+        if camp.player is not None and camp.realms[camp.player].alive:
+            return                                   # only a spectator (or a fallen player) watches the others
+        self._wait(dict(what, kind="show"))
 
     def _diplo_hook(self, camp, frm, to, kind, reasons):
         if not self._in_worker():

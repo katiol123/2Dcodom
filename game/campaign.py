@@ -136,7 +136,7 @@ def _pair(a: str, b: str) -> frozenset:
 
 
 class Campaign:
-    HOOKS = ("battle_hook", "answer_hook", "diplo_hook")
+    HOOKS = ("battle_hook", "answer_hook", "diplo_hook", "show_hook")
     _SHAPE: Tuple[str, ...] = ()            # attribute names of a fresh campaign (filled on first init)
 
     def __getstate__(self):
@@ -237,6 +237,9 @@ class Campaign:
         self.last_event = -99
         self.no_events = False                                # tests switch the world's whims off
         self.diplo_hook = None      # (camp, from, to, kind, reasons) -> the player's yes/no
+        self.show_hook = None       # (camp, dict) -> a card played / envoys sent, shown to a spectator
+        self._envoys = None         # envoys sent by the card being played (shown with the card)
+        self._playing = False
         self.trade: Dict[frozenset, Tuple[int, int]] = {}     # pair -> (turns left, gold each)
         self.buffs: Dict[str, List[List[float]]] = {}         # officer -> [[mult, turns]]
         self.frozen: Dict[str, int] = {}                      # faction -> its next turns frozen
@@ -1150,7 +1153,11 @@ class Campaign:
         r.ap -= self.card_cost(faction, inst)
         self.gold[faction] -= card.gold
         r.hand.remove(inst)
-        msg = EFFECTS[card.key](self, faction, targets)
+        self._envoys, self._playing = None, True
+        try:
+            msg = EFFECTS[card.key](self, faction, targets)
+        finally:
+            self._playing = False
         if card.exhaust:                                      # burnt: gone for good
             if inst.origin in OFFICER:
                 self.burnt.add((inst.origin, card.key))
@@ -1160,6 +1167,10 @@ class Campaign:
         from . import growth
         growth.on_card_used(self, faction, inst)
         self.log_event(faction, f"{card.name}: {msg}" if msg else card.name)
+        if self.show_hook:
+            envoys, self._envoys = self._envoys, None
+            self.show_hook(self, {"what": "card", "faction": faction, "card": card.key, "origin": inst.origin,
+                                  "targets": targets, "msg": msg, "envoys": envoys})
         return True, msg
 
     # --- war --------------------------------------------------------------------------------

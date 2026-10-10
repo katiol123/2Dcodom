@@ -284,6 +284,7 @@ def propose(camp, frm: str, to: str, kind: str, bonus: int = 0, turns: Optional[
         camp.log_event(frm, msg)
         if to != frm:
             camp.log_event(to, f"Отвергли {name} от державы {FACTION[frm].short}")
+        _show(camp, frm, to, kind, False, top)
         return False, msg
     p = _pair(frm, to)
     if kind == "truce":
@@ -303,7 +304,21 @@ def propose(camp, frm: str, to: str, kind: str, bonus: int = 0, turns: Optional[
     camp.change_relation(frm, to, 4)
     camp.log_event(frm, msg)
     camp.log_event(to, f"{name} с державой {FACTION[frm].short} заключён")
+    best = max(reasons, key=lambda r: r[1])[0] if reasons else ""
+    _show(camp, frm, to, kind, True, best, msg)
     return True, msg
+
+
+def _show(camp, frm: str, to: str, kind: str, yes: bool, why: str, terms: str = "") -> None:
+    """Envoys for the spectator: shown with the card that sent them, or on their own."""
+    hook = getattr(camp, "show_hook", None)
+    if hook is None:
+        return
+    env = {"what": "diplo", "faction": frm, "to": to, "treaty": kind, "yes": yes, "why": why, "terms": terms}
+    if getattr(camp, "_playing", False) and getattr(camp, "_envoys", None) is None:
+        camp._envoys = env                               # the card's show carries them
+    else:
+        hook(camp, env)
 
 
 def declare_war(camp, frm: str, to: str) -> str:
@@ -329,6 +344,7 @@ def declare_war(camp, frm: str, to: str) -> str:
           f" С {FACTION[to].short}"
     camp.log_event(frm, msg)
     camp.log_event(to, msg)
+    _show(camp, frm, to, "war", True, "", msg)
     return msg
 
 

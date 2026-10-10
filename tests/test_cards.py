@@ -369,6 +369,8 @@ class CardScreenTest(unittest.TestCase):
                         screen.runner.reply(req["cards"][0])
                     elif req["kind"] == "diplo":
                         screen.runner.reply(True)
+                    elif req["kind"] == "show":           # a spectator's show (spectate.py): move on
+                        screen.runner.reply(True)
                     else:
                         w = headless_campaign_world(req["battle"])
                         while w.winner is None and w.time < 240:

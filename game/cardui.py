@@ -207,6 +207,7 @@ class CardTable:
         self.sounded: set = set()
         self.launch = None                              # (inst, rect, image) of the card being played
         self.last_req = None
+        self.rosters_open = False                       # the squads' window of an AI storm (button СОСТАВЫ)
 
     # --- state -----------------------------------------------------------------------------
     @property
@@ -460,11 +461,10 @@ class CardTable:
     def _req_rect(self) -> pygame.Rect:
         from .mapview import TOP
         req = self.ms.runner.request
-        if req and req["kind"] == "ask":                  # under the window with both sides' squads
+        if req and req["kind"] == "ask" and self.rosters_open:   # under the window with both sides' squads
             return pygame.Rect(6, H - 44, W - 12, 40)
         if self.ms.focus is not None:                     # a storm on the map: the question sits beside the city
-            req = self.ms.runner.request
-            h = 66 if req and req["kind"] == "ask" else 180
+            h = 80 if req and req["kind"] == "ask" else 180
             x = 6 if self.ms.focus.get("left") else W - 326
             return pygame.Rect(x, TOP + 34, 320, h)           # under the battle's banner
         return pygame.Rect(W // 2 - 160, 36, 320, 180)
@@ -476,15 +476,19 @@ class CardTable:
                     (pygame.Rect(r.right - 150, r.bottom - 22, 110, 15), False)]
         if req["kind"] == "ask":
             labels = [("СМОТРЕТЬ БОЙ", "watch"), ("РАССЧИТАТЬ", "calc"), ("ВСЕГДА СЧИТАТЬ", "never")]
-            return [(pygame.Rect(r.centerx - 151 + i * 102, r.bottom - 19, 98, 15), v)
-                    for i, (_, v) in enumerate(labels)]
+            if self.rosters_open:                         # the bar under the squads' window
+                out = [(pygame.Rect(r.centerx - 151 + i * 102, r.bottom - 19, 98, 15), v)
+                       for i, (_, v) in enumerate(labels)]
+                return out + [(pygame.Rect(r.right - 84, r.bottom - 19, 78, 15), "rosters")]
+            out = [(pygame.Rect(r.x + 8 + i * 102, r.bottom - 22, 98, 15), v) for i, (_, v) in enumerate(labels)]
+            return out + [(pygame.Rect(r.centerx - 60, r.y + 37, 120, 13), "rosters")]
         out = [(pygame.Rect(r.x + 8 + i * 70, r.y + 42, 66, 96), c) for i, c in enumerate(req["cards"][:3])]
         out.append((pygame.Rect(r.x + 8, r.bottom - 22, 98, 15), None))
         return out
 
     def handle_request(self, ev, mouse) -> None:
         req = self.ms.runner.request
-        if not req or req["kind"] == "battle":
+        if not req or req["kind"] in ("battle", "show"):
             return
         mx, my = mouse
         if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
@@ -493,6 +497,11 @@ class CardTable:
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
             for rect, value in self._req_buttons(req):
                 if rect.collidepoint(mx, my):
+                    if value == "rosters":                # unfold / fold the squads' window
+                        from .audio import ui
+                        ui("click")
+                        self.rosters_open = not self.rosters_open
+                        return
                     if req["kind"] == "diplo":
                         from .audio import ui
                         ui("harp" if value else "refuse")
@@ -503,10 +512,11 @@ class CardTable:
         req = self.ms.runner.request
         if req is not self.last_req:
             self.last_req = req
+            self.rosters_open = False                     # every storm asks with the small panel first
             if req:
                 from .audio import ui
                 ui({"answer": "drums", "diplo": "horn", "ask": "drums"}.get(req["kind"], ""))
-        if not req or req["kind"] == "battle":
+        if not req or req["kind"] in ("battle", "show"):   # (a show is drawn by the map, spectate.py)
             return
         if req["kind"] == "diplo":
             return self._draw_diplo(s, req)
@@ -562,27 +572,37 @@ class CardTable:
                 s.blit(self.art.full(preview.key, "ОТВЕТ", self.player), (r.right - CARD_W - 8, r.y + 40))
 
     def _draw_ask(self, s: pygame.Surface, req) -> None:
-        """A storm between computer realms: a window with both sides' squads (each officer with his
-        soldiers in a row) and, under it, the question - watch it or work it out?"""
+        """A storm between computer realms: watch it or work it out? A small panel beside the city; its
+        button СОСТАВЫ ОТРЯДОВ unfolds a window with both sides' squads (each officer with his soldiers
+        in a row), the question then sits under it."""
         b = req["battle"]
         camp, font = self.camp, self.font
-        s.blit(self.ms.dim, (0, 0))
         r = self._req_rect()
-        self._draw_rosters(s, b, pygame.Rect(r.x, 17, r.w, r.y - 20))
-        s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#c9a24a"), r.topleft)
         att, deff = FACTION[b.attacker], FACTION[b.defender]
         a = camp.attack_power(b.attacker, b.officers, b.city, b.mult)
         d = camp.defense_power(b.city) * b.def_mult
         p = camp.win_chance(a, d)
-        font.draw(s, f"БОЙ ДРУГИХ ДЕРЖАВ: {att.short} ШТУРМУЕТ {CITY[b.city].name} ({deff.short})", r.centerx,
-                  r.y + 4, "#fee761", anchor="midtop")
-        font.draw(s, f"СИЛА {int(a)} ПРОТИВ {int(d)}: ШАНС ШТУРМА {int(p * 100)}%", r.centerx, r.y + 13,
-                  "#c0cbdc", anchor="midtop")
+        storm = f"{att.short} ШТУРМУЕТ {CITY[b.city].name} ({deff.short})"
+        odds = f"СИЛА {int(a)} ПРОТИВ {int(d)}: ШАНС ШТУРМА {int(p * 100)}%"
+        if self.rosters_open:                             # the squads' window over the map, the question under it
+            s.blit(self.ms.dim, (0, 0))
+            self._draw_rosters(s, b, pygame.Rect(r.x, 17, r.w, r.y - 20))
+            s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#c9a24a"), r.topleft)
+            font.draw(s, f"БОЙ ДРУГИХ ДЕРЖАВ: {storm}", r.centerx, r.y + 4, "#fee761", anchor="midtop")
+            font.draw(s, odds, r.centerx, r.y + 13, "#c0cbdc", anchor="midtop")
+        else:                                             # the small panel beside the city: the city stays in sight
+            if self.ms.focus is None:
+                s.blit(self.ms.dim, (0, 0))
+            s.blit(self.ms.r.panel(r.w, r.h, base="#181425", border="#c9a24a"), r.topleft)
+            font.draw(s, "БОЙ ДРУГИХ ДЕРЖАВ", r.centerx, r.y + 5, "#fee761", anchor="midtop")
+            font.draw(s, storm, r.centerx, r.y + 16, att.light, anchor="midtop")
+            font.draw(s, odds, r.centerx, r.y + 26, "#c0cbdc", anchor="midtop")
         mouse = self.ms._mouse
         for rect, value in self._req_buttons(req):
             hot = rect.collidepoint(mouse)
-            label = {"watch": "СМОТРЕТЬ БОЙ", "calc": "РАССЧИТАТЬ", "never": "ВСЕГДА СЧИТАТЬ"}[value]
-            base = "#3e8948" if value == "watch" else "#3a4466"
+            label = {"watch": "СМОТРЕТЬ БОЙ", "calc": "РАССЧИТАТЬ", "never": "ВСЕГДА СЧИТАТЬ",
+                     "rosters": "СВЕРНУТЬ СОСТАВЫ" if self.rosters_open else "СОСТАВЫ ОТРЯДОВ"}[value]
+            base = "#3e8948" if value == "watch" else "#5a3a6e" if value == "rosters" else "#3a4466"
             s.blit(self.ms.r.panel(rect.w, rect.h, base="#5a6988" if hot else base, border="#c0cbdc"), rect.topleft)
             font.draw(s, label, rect.centerx, rect.centery, "#ffffff", anchor="center")
 
@@ -1033,6 +1053,18 @@ class CardTable:
                                 border="#8b9bb4"), ar.topleft)
         self.font.draw(s, "АВТО: ВКЛ" if self.auto else "АВТО: ВЫКЛ", ar.centerx, ar.centery, "#ffffff",
                        anchor="center")
+        sr = self._show_rect()
+        on = self.ms.runner.show_plays
+        hot = sr.collidepoint(self.ms._mouse)
+        s.blit(self.ms.r.panel(sr.w, sr.h, base="#3e8948" if on else ("#5a6988" if hot else "#262b44"),
+                                border="#8b9bb4"), sr.topleft)
+        self.font.draw(s, "ПОКАЗ ХОДОВ: ВКЛ" if on else "ПОКАЗ ХОДОВ: ВЫКЛ", sr.centerx, sr.centery, "#ffffff",
+                       anchor="center")
+
+    def _show_rect(self) -> pygame.Rect:
+        """The spectator's switch: watch every card and embassy of the computer realms, or not."""
+        er = self.end_rect()
+        return pygame.Rect(er.x, er.y - 30, er.w, 13)
 
     def spectator_click(self, mx, my) -> bool:
         er = self.end_rect()
@@ -1041,6 +1073,9 @@ class CardTable:
             return True
         if pygame.Rect(er.x, er.y - 15, er.w, 13).collidepoint(mx, my):
             self.auto = not self.auto
+            return True
+        if self._show_rect().collidepoint(mx, my):
+            self.ms.runner.show_plays = not self.ms.runner.show_plays
             return True
         return False
 

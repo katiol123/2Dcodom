@@ -396,6 +396,7 @@ class WorldMapScreen:
             self.table.arrows_from = next((i for i, a in enumerate(self.camp.attacks) if a[0] >= last),
                                           len(self.camp.attacks))
         self.runner = Runner(self.camp)                   # card plays and turns run in a worker thread
+        self.show = None                                  # the spectator's view of a card played (spectate.py)
         self.running: Optional[tuple] = None              # what the runner is doing (for its result)
         self.frozen: Optional[pygame.Surface] = None      # the last frame, shown while it runs
         global _SNOWFLAKE
@@ -499,7 +500,11 @@ class WorldMapScreen:
     def handle(self, ev, mouse: Tuple[int, int]) -> Optional[str]:
         mx, my = mouse
         if self.runner.busy():                            # only the runner's questions are live
-            self.table.handle_request(ev, mouse)
+            req = self.runner.request
+            if req and req["kind"] == "show":
+                self._show_handle(ev)
+            else:
+                self.table.handle_request(ev, mouse)
             if ev.type == pygame.QUIT:
                 return "quit"
             return None
@@ -631,7 +636,9 @@ class WorldMapScreen:
             what, self.running = self.running, None
             self.table.finished(what, done)
         if self.runner.busy():
+            self._update_show(dt)
             return
+        self.show = None
         self.autosave()
         self.fx.update(dt)
         if self.event_show is None and self.events_seen < len(self.camp.world_events):
@@ -662,9 +669,38 @@ class WorldMapScreen:
         elif self.faction_panel:
             self.hover_rel = self._faction_rel_at(mx, my)
 
+    def _update_show(self, dt: float) -> None:
+        """A spectator watches a computer realm play a card or send envoys (spectate.py)."""
+        req = self.runner.request
+        if not req or req["kind"] != "show":
+            return
+        if self.show is None or self.show.req is not req:
+            from .spectate import Show
+            self.show = Show(self, req)
+        self.show.update(dt)
+        self.fx.update(dt)
+        if self.show.done:
+            self.show = None
+            self.runner.reply(True)
+
+    def _show_handle(self, ev) -> None:
+        if self.show is None:
+            return
+        if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+            self.runner.show_plays = False               # the rest of the turns go by unseen
+            self.show.skip()
+        elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1 or \
+                ev.type == pygame.KEYDOWN and ev.key in (pygame.K_SPACE, pygame.K_RETURN):
+            self.show.skip()
+
     # --- drawing ------------------------------------------------------------------------------
     def draw(self, s: pygame.Surface) -> None:
         req = self.runner.request
+        if self.runner.busy() and req and req["kind"] == "show" and self.show is not None:
+            self._draw(s)                                 # the living map: the card's effect is already on it
+            self.frozen = s.copy()
+            self.show.draw(s)
+            return
         if self.runner.busy() and req and req.get("battle") is not None and req["kind"] in ("ask", "answer"):
             if self._battle_focus(s, req):               # the camera flies to the storm, then the question
                 self.table.draw_request(s)

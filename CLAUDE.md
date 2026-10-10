@@ -40,8 +40,14 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   (`World.y0` = `TALL_TOP`, quick battles keep `FIELD[1]`) and strips are parted by bare ground (`STRIP_GAP`,
   a sprite is ~25 px tall); every squad wears a pennant colour (`BAND_COLORS`, `Unit.band`) by its hp bar and
   HUD tile, and its name (`match.squad_names`: officer / ГАРНИЗОН / СОЮЗНИКИ) labels its strip for 4 s.
-- AI storms the player is asked to watch: `cardui._draw_ask` shows both sides' squads in rows (officer face
-  and name, then each soldier's sprite and name; two columns when squads have <= 3 kinds) above the question.
+- AI storms the player is asked to watch: a small panel beside the city (`cardui._draw_ask`); its button СОСТАВЫ
+  ОТРЯДОВ (`rosters_open`) unfolds a window with both sides' squads in rows (officer face and name, then each
+  soldier's sprite and name; two columns when squads have <= 3 kinds), the question then sits under it.
+- Spectator shows (`spectate.py`): `Campaign.play` and `diplomacy.propose/declare_war` call `camp.show_hook`;
+  the runner turns it into a `show` request only for a spectator (or a fallen player) while `show_plays` is on
+  (button ПОКАЗ ХОДОВ; Esc turns it off). A card flies from its realm's banner to its target (city: the camera
+  glides there; realm: a trail between banners; officer: his face; else the middle), a plate tells the effect;
+  envoys sent by a card ride with it (`camp._envoys` while `camp._playing`). Each show lasts 3 s by itself.
 - Charges (`status["charge"]`) are countered by `COUNTERS` (spearman, halberdier, militia) whenever the rusher
   comes within reach, not only when it targets them. Cornered shooters (`cornered`) stop kiting and shoot.
 - Unit descriptions live in `TRAITS` (units.py): perks (green), flaws (red), behavior (blue); one independent trait
