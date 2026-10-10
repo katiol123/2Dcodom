@@ -42,8 +42,8 @@ TRADE_SKIM = 0.2                # ПЕРЕКУПЩИКИ: Zarkhad's cut of its p
 DEFAULT_GOLD = 450
 START_SQUAD = (0.25, 0.4)       # starting squads: this share of the officer's leadership
 TAX = 20                        # gold per point of prosperity for a tax card
-GUARD = {"capital": 260, "castle": 220, "fort": 170, "town": 110, "port": 120, "lair": 140}
-WALLS = {"capital": 1.25, "castle": 1.3, "fort": 1.2, "town": 1.0, "port": 1.05, "lair": 1.1}
+GUARD = {"capital": 260, "castle": 220, "fort": 170, "town": 110, "port": 120, "lair": 190}
+WALLS = {"capital": 1.25, "castle": 1.3, "fort": 1.2, "town": 1.0, "port": 1.05, "lair": 1.2}
 BATTLE_K = 2.5                  # how decisive a power advantage is
 MAX_PROSPERITY = 10
 PROSPERITY_ROOM = 2             # a city can grow this far above its starting prosperity
@@ -504,6 +504,22 @@ class Campaign:
 
     def max_prosperity(self, city: str) -> int:
         return min(MAX_PROSPERITY, PROSPERITY[city] + PROSPERITY_ROOM)
+
+    def tax_yield(self, city: str, faction: str) -> int:
+        """Exactly what the card ПОДАТЬ brings in this city now (the market building included)."""
+        from .buildings import count
+        return int(self.income_of(city, faction) * (1.5 if count(self, city, "market") else 1))
+
+    def growth_need(self, city: str) -> int:
+        """Untaxed own turns the city needs to grow by 1 prosperity (as in end_turn)."""
+        r = self.realms[self.owner[city]]
+        need = GROWTH_TURNS - 1 if r.course == "economy" else GROWTH_TURNS
+        from .diplomacy import growth_blocked
+        if growth_blocked(self, city):
+            need += 1
+        if self.prosperity[city] >= PROSPERITY[city]:
+            need *= 3
+        return need
 
     def income_of(self, city: str, faction: str) -> int:
         """What a tax card brings in this city now."""

@@ -707,6 +707,7 @@ class WorldMapScreen:
         if self.selected:
             self._city_panel(s, CITY[self.selected])
             self._city_buttons_draw(s)
+            self._panel_tip(s, CITY[self.selected])
         if free:
             text, col, until = self.toast
             if self.time < until and not self.table.busy():
@@ -1163,6 +1164,111 @@ class WorldMapScreen:
         h = 25 + 7 * len(wrap(c.desc, w - 10)) + 1 + 8 + 8 * status + 9 + 22 + 8 + 17 + 8 + 1 + 7 * len(roads) + 4
         return pygame.Rect(W - w - 4, TOP + 3, w, min(h, H - BOTTOM - TOP - 6))   # never over the bottom bar
 
+    def _panel_tip(self, s: pygame.Surface, c: City) -> None:
+        """Hovering ПРОЦВЕТАНИЕ, ПОДАТЬ or ПОРЯДОК in the city panel: how the value is made and what it does."""
+        kind = next((k for rect, k in getattr(self, "_panel_tips", []) if rect.collidepoint(self._mouse)), None)
+        if kind is None:
+            return
+        lines = {"prosperity": self._prosperity_help, "tax": self._tax_help, "order": self._order_help}[kind](c)
+        w = 214
+        rows = [(seg, col) for text, col in lines for seg in wrap(text.upper(), w - 10)]
+        h = 6 + 8 * len(rows)
+        panel = self._city_panel_rect()
+        box = pygame.Rect(panel.x - w - 4, max(TOP + 3, min(H - BOTTOM - h - 3, self._mouse[1] - 8)), w, h)
+        self.cards.cover_rect(box)
+        s.blit(self.r.panel(w, h, base="#181425", border="#feae34"), box.topleft)
+        for i, (text, col) in enumerate(rows):
+            self.font.draw(s, text, box.x + 5, box.y + 4 + 8 * i, col)
+
+    def _prosperity_help(self, c: City) -> List[Tuple[str, str]]:
+        camp = self.camp
+        key, owner = c.key, camp.owner[c.key]
+        p, top = camp.prosperity[key], camp.max_prosperity(key)
+        out = [(f"ПРОЦВЕТАНИЕ {p} ИЗ {top}", "#feae34"),
+               ("ДАЁТ: подать = процветание x20, богатые города кормят казну; но выше 6 оно тянет вниз порядок "
+                "(воры идут к богатству).", "#c0cbdc")]
+        if owner != "goblin":
+            r = camp.realms[owner]
+            if camp.ravaged.get(key):
+                now = "сейчас разорён: не растёт"
+            elif r.course == "war":
+                now = "при курсе войны города не растут"
+            elif "frost" in camp.active and key in camp.frost_wide:
+                now = "великая стужа: не растёт"
+            elif p >= top:
+                now = "больше не вырастет"
+            else:
+                left = max(1, camp.growth_need(key) - camp.untaxed.get(key, 0))
+                now = f"вырастет на 1 через {left} {plural(left, 'ход', 'хода', 'ходов')} без подати"
+            out.append((f"РАСТЁТ: +1, если город несколько ходов не облагать податью (курс хозяйства - быстрее, "
+                        f"выше прежнего уровня - втрое медленнее). Сейчас: {now}.", "#a7f070"))
+        out.append(("ПАДАЕТ: подать два хода подряд, бои за город, захват, набеги, бунты и притоны, чума.",
+                    "#f6757a"))
+        return out
+
+    def _tax_help(self, c: City) -> List[Tuple[str, str]]:
+        from .buildings import count
+        from .factions import city_feat
+        from .campaign import TAX
+        camp = self.camp
+        key, owner = c.key, camp.owner[c.key]
+        out = [(f"ПОДАТЬ {camp.tax_yield(key, owner)}: столько золота принесёт карта ПОДАТЬ в этом городе сейчас",
+                "#fee761"),
+               (f"ПРОЦВЕТАНИЕ {camp.prosperity[key]} x{TAX} = {camp.prosperity[key] * TAX}", "#c0cbdc")]
+        offs = [o for o in camp.officers_in(key) if camp.allegiance[o.key] == owner]
+        if offs:
+            best = max(offs, key=lambda o: camp.stat(o.key, "УПРАВЛЕНИЕ"))
+            u = camp.stat(best.key, "УПРАВЛЕНИЕ")
+            out.append((f"+ УПРАВЛЕНИЕ {u} x2 = {2 * u} ({best.name})", "#a7f070"))
+        else:
+            out.append(("+ нет офицера: каждое очко УПРАВЛЕНИЯ лучшего офицера в городе дало бы +2", "#5a6988"))
+        if key in camp.dens:
+            out.append(("- 30%: воровской притон", "#f6757a"))
+        if city_feat(key) == "market":
+            out.append(("+ 30%: рынок пряностей", "#a7f070"))
+        if count(camp, key, "market"):
+            out.append(("+ 50%: рынок (здание)", "#a7f070"))
+        if "drought" in camp.active:
+            out.append(("- 60%: засуха", "#f6757a"))
+        out.append(("Подать два хода подряд в одном городе - процветание -1 и порядок падает "
+                    "(кроме курса хозяйства).", "#feae34"))
+        return out
+
+    def _order_help(self, c: City) -> List[Tuple[str, str]]:
+        from .buildings import count
+        from .order import HORDE_FEAR, SAFE, haunted, target
+        camp = self.camp
+        key = c.key
+        law, t = camp.law.get(key, 0), target(camp, key)
+        trend = "растёт" if t > law else "падает" if t < law else "держится"
+        out = [(f"ПОРЯДОК {law}/10 - {trend}, каждый ход на 1 к цели {t}", "#a7f070"),
+               ("ЦЕЛЬ: 5", "#c0cbdc")]
+        offs = camp.officers_in(key)
+        if offs:
+            scout = max(camp.stat(o.key, "РАЗВЕДКА") for o in offs) >= 14
+            out.append((f"+1 офицер в городе" + (", +1 его РАЗВЕДКА 14+" if scout else ""), "#a7f070"))
+        else:
+            out.append(("нет офицера (дал бы +1, разведчик 14+ ещё +1)", "#5a6988"))
+        troops = sum(camp.power(o.key) for o in offs) + sum(x.power for x in camp.free[key])
+        if troops >= 300:
+            out.append((f"+{1 + (troops >= 700)} войска в городе ({int(troops)} мощи)", "#a7f070"))
+        if count(camp, key, "temple"):
+            out.append(("+1 храм", "#a7f070"))
+        if c.kind == "capital":
+            out.append(("+1 столица", "#a7f070"))
+        if camp.prosperity[key] > 6:
+            out.append((f"-{camp.prosperity[key] - 6} богатство манит воров", "#f6757a"))
+        if key in camp.sick:
+            out.append(("-2 болезнь", "#f6757a"))
+        realm = camp.realms.get(camp.owner[key])
+        if realm and realm.unrest:
+            out.append(("-1 смута в державе", "#f6757a"))
+        if haunted(camp, key):
+            out.append((f"-{HORDE_FEAR} тень орды рядом", "#f6757a"))
+        out.append((f"НИЖЕ {SAFE}: преступность - бунты, контрабанда, притоны (процветание -1, подать -30%). "
+                    f"Бои, набеги и поборы сбивают порядок.", "#feae34"))
+        return out
+
     def _city_status(self, c: City) -> List[Tuple[str, str]]:
         """The city's state, one line (wrapped) per topic: tax and order, defence and troubles, buildings."""
         camp = self.camp
@@ -1172,7 +1278,7 @@ class WorldMapScreen:
         if c.key in CITY_FEATS:                                # the city's own feature, first and in gold
             _, name, desc = CITY_FEATS[c.key]
             out.append((f"{name}: {desc}".upper(), "#ffd36b"))
-        tax = f"ПОДАТЬ {camp.income_of(c.key, owner)}"
+        tax = f"ПОДАТЬ {camp.tax_yield(c.key, owner)}"
         if c.key in camp.law and owner != "goblin":           # tax and order share a line, in their own colours
             law = camp.law[c.key]
             out.append(((tax, "#fee761"), (f"ПОРЯДОК {law}/10",
@@ -1224,6 +1330,7 @@ class WorldMapScreen:
             y += 7
         y += 1
         pros = self.camp.prosperity[c.key]
+        self._panel_tips = [(pygame.Rect(r.x + 3, y - 1, r.w - 6, 8), "prosperity")]
         font.draw(s, "ПРОЦВЕТАНИЕ", r.x + 5, y, "#feae34")
         for i in range(self.camp.max_prosperity(c.key)):
             pygame.draw.rect(s, INK, (r.x + 62 + i * 6, y, 5, 6))
@@ -1233,6 +1340,10 @@ class WorldMapScreen:
             if isinstance(text, tuple):                       # two coloured parts on one line
                 font.draw(s, col[0], r.x + 5 + text_width(text[0]) + 12, y, col[1])
                 font.draw(s, text[0], r.x + 5, y, text[1])
+                if text[0].startswith("ПОДАТЬ"):                # tax and order: hover for how they work
+                    self._panel_tips.append((pygame.Rect(r.x + 3, y - 1, text_width(text[0]) + 6, 8), "tax"))
+                    self._panel_tips.append((pygame.Rect(r.x + 5 + text_width(text[0]) + 10, y - 1,
+                                                         text_width(col[0]) + 6, 8), "order"))
                 y += 8
                 continue
             for line in wrap(text, r.w - 10):

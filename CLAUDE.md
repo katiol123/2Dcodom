@@ -94,6 +94,14 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   `Unit.chill`, blizzard + snowy field in render.py), `FROST_POWER` in worked-out ones; the map shows snow
   ground and a snowflake on the ribbon. ВЕЛИКАЯ СТУЖА freezes the northern 60% of cities (`camp.frost_wide`).
   The AI shies from frozen targets when its purse is strained (`campaign_ai.frost_reluctance`).
+- AI marching (`campaign_ai._move_plan`): a destination is worth the gap between the hostile army next to it
+  and its own defence (`guard_gap`) plus a staging bonus for a weak hostile neighbour (`_staging`); a city is
+  never stripped below its own guard or of its last defender. Rear posts (`plan_rear`/`rear_posts`/
+  `_post_plan`): rich cities (tax), temple/mead hall (morale) and restless ones (order) get an officer by a
+  rolled chance (`rear_chance`: УПРАВЛЕНИЕ / low loyalty / РАЗВЕДКА, a weak squad; halved by the reign trait
+  ЖЕЛЕЗНЫЙ КУЛАК, which also masses troops at the most dangerous border; the horde always marches as one).
+- City panel: hovering ПРОЦВЕТАНИЕ / ПОДАТЬ / ПОРЯДОК explains them (`_panel_tip`); ПОДАТЬ shows exactly the
+  card's yield (`camp.tax_yield`).
 - Diplomacy (`diplomacy.py`, UI `diploui.py`): war by default, truce/alliance/trade by proposal (1 AP),
   answered by `evaluate` (weighted reasons, shown in the UI; the player answers AI envoys via `diplo_hook`),
   `declare_war` = betrayal. Relation tiers (`TIERS`/`TIER_EFFECTS`) have mechanical effects - keep the texts
@@ -108,7 +116,7 @@ PixelForge: Python engine that generates all pixel-art graphics in code. Only de
   ruler's cards become the ruler's cards, the dead ruler's stay as `Realm.legacy` (one ruler only); then
   political instability (`Realm.unrest`). Use `camp.is_leader(o)`, never `rank == 0`, for "the ruler".
   Dead officers stay in `camp.dead` (excluded from `officers_of/officers_in`).
-- Reign types (`reign.py`): every officer has a reign type of 3 traits (33 traits, 28 types; `GOBLIN_ONLY` /
+- Reign types (`reign.py`): every officer has a reign type of 3 traits (34 traits, 28 types; `GOBLIN_ONLY` /
   `HUMAN_ONLY` types); it acts only
   while he rules a computer realm (`ruler_traits` is empty for the player's realm) and is shown only then.
   Traits hook card values, attack odds, leader risk, hiring, council, course, diplomacy, prisoners, loyalty.

@@ -189,7 +189,8 @@ def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
         d_src = camp.defense_power(src)
         need = t_src * GUARD_RATIO * keep
         here = sorted(options(camp, f, key, [src]), key=lambda o: -camp.power(o))
-        armed = [o for o in here if camp.power(o) > 0]
+        posts = rear_posts(camp, f)
+        armed = [o for o in here if camp.power(o) > 0 and posts.get(o) != src]   # a rear post stays put
         stay = [o.key for o in camp.officers_in(src) if camp.squads[o.key] and o.key not in armed]
         movers, removed = [], 0.0
         for o in armed:
@@ -216,8 +217,137 @@ def _move_plan(camp, f: str, key: str) -> Tuple[float, list]:
                 v += threat(camp, f, dest) / 30        # the iron fist goes where the enemy is strongest
             elif gap <= 0:
                 v = min(v, 8.0)                        # already held: hardly worth the march
+            v += _staging(camp, f, dest, power) * (1.0 if fist else 0.5)
             if v > best[0]:
                 best = (v, [src, tuple(movers), dest])
+    return best
+
+
+def _staging(camp, f: str, dest: str, moved: float) -> float:
+    """Worth of standing in ``dest`` for a storm next turn: the richest hostile neighbour that the troops
+    gathered there (with those arriving) could take."""
+    here = sum(camp.power(o.key) * camp.officer_mult(o.key) for o in camp.officers_in(dest)) + moved
+    best = 0.0
+    for n in neighbors(dest):
+        other = camp.owner[n]
+        if other == f or camp.at_peace(f, other):
+            continue
+        if here > camp.defense_power(n) * 0.8:
+            best = max(best, 20 + camp.prosperity[n] * 4)
+    return best
+
+
+# --- the rear: some officers are posted away from the border on purpose ------------------------------
+REAR_REASONS = ("tax", "morale", "order")
+REAR_NEW_A_TURN = 2
+
+
+def _weak_squad(camp, o: str) -> float:
+    """1 for an officer with no squad, 0 for a big one: a small squad is missed least at the front."""
+    return 1.0 - min(1.0, camp.power(o) / 500)
+
+
+def rear_chance(camp, f: str, o: str, reason: str, city: str) -> float:
+    """Chance that the ruler posts ``o`` in a rear city for ``reason``:
+    tax - a good administrator (УПРАВЛЕНИЕ) collects more there; morale - a temple or the mead hall
+    mends the loyalty of the doubtful; order - an officer (a scout above all) keeps a restless city calm.
+    A weak squad makes any posting likelier; ЖЕЛЕЗНЫЙ КУЛАК halves it (the border comes first)."""
+    from . import reign
+    from .order import SAFE
+    w = _weak_squad(camp, o)
+    if reason == "tax":
+        p = 0.05 + 0.03 * max(0, camp.stat(o, "УПРАВЛЕНИЕ") - 8) + 0.35 * w
+    elif reason == "morale":
+        p = 0.05 + max(0, 60 - camp.loyalty[o]) / 80 + 0.35 * w
+    else:
+        p = 0.05 + 0.02 * camp.stat(o, "РАЗВЕДКА") + 0.06 * max(0, SAFE - camp.law.get(city, SAFE)) + 0.3 * w
+    p = max(0.0, min(0.9, p))
+    if reign.has(camp, f, "fist"):
+        p *= 0.5
+    return p
+
+
+def _rear_reason(camp, f: str, city: str) -> Optional[str]:
+    """Why a rear city would want an officer of its own (None: it does not)."""
+    from .buildings import count
+    from .factions import city_feat
+    from .order import SAFE
+    if f == "goblin" or camp.owner[city] == "goblin":
+        return None
+    if camp.prosperity[city] >= 6:
+        return "tax"
+    if count(camp, city, "temple") or city_feat(city) == "hall":
+        return "morale"
+    if city in camp.law and camp.law[city] < SAFE:
+        return "order"
+    return None
+
+
+def rear_posts(camp, f: str) -> Dict[str, str]:
+    """officer -> the rear city he is posted to (kept from turn to turn while the reason holds)."""
+    return camp.__dict__.setdefault("ai_rear", {}).setdefault(f, {})
+
+
+def plan_rear(camp, f: str) -> None:
+    """At the start of the computer's turn: drop the posts that lost their reason, then give each rear city
+    that has a reason and nobody posted a chance to get an officer (rolled per city, best candidate)."""
+    posts = rear_posts(camp, f)
+    front = set(frontier(camp, f))
+    for o, c in list(posts.items()):
+        if (camp.allegiance.get(o) != f or o in camp.dead or camp.owner.get(c) != f or c in front
+                or _rear_reason(camp, f, c) is None):
+            del posts[o]
+    taken = set(posts.values())
+    new = 0
+    officers = [o.key for o in camp.officers_of(f) if o.key not in posts]
+    for city in camp.cities_of(f):
+        if new >= REAR_NEW_A_TURN or city in front or city in taken:
+            continue
+        reason = _rear_reason(camp, f, city)
+        if reason is None:
+            continue
+        cands = [o for o in officers if o not in posts and _can_spare(camp, f, o)]
+        if not cands:
+            break
+        o = max(cands, key=lambda x: (rear_chance(camp, f, x, reason, city), x))
+        if camp.rng.random() < rear_chance(camp, f, o, reason, city):
+            posts[o] = city
+            taken.add(city)
+            new += 1
+
+
+def _can_spare(camp, f: str, o: str) -> bool:
+    """The officer may leave his city: it is not threatened beyond what stays, and he is not its last
+    defender against a hostile neighbour."""
+    city = camp.officer_city.get(o)
+    if city is None:
+        return False
+    t = threat(camp, f, city)
+    if t <= 0:
+        return True
+    stay = [x.key for x in camp.officers_in(city) if x.key != o and camp.squads[x.key]]
+    left = camp.defense_power(city) - camp.power(o) * camp.officer_mult(o)
+    return bool(stay) and left >= t * GUARD_RATIO
+
+
+def _post_plan(camp, f: str, key: str) -> Tuple[float, list]:
+    """Walk a posted officer towards his rear city (one road a march, through own cities)."""
+    best = (-1.0, [])
+    for o, post in rear_posts(camp, f).items():
+        src = camp.officer_city.get(o)
+        if src is None or src == post or src not in options(camp, f, key, []):
+            continue
+        if o not in options(camp, f, key, [src]):
+            continue
+        dist = camp.roads_within(post, 12, f)
+        here = dist.get(src, 99)
+        dests = [d for d in options(camp, f, key, [src, (o,)]) if dist.get(d, 99) < here]
+        if not dests:
+            continue
+        dest = min(dests, key=lambda d: (dist[d], d))
+        v = 45 + (10 if dest == post else 0)
+        if v > best[0]:
+            best = (v, [src, (o,), dest])
     return best
 
 
@@ -459,7 +589,7 @@ def _v(camp, f, inst) -> Tuple[float, list]:
     if k == "longships":
         return _attack_plan(camp, f, k)
     if k in ("march", "forced_march", "mother_tree"):
-        return _move_plan(camp, f, k)
+        return max(_move_plan(camp, f, k), _post_plan(camp, f, k), key=lambda p: p[0])
     if k == "ancient_map":
         front = frontier(camp, f)
         best = (-1.0, [])
@@ -966,6 +1096,7 @@ def play_turn(camp, f: str) -> None:
     from .diplomacy import ai_turn
     ai_turn(camp, f, AP_PRICE)
     _broker(camp, f)
+    plan_rear(camp, f)
     for _ in range(20):
         pick = best_play(camp, f)
         if pick is None:                 # nothing worth a full action left: spend what remains

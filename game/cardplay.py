@@ -250,7 +250,7 @@ def effect(key):
 def _tax(camp, f, t):
     city = t[0]
     from .buildings import count
-    g = _gold(camp, f, int(camp.income_of(city, f) * (1.5 if count(camp, city, "market") else 1)), "tax")
+    g = _gold(camp, f, camp.tax_yield(city, f), "tax")
     from .order import DEN_TAX, FENCE, haunted
     if city in camp.dens and haunted(camp, city):          # the den fences its take through the lairs
         camp.earn("goblin", int(g / (1 - DEN_TAX) * DEN_TAX * FENCE), "fence")

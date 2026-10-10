@@ -127,5 +127,40 @@ class CityFeatsTest(unittest.TestCase):
         risen = [u for u in w.units if u.team == 1 and u.key == "skeleton" and not u.tag]
         self.assertGreaterEqual(len(risen), 2 if w.winner is None else 1)
 
+class RearTest(unittest.TestCase):
+    def test_rear_chances(self):
+        from game import reign
+        from game.campaign_ai import rear_chance
+        c = Campaign(None, seed=3)
+        offs = [o.key for o in c.officers_of("aldern") if not c.is_leader(o.key)]
+        a, b = offs[0], offs[1]
+        city = c.cities_of("aldern")[0]
+        c.squads[a], c.squads[b] = [], list(c.squads[b]) or [c._new("knight")] * 5
+        c.ostats[a][0] = c.ostats[b][0] = 15
+        self.assertGreater(rear_chance(c, "aldern", a, "tax", city), rear_chance(c, "aldern", b, "tax", city))
+        c.ostats[b] = list(c.ostats[b]); c.ostats[b][0] = 20
+        c.squads[b] = []
+        self.assertGreater(rear_chance(c, "aldern", b, "tax", city), rear_chance(c, "aldern", a, "tax", city))
+        c.loyalty[a], c.loyalty[b] = 30, 80
+        self.assertGreater(rear_chance(c, "aldern", a, "morale", city), rear_chance(c, "aldern", b, "morale", city))
+        p = rear_chance(c, "aldern", a, "order", city)
+        orig = reign.has
+        reign.has = lambda camp, f, t: t == "fist" or orig(camp, f, t)
+        try:
+            self.assertAlmostEqual(rear_chance(c, "aldern", a, "order", city), p / 2)
+        finally:
+            reign.has = orig
+
+    def test_tax_shown_is_tax_paid(self):
+        from game.buildings import BUILDINGS
+        c = Campaign("aldern", seed=3)
+        city = c.cities_of("aldern")[0]
+        c.buildings[city] = ["market"]
+        shown = c.tax_yield(city, "aldern")
+        g = c.gold["aldern"]
+        EFFECTS["tax"](c, "aldern", [city])
+        self.assertEqual(c.gold["aldern"] - g, shown)
+
+
 if __name__ == "__main__":
     unittest.main()
